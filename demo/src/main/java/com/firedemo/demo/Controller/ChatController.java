@@ -95,10 +95,10 @@ public class ChatController {
      * 流式聊天（SSE）
      */
     @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public StreamingResponseBody streamMessage(@RequestParam String message,
-                                               @RequestParam(required = false) String sessionId,
-                                               HttpServletRequest httpRequest,
-                                               HttpServletResponse httpResponse) {
+    public ResponseEntity<StreamingResponseBody> streamMessage(@RequestParam String message,
+                                                               @RequestParam(required = false) String sessionId,
+                                                               HttpServletRequest httpRequest,
+                                                               HttpServletResponse httpResponse) {
         log.debug("收到流式消息: {}, sessionId: {}", message, sessionId);
 
         // 禁用 keep-alive，防止连接复用导致重复请求
@@ -116,39 +116,52 @@ public class ChatController {
 
         // 流式响应
         String finalSessionId = sessionId;
-        return outputStream -> {
+        StreamingResponseBody responseBody = outputStream -> {
             StringBuilder responseBuilder = new StringBuilder();
             
-            openClawService.streamChat(message, finalSessionId)
-                    .doOnNext(chunk -> {
-                        log.info("发送SSE chunk: {}", chunk);
-                        try {
-                            responseBuilder.append(chunk);
-                            String sseLine = "data: " + chunk + "\n\n";
-                            outputStream.write(sseLine.getBytes());
-                            outputStream.flush();
-                        } catch (IOException e) {
-                            throw new RuntimeException(e);
-                        }
-                    })
-                    .doOnError(error -> {
-                        log.error("流式调用失败", error);
-                    })
-                    .doOnComplete(() -> {
-                        // 流结束，保存完整回复
-                        if (userId != null) {
-                            saveChatHistory(userId, finalSessionId, "assistant",
-                                    responseBuilder.toString(), "OpenClaw");
-                        }
-                        try {
-                            outputStream.write("data: [DONE]\n\n".getBytes());
-                            outputStream.flush();
-                        } catch (IOException e) {
-                            log.error("写入结束标记失败", e);
-                        }
-                    })
-                    .blockLast();
+            try {
+                openClawService.streamChat(message, finalSessionId)
+                        .doOnNext(chunk -> {
+                            log.debug("发送SSE chunk: {}", chunk);
+                            try {
+                                responseBuilder.append(chunk);
+                                String sseLine = "data: " + chunk + "\n\n";
+                                outputStream.write(sseLine.getBytes());
+                                outputStream.flush();
+                            } catch (IOException e) {
+                                log.warn("客户端断开连接");
+                                throw new RuntimeException(e);
+                            }
+                        })
+                        .doOnError(error -> {
+                            log.error("流式调用失败", error);
+                        })
+                        .doOnComplete(() -> {
+                            // 流结束，保存完整回复
+                            if (userId != null && !responseBuilder.isEmpty()) {
+                                saveChatHistory(userId, finalSessionId, "assistant",
+                                        responseBuilder.toString(), "OpenClaw");
+                            }
+                            try {
+                                outputStream.write("data: [DONE]\n\n".getBytes());
+                                outputStream.flush();
+                            } catch (IOException e) {
+                                log.error("写入结束标记失败", e);
+                            }
+                        })
+                        .blockLast(java.time.Duration.ofMinutes(5)); // 5分钟超时
+            } catch (Exception e) {
+                log.error("流式响应异常", e);
+                try {
+                    outputStream.write("data: {\"error\":\"服务暂时不可用\"}\n\n".getBytes());
+                    outputStream.flush();
+                } catch (IOException ignored) {}
+            }
         };
+
+        return ResponseEntity.ok()
+                .header("X-Accel-Buffering", "no") // 禁用 Nginx 缓冲
+                .body(responseBody);
     }
 
     /**
