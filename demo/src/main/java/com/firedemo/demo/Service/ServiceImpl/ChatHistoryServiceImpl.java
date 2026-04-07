@@ -1,0 +1,62 @@
+package com.firedemo.demo.Service.ServiceImpl;
+
+import com.firedemo.demo.entity.ChatHistory;
+import com.firedemo.demo.mapper.ChatHistoryMapper;
+import com.firedemo.demo.service.ChatHistoryService;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
+import java.util.stream.Collectors;
+
+/**
+ * 对话记录服务实现
+ *
+ * @author 海克斯
+ */
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class ChatHistoryServiceImpl implements ChatHistoryService {
+
+    private final ChatHistoryMapper chatHistoryMapper;
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean save(ChatHistory history) {
+        return chatHistoryMapper.insert(history) > 0;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean saveBatch(List<ChatHistory> histories) {
+        for (ChatHistory history : histories) {
+            chatHistoryMapper.insert(history);
+        }
+        return true;
+    }
+
+    @Override
+    public List<ChatHistory> getHistory(String sessionId, int limit) {
+        return chatHistoryMapper.selectBySessionId(sessionId, limit);
+    }
+
+    @Override
+    public List<String> getUserSessions(Long userId) {
+        return chatHistoryMapper.selectSessionIdsByUserId(userId);
+    }
+
+    @Override
+    public String buildContextPrompt(String sessionId, int limit) {
+        List<ChatHistory> histories = getHistory(sessionId, limit);
+        if (histories.isEmpty()) {
+            return "";
+        }
+
+        return histories.stream()
+                .map(h -> h.getRole() + ": " + h.getContent())
+                .collect(Collectors.joining("\n"));
+    }
+}

@@ -1,0 +1,29 @@
+@import './base.css';
+
+/* Use full width app container so App.vue layout controls header/sidebar/content */
+#app {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  font-weight: normal;
+}
+a,
+.green {
+  text-decoration: none;
+  color: hsla(160, 100%, 37%, 1);
+  transition: 0.4s;
+  padding: 3px;
+}
+
+@media (hover: hover) {
+  a:hover {
+    background-color: hsla(160, 100%, 37%, 0.2);
+  }
+}
+
+/* Larger screens: keep full width, App.vue handles layout */
+@media (min-width: 1024px) {
+  body {
+    /* keep normal flow so header and sidebar layout work */
+  }
+}
