@@ -444,7 +444,8 @@ export default {
         this.isLoading = true
         this.isTyping = true
 
-        // 步骤2：调用批改
+        // 步骤2：调用批改（带上sessionId保持会话）
+        const sessionId = localStorage.getItem('sessionId') || this.sessionId
         const gradeRes = await fetch(`${this.apiBaseUrl}/chat/grade`, {
           method: 'POST',
           headers: {
@@ -453,7 +454,8 @@ export default {
           },
           body: JSON.stringify({
             filePath: this.uploadedFilePath,
-            requirement: requirement || '请批改这份作业'
+            requirement: requirement || '请批改这份作业',
+            sessionId: sessionId
           })
         })
 

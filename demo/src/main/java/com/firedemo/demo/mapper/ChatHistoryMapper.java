@@ -27,12 +27,12 @@ public interface ChatHistoryMapper extends BaseMapper<ChatHistory> {
     List<ChatHistory> selectBySessionId(@Param("sessionId") String sessionId, @Param("limit") int limit);
 
     /**
-     * 查询用户的所有会话ID
+     * 查询用户的所有会话ID（按最近活动时间排序）
      *
      * @param userId 用户ID
      * @return 会话ID列表
      */
-    @Select("SELECT DISTINCT session_id FROM chat_history WHERE user_id = #{userId} ORDER BY MAX(created_at) DESC")
+    @Select("SELECT session_id FROM chat_history WHERE user_id = #{userId} GROUP BY session_id ORDER BY MAX(created_at) DESC")
     List<String> selectSessionIdsByUserId(@Param("userId") Long userId);
 
     /**

@@ -25,4 +25,9 @@ public class GradeRequest {
      */
     @NotBlank(message = "批改要求不能为空")
     private String requirement;
+
+    /**
+     * 会话ID（用于保持OpenClaw会话上下文）
+     */
+    private String sessionId;
 }

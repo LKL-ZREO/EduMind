@@ -11,4 +11,5 @@ public class UserLoginVO {
     private String username;
     private String email;
     private String token;  // JWT Token
+    private String sessionId;  // 当前会话ID
 }

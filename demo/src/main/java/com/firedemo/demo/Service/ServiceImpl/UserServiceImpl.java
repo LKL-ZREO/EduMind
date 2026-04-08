@@ -7,18 +7,22 @@ import com.firedemo.demo.Entity.User;
 import com.firedemo.demo.Service.UserService;
 import com.firedemo.demo.VO.UserLoginVO;
 import com.firedemo.demo.mapper.UserMapper;
+import com.firedemo.demo.mapper.ChatHistoryMapper;
 import com.firedemo.demo.utils.JwtUtil;
 import com.firedemo.demo.utils.PasswordUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
 public class UserServiceImpl implements UserService {
 
     private final UserMapper userMapper;
+    private final ChatHistoryMapper chatHistoryMapper;
     private final JwtUtil jwtUtil;
     private final PasswordUtil passwordUtil;
 
@@ -70,13 +74,29 @@ public class UserServiceImpl implements UserService {
         // 4. 生成 JWT
         String token = jwtUtil.generateToken(user.getId(), user.getUsername());
 
-        // 5. 返回登录信息
+        // 5. 获取或生成 sessionId（查最近的历史记录）
+        String sessionId = getOrCreateSessionId(user.getId());
+
+        // 6. 返回登录信息
         return UserLoginVO.builder()
                 .id(user.getId())
                 .username(user.getUsername())
-                .email(user.getEmail())  // 确保 User 实体有 email 字段
+                .email(user.getEmail())
                 .token(token)
+                .sessionId(sessionId)
                 .build();
+    }
+
+    /**
+     * 获取用户最近的 sessionId，没有则创建新的
+     */
+    private String getOrCreateSessionId(Long userId) {
+        List<String> sessionIds = chatHistoryMapper.selectSessionIdsByUserId(userId);
+        if (sessionIds != null && !sessionIds.isEmpty()) {
+            return sessionIds.get(0); // 返回最新的 sessionId
+        }
+        // 没有历史记录，生成新的
+        return "session_" + UUID.randomUUID().toString().replace("-", "");
     }
 
 }

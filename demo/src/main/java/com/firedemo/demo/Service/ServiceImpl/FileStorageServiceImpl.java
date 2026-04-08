@@ -2,11 +2,22 @@ package com.firedemo.demo.Service.ServiceImpl;
 
 import com.firedemo.demo.Service.FileStorageService;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.tika.exception.TikaException;
+import org.apache.tika.extractor.EmbeddedDocumentExtractor;
+import org.apache.tika.metadata.Metadata;
+import org.apache.tika.parser.AutoDetectParser;
+import org.apache.tika.parser.ParseContext;
+import org.apache.tika.parser.Parser;
+import org.apache.tika.parser.pdf.PDFParserConfig;
+import org.apache.tika.sax.BodyContentHandler;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
+import org.xml.sax.ContentHandler;
+import org.xml.sax.SAXException;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -56,19 +67,83 @@ public class FileStorageServiceImpl implements FileStorageService {
         try {
             Path path = Paths.get(filePath);
 
-            // 检查文件类型
-            String contentType = Files.probeContentType(path);
+            // 先用 Tika 尝试解析所有格式
+            String parsedContent = parseWithTika(path);
+            if (parsedContent != null && !parsedContent.isEmpty()) {
+                return parsedContent;
+            }
 
+            // Tika 解析失败，回退到文本读取
+            String contentType = Files.probeContentType(path);
             if (contentType != null && contentType.startsWith("text")) {
-                // 文本文件直接读取
                 return Files.readString(path);
             } else {
-                // 非文本文件返回路径，由调用方处理
                 return "[文件类型: " + contentType + ", 路径: " + filePath + "]";
             }
         } catch (IOException e) {
             log.error("读取文件失败: {}", filePath, e);
             throw new RuntimeException("读取文件失败", e);
         }
+    }
+
+    /**
+     * 使用 Apache Tika 解析文档内容
+     * 支持 PDF、Word、Excel、PPT、TXT、MD 等多种格式
+     */
+    private String parseWithTika(Path filePath) {
+        try (InputStream inputStream = Files.newInputStream(filePath)) {
+            // 1. 创建自动检测解析器
+            AutoDetectParser parser = new AutoDetectParser();
+
+            // 2. 创建内容处理器，限制最大 5MB
+            BodyContentHandler handler = new BodyContentHandler(5 * 1024 * 1024);
+
+            // 3. 创建元数据对象
+            Metadata metadata = new Metadata();
+
+            // 4. 创建解析上下文
+            ParseContext context = new ParseContext();
+            context.set(Parser.class, parser);
+
+            // 5. 禁用嵌入文档解析（避免提取图片引用）
+            context.set(EmbeddedDocumentExtractor.class, 
+                new NoOpEmbeddedDocumentExtractor());
+
+            // 6. PDF 配置：关闭图片提取，按位置排序文本
+            PDFParserConfig pdfConfig = new PDFParserConfig();
+            pdfConfig.setExtractInlineImages(false);
+            pdfConfig.setSortByPosition(true);
+            context.set(PDFParserConfig.class, pdfConfig);
+
+            // 7. 执行解析
+            parser.parse(inputStream, handler, metadata, context);
+
+            String content = handler.toString();
+            log.info("Tika 解析成功: {}, 提取 {} 字符", filePath.getFileName(), content.length());
+            return content;
+
+        } catch (TikaException | SAXException e) {
+            log.warn("Tika 解析失败: {}, 错误: {}", filePath.getFileName(), e.getMessage());
+            return null;
+        } catch (IOException e) {
+            log.error("读取文件失败: {}", filePath, e);
+            return null;
+        }
+    }
+
+    /**
+     * 空操作嵌入文档提取器（禁用嵌入资源解析）
+     */
+    private static class NoOpEmbeddedDocumentExtractor implements EmbeddedDocumentExtractor {
+        @Override
+        public boolean shouldParseEmbedded(Metadata metadata) {
+            return false;
+        }
+
+        @Override
+        public void parseEmbedded(InputStream inputStream, ContentHandler contentHandler, Metadata metadata, boolean b) throws SAXException, IOException {
+
+        }
+
     }
 }

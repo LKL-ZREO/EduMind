@@ -218,8 +218,8 @@ public class ChatController {
             请使用批改作业助手的标准格式输出结果。
             """, request.getRequirement(), fileContent);
 
-        // 3. 调用 OpenClaw
-        String response = openClawService.chat(message);
+        // 3. 调用 OpenClaw（传入sessionId保持会话）
+        String response = openClawService.chat(message, request.getSessionId());
 
         return ResponseEntity.ok(ChatResponse.builder()
                 .content(response)
@@ -255,8 +255,8 @@ public class ChatController {
             请使用批改作业助手的标准格式输出结果。
             """, request.getRequirement(), fileContent);
 
-        // 3. 流式调用
-        return openClawService.streamChatWithSse(message);
+        // 3. 流式调用（传入sessionId保持会话）
+        return openClawService.streamChatWithSse(message, request.getSessionId());
     }
 
     // ============ 私有方法 ============

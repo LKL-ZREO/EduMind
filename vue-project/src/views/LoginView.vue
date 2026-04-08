@@ -60,10 +60,11 @@ async function submit() {
       throw new Error(result.message || result.msg || '登录失败，用户名或密码错误')
     }
 
-    // 存 token 和 user
-    const { id, username, email, token } = result.data
+    // 存 token、user 和 sessionId
+    const { id, username, email, token, sessionId } = result.data
 
     localStorage.setItem('token', token)
+    localStorage.setItem('sessionId', sessionId || '')
     localStorage.setItem('user', JSON.stringify({
       id: String(id),
       username,
