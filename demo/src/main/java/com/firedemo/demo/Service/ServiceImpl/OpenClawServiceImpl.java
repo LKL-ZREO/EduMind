@@ -42,6 +42,9 @@ public class OpenClawServiceImpl implements OpenClawService {
         request.put("model", "openclaw");
         request.put("input", message);
         request.put("stream", stream);
+        if (sessionId != null && !sessionId.isEmpty()) {
+            request.put("user", sessionId);
+        }
         return request;
     }
 
@@ -86,14 +89,12 @@ public class OpenClawServiceImpl implements OpenClawService {
 
     @Override
     public String chat(String message, String sessionId) {
-        // 直接构建 JSON 字符串
-        String jsonBody = String.format("{\"input\":\"%s\",\"stream\":false,\"model\":\"openclaw\"}", 
-            message.replace("\"", "\\\""));
+        Map<String, Object> requestBody = buildRequest(message, false, sessionId);
 
         return openClawWebClient.post()
                 .uri("/v1/responses")
                 .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(jsonBody)
+                .bodyValue(requestBody)
                 .retrieve()
                 .bodyToMono(OpenResponsesResponse.class)
                 .map(this::extractContent)
@@ -109,17 +110,15 @@ public class OpenClawServiceImpl implements OpenClawService {
 
     @Override
     public Flux<String> streamChat(String message, String sessionId) {
-        // 直接构建 JSON 字符串，确保格式和 curl 一致
-        String jsonBody = String.format("{\"input\":\"%s\",\"stream\":true,\"model\":\"openclaw\"}", 
-            message.replace("\"", "\\\""));
+        Map<String, Object> requestBody = buildRequest(message, true, sessionId);
         
-        log.info("OpenClaw请求JSON: {}", jsonBody);
+        log.info("OpenClaw请求: user={}, message={}", sessionId, message.substring(0, Math.min(50, message.length())));
 
         return openClawWebClient.post()
                 .uri("/v1/responses")
                 .contentType(MediaType.APPLICATION_JSON)
                 .accept(MediaType.TEXT_EVENT_STREAM)
-                .bodyValue(jsonBody)
+                .bodyValue(requestBody)
                 .retrieve()
                 .bodyToFlux(String.class)
                 .doOnNext(line -> log.info("WebClient收到行: {}", line))
