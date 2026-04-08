@@ -45,6 +45,14 @@ public interface ChatHistoryService {
     List<String> getUserSessions(Long userId);
 
     /**
+     * 获取用户的所有历史记录（按会话分组）
+     *
+     * @param userId 用户ID
+     * @return 历史记录列表
+     */
+    List<ChatHistory> getUserHistory(Long userId);
+
+    /**
      * 构建上下文提示词
      *
      * @param sessionId 会话ID

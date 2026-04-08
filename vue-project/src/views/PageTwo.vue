@@ -171,7 +171,7 @@ export default {
   },
   mounted() {
     this.checkConnection()
-    this.loadSession()
+    this.loadHistoryFromBackend()
     this.$nextTick(() => {
       this.autoResize()
     })
@@ -192,39 +192,109 @@ export default {
         messages: this.messages,
         timestamp: Date.now()
       }
-      localStorage.setItem('chat_session', JSON.stringify(sessionData))
+      const storageKey = this.getSessionStorageKey()
+      localStorage.setItem(storageKey, JSON.stringify(sessionData))
     },
 
-    // 从localStorage加载会话
-    loadSession() {
+    // 获取当前用户ID（从localStorage解析）
+    getCurrentUserId() {
+      const userStr = localStorage.getItem('user')
+      if (userStr) {
+        try {
+          const user = JSON.parse(userStr)
+          return user.id || user.userId || 'anonymous'
+        } catch {
+          return 'anonymous'
+        }
+      }
+      return 'anonymous'
+    },
+
+    // 获取当前用户的session存储key
+    getSessionStorageKey() {
+      const userId = this.getCurrentUserId()
+      return `chat_session_${userId}`
+    },
+
+    // 从后端加载历史记录
+    async loadHistoryFromBackend() {
       try {
-        const saved = localStorage.getItem('chat_session')
-        if (saved) {
-          const sessionData = JSON.parse(saved)
-          // 检查是否过期（7天）
-          const sevenDays = 7 * 24 * 60 * 60 * 1000
-          if (Date.now() - sessionData.timestamp < sevenDays) {
-            this.sessionId = sessionData.sessionId
-            this.messages = sessionData.messages || []
-          } else {
-            // 过期，创建新会话
+        const token = localStorage.getItem('token')
+        if (!token) {
+          // 未登录，创建新会话
+          this.sessionId = this.generateSessionId()
+          return
+        }
+
+        const response = await fetch(`${this.apiBaseUrl}/chat/history`, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        })
+
+        if (!response.ok) {
+          if (response.status === 401) {
+            // Token过期，清空并创建新会话
             this.sessionId = this.generateSessionId()
+            return
+          }
+          throw new Error('加载历史记录失败')
+        }
+
+        const historyList = await response.json()
+        
+        if (historyList && historyList.length > 0) {
+          // 按 session_id 分组，取最新的会话
+          const sessionMap = new Map()
+          historyList.forEach(item => {
+            if (!sessionMap.has(item.sessionId)) {
+              sessionMap.set(item.sessionId, [])
+            }
+            sessionMap.get(item.sessionId).push({
+              role: item.role,
+              content: item.content,
+              time: this.formatTime(item.createdAt),
+              model: item.model
+            })
+          })
+
+          // 取最新的会话显示
+          const latestSession = Array.from(sessionMap.entries()).pop()
+          if (latestSession) {
+            this.sessionId = latestSession[0]
+            this.messages = latestSession[1]
           }
         } else {
-          // 没有保存的会话，创建新的
+          // 没有历史记录，创建新会话
           this.sessionId = this.generateSessionId()
         }
-      } catch (e) {
-        console.error('加载会话失败:', e)
+      } catch (error) {
+        console.error('加载历史记录失败:', error)
         this.sessionId = this.generateSessionId()
       }
     },
 
+    // 格式化时间
+    formatTime(timestamp) {
+      if (!timestamp) return this.getCurrentTime()
+      const date = new Date(timestamp)
+      return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`
+    },
+
+    // 从localStorage加载会话（备用，现在主要用后端）
+    loadSession() {
+      // 已废弃，使用 loadHistoryFromBackend
+      this.sessionId = this.generateSessionId()
+    },
+
     // 清空对话
     clearChat() {
-      this.messages = []
-      this.sessionId = this.generateSessionId()
-      this.saveSession()
+      if (confirm('确定要清空所有对话吗？')) {
+        this.messages = []
+        this.sessionId = this.generateSessionId()
+        this.saveSession()
+      }
     },
 
     // 检查连接状态

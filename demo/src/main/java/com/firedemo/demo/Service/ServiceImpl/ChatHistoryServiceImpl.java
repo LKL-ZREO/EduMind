@@ -49,6 +49,11 @@ public class ChatHistoryServiceImpl implements ChatHistoryService {
     }
 
     @Override
+    public List<ChatHistory> getUserHistory(Long userId) {
+        return chatHistoryMapper.selectByUserId(userId);
+    }
+
+    @Override
     public String buildContextPrompt(String sessionId, int limit) {
         List<ChatHistory> histories = getHistory(sessionId, limit);
         if (histories.isEmpty()) {

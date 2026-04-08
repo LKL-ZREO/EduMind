@@ -23,6 +23,7 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
 
 import java.io.IOException;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -53,6 +54,34 @@ public class ChatController {
         );
 
         return ResponseEntity.status(openclawHealthy ? 200 : 503).body(health);
+    }
+
+    /**
+     * 获取当前用户的历史记录
+     */
+    @GetMapping("/history")
+    public ResponseEntity<List<ChatHistory>> getHistory(HttpServletRequest httpRequest) {
+        Long userId = getCurrentUserId(httpRequest);
+        if (userId == null) {
+            return ResponseEntity.status(401).build();
+        }
+
+        List<ChatHistory> history = chatHistoryService.getUserHistory(userId);
+        return ResponseEntity.ok(history);
+    }
+
+    /**
+     * 获取当前用户的会话列表
+     */
+    @GetMapping("/sessions")
+    public ResponseEntity<List<String>> getSessions(HttpServletRequest httpRequest) {
+        Long userId = getCurrentUserId(httpRequest);
+        if (userId == null) {
+            return ResponseEntity.status(401).build();
+        }
+
+        List<String> sessions = chatHistoryService.getUserSessions(userId);
+        return ResponseEntity.ok(sessions);
     }
 
     /**
