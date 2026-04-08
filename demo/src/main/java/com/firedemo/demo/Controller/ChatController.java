@@ -3,13 +3,17 @@ package com.firedemo.demo.Controller;
 
 import com.firedemo.demo.DTO.ChatRequest;
 import com.firedemo.demo.DTO.ChatResponse;
+import com.firedemo.demo.DTO.EvaluationResultDTO;
 import com.firedemo.demo.DTO.GradeRequest;
 import com.firedemo.demo.Service.FileStorageService;
 import com.firedemo.demo.Service.OpenClawService;
 import com.firedemo.demo.entity.ChatHistory;
+import com.firedemo.demo.entity.HomeworkEvaluation;
+import com.firedemo.demo.mapper.HomeworkEvaluationMapper;
 import com.firedemo.demo.service.ChatHistoryService;
 
 import com.firedemo.demo.utils.JwtUtil;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
@@ -36,7 +40,9 @@ public class ChatController {
     private final OpenClawService openClawService;
     private final FileStorageService fileStorageService;
     private final ChatHistoryService chatHistoryService;
+    private final HomeworkEvaluationMapper evaluationMapper;
     private final JwtUtil jwtUtil;
+    private final ObjectMapper objectMapper;
 
     private static final String TOKEN_PREFIX = "Bearer ";
 
@@ -200,34 +206,136 @@ public class ChatController {
      * @return 批改结果
      */
     @PostMapping("/grade")
-    public ResponseEntity<ChatResponse> gradeHomework(@Valid @RequestBody GradeRequest request) {
+    public ResponseEntity<ChatResponse> gradeHomework(@Valid @RequestBody GradeRequest request,
+                                                       HttpServletRequest httpRequest) {
         log.debug("收到作业批改请求: {}, 文件: {}", request.getRequirement(), request.getFilePath());
+
+        // 获取当前用户ID
+        Long userId = getCurrentUserId(httpRequest);
 
         // 1. 读取文件内容
         String fileContent = fileStorageService.readFileContent(request.getFilePath());
 
-        // 2. 构造批改消息
+        // 2. 构造批改消息（要求返回JSON格式）
         String message = String.format("""
-            请批改以下作业：
+            请批改以下作业，并以JSON格式返回结果：
 
             要求：%s
 
             文件内容：
             %s
 
-            请使用批改作业助手的标准格式输出结果。
+            请使用批改作业助手的标准格式输出结果，必须是合法JSON格式。
             """, request.getRequirement(), fileContent);
 
         // 3. 调用 OpenClaw（传入sessionId保持会话）
         String response = openClawService.chat(message, request.getSessionId());
 
+        // 4. 解析JSON并保存到数据库
+        String displayContent = response;
+        try {
+            // 去掉可能的markdown代码块标记
+            String jsonStr = extractJsonFromMarkdown(response);
+            EvaluationResultDTO evaluation = objectMapper.readValue(jsonStr, EvaluationResultDTO.class);
+            saveEvaluation(userId, request.getSessionId(), request, evaluation, response);
+            // 将JSON转换为友好文本格式
+            displayContent = formatEvaluationToText(evaluation);
+        } catch (Exception e) {
+            log.warn("解析评价JSON失败，返回原始响应: {}", e.getMessage());
+        }
+
         return ResponseEntity.ok(ChatResponse.builder()
-                .content(response)
+                .content(displayContent)
                 .role("assistant")
                 .timestamp(Instant.now().toEpochMilli())
                 .model("OpenClaw")
                 .done(true)
                 .build());
+    }
+
+    /**
+     * 保存评价结果到数据库
+     */
+    private void saveEvaluation(Long userId, String sessionId, GradeRequest request,
+                                 EvaluationResultDTO evaluation, String rawResponse) {
+        try {
+            HomeworkEvaluation entity = new HomeworkEvaluation();
+            entity.setUserId(userId);
+            entity.setSessionId(sessionId);
+            entity.setFilePath(request.getFilePath());
+            entity.setRequirement(request.getRequirement());
+            entity.setTotalScore(evaluation.getTotalScore());
+            // 简单处理：总分作为内容分，格式分设为null
+            entity.setContentScore(evaluation.getTotalScore());
+            entity.setOverallComment(evaluation.getOverallComment());
+            entity.setStrengths(evaluation.getHighlights() != null ? 
+                String.join(",", evaluation.getHighlights()) : "");
+            // 建议列表转为字符串
+            String suggestionsStr = "";
+            if (evaluation.getSuggestions() != null) {
+                suggestionsStr = evaluation.getSuggestions().stream()
+                    .map(s -> s.getPriority() + ": " + s.getIssue() + " -> " + s.getSuggestion())
+                    .reduce((a, b) -> a + "\n" + b)
+                    .orElse("");
+            }
+            entity.setSuggestions(suggestionsStr);
+            entity.setRawResponse(rawResponse);
+            evaluationMapper.insert(entity);
+            log.info("评价结果已保存: userId={}, totalScore={}", userId, evaluation.getTotalScore());
+        } catch (Exception e) {
+            log.error("保存评价结果失败", e);
+        }
+    }
+
+    /**
+     * 从markdown代码块中提取JSON字符串
+     */
+    private String extractJsonFromMarkdown(String response) {
+        if (response == null || response.isEmpty()) {
+            return response;
+        }
+        String trimmed = response.trim();
+        // 去掉 ```json 开头
+        if (trimmed.startsWith("```json")) {
+            trimmed = trimmed.substring(7).trim();
+        } else if (trimmed.startsWith("```")) {
+            trimmed = trimmed.substring(3).trim();
+        }
+        // 去掉 ``` 结尾
+        if (trimmed.endsWith("```")) {
+            trimmed = trimmed.substring(0, trimmed.length() - 3).trim();
+        }
+        return trimmed;
+    }
+
+    /**
+     * 将评价DTO格式化为友好文本
+     */
+    private String formatEvaluationToText(EvaluationResultDTO evaluation) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("## 批改结果\n\n");
+        sb.append("**总分**: ").append(evaluation.getTotalScore());
+        if (evaluation.getMaxScore() != null) {
+            sb.append("/").append(evaluation.getMaxScore());
+        }
+        sb.append("分\n\n");
+        sb.append("### 总体评语\n");
+        sb.append(evaluation.getOverallComment()).append("\n\n");
+        sb.append("### 亮点\n");
+        if (evaluation.getHighlights() != null) {
+            for (String highlight : evaluation.getHighlights()) {
+                sb.append("- ").append(highlight).append("\n");
+            }
+        }
+        sb.append("\n### 改进建议\n");
+        if (evaluation.getSuggestions() != null) {
+            for (EvaluationResultDTO.SuggestionItem s : evaluation.getSuggestions()) {
+                sb.append("**[").append(s.getPriority()).append("]** ")
+                  .append(s.getIssue()).append("\n");
+                sb.append("→ ").append(s.getSuggestion()).append("\n\n");
+            }
+        }
+        return sb.toString();
     }
 
     /**
