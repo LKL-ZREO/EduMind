@@ -1,4 +1,4 @@
-package com.firedemo.demo.rag;
+package com.firedemo.demo.Entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;

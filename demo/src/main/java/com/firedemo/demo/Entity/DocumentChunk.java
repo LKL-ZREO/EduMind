@@ -1,4 +1,4 @@
-package com.firedemo.demo.rag;
+package com.firedemo.demo.Entity;
 
 import lombok.Data;
 import java.time.LocalDateTime;

@@ -1,6 +1,6 @@
 package com.firedemo.demo.rag;
 
-import ai.djl.huggingface.tokenizers.HuggingFaceTokenizer;
+import com.firedemo.demo.Entity.DocumentChunk;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -8,7 +8,6 @@ import org.springframework.stereotype.Service;
 
 import java.util.*;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 /**
  * RAG智能上下文切割服务

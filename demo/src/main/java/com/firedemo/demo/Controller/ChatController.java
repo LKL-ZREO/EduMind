@@ -92,6 +92,30 @@ public class ChatController {
     }
 
     /**
+     * 清空当前用户的所有对话历史，并生成新的 sessionId
+     */
+    @PostMapping("/clear")
+    public ResponseEntity<Map<String, String>> clearHistory(HttpServletRequest httpRequest) {
+        Long userId = getCurrentUserId(httpRequest);
+        if (userId == null) {
+            return ResponseEntity.status(401).build();
+        }
+
+        // 删除该用户的所有历史记录
+        chatHistoryService.deleteByUserId(userId);
+
+        // 生成新的 sessionId
+        String newSessionId = UUID.randomUUID().toString();
+
+        log.info("用户 {} 清空了对话历史，新 sessionId: {}", userId, newSessionId);
+
+        return ResponseEntity.ok(Map.of(
+                "message", "对话历史已清空",
+                "sessionId", newSessionId
+        ));
+    }
+
+    /**
      * 普通聊天（非流式）
      */
     @PostMapping("/send")

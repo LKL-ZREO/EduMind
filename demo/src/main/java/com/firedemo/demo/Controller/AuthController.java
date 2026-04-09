@@ -2,7 +2,7 @@ package com.firedemo.demo.Controller;
 
 import com.firedemo.demo.DTO.UserLoginDTO;
 import com.firedemo.demo.DTO.UserRegisterDTO;
-import com.firedemo.demo.Result;
+import com.firedemo.demo.config.Result;
 import com.firedemo.demo.Service.UserService;
 import com.firedemo.demo.VO.UserLoginVO;
 import lombok.RequiredArgsConstructor;

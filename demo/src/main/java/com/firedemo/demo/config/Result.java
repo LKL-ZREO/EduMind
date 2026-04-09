@@ -1,4 +1,4 @@
-package com.firedemo.demo;
+package com.firedemo.demo.config;
 
 import lombok.Data;
 

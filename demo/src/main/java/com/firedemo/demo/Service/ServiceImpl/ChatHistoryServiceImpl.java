@@ -66,4 +66,12 @@ public class ChatHistoryServiceImpl implements ChatHistoryService {
                 .map(h -> h.getRole() + ": " + h.getContent())
                 .collect(Collectors.joining("\n"));
     }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean deleteByUserId(Long userId) {
+        int deleted = chatHistoryMapper.deleteByUserId(userId);
+        log.info("已删除用户 {} 的 {} 条对话记录", userId, deleted);
+        return deleted >= 0;
+    }
 }

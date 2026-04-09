@@ -26,20 +26,12 @@ public class OpenClawServiceImpl implements OpenClawService {
     private final WebClient openClawWebClient;
     private final OpenClawProperties properties;
     private final ObjectMapper objectMapper;
-
-    /**
-     * 构建 OpenResponses 请求体
-     */
-    private Map<String, Object> buildRequest(String message, boolean stream) {
-        return buildRequest(message, stream, null);
-    }
-
     /**
      * 构建 OpenResponses 请求体（带会话ID）
      */
     private Map<String, Object> buildRequest(String message, boolean stream, String sessionId) {
         java.util.Map<String, Object> request = new java.util.HashMap<>();
-        request.put("model", "openclaw");
+        request.put("model", "openclaw/" + properties.getAgent());
         request.put("input", message);
         request.put("stream", stream);
         if (sessionId != null && !sessionId.isEmpty()) {
@@ -91,9 +83,17 @@ public class OpenClawServiceImpl implements OpenClawService {
     public String chat(String message, String sessionId) {
         Map<String, Object> requestBody = buildRequest(message, false, sessionId);
 
-        return openClawWebClient.post()
+        // 构建WebClient请求，添加session key头
+        var requestSpec = openClawWebClient.post()
                 .uri("/v1/responses")
-                .contentType(MediaType.APPLICATION_JSON)
+                .contentType(MediaType.APPLICATION_JSON);
+        
+        // 如果有sessionId，添加x-openclaw-session-key头
+        if (sessionId != null && !sessionId.isEmpty()) {
+            requestSpec = requestSpec.header("x-openclaw-session-key", sessionId);
+        }
+
+        return requestSpec
                 .bodyValue(requestBody)
                 .retrieve()
                 .bodyToMono(OpenResponsesResponse.class)
@@ -114,10 +114,18 @@ public class OpenClawServiceImpl implements OpenClawService {
         
         log.info("OpenClaw请求: user={}, message={}", sessionId, message.substring(0, Math.min(50, message.length())));
 
-        return openClawWebClient.post()
+        // 构建WebClient请求，添加session key头
+        var requestSpec = openClawWebClient.post()
                 .uri("/v1/responses")
                 .contentType(MediaType.APPLICATION_JSON)
-                .accept(MediaType.TEXT_EVENT_STREAM)
+                .accept(MediaType.TEXT_EVENT_STREAM);
+        
+        // 如果有sessionId，添加x-openclaw-session-key头
+        if (sessionId != null && !sessionId.isEmpty()) {
+            requestSpec = requestSpec.header("x-openclaw-session-key", sessionId);
+        }
+        
+        return requestSpec
                 .bodyValue(requestBody)
                 .retrieve()
                 .bodyToFlux(String.class)

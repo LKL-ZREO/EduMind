@@ -3,6 +3,7 @@ package com.firedemo.demo.mapper;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 
 import com.firedemo.demo.Entity.ChatHistory;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -44,4 +45,13 @@ public interface ChatHistoryMapper extends BaseMapper<ChatHistory> {
      */
     @Select("SELECT * FROM chat_history WHERE user_id = #{userId} ORDER BY session_id, created_at ASC")
     List<ChatHistory> selectByUserId(@Param("userId") Long userId);
+
+    /**
+     * 删除用户的所有历史记录
+     *
+     * @param userId 用户ID
+     * @return 删除的记录数
+     */
+    @Delete("DELETE FROM chat_history WHERE user_id = #{userId}")
+    int deleteByUserId(@Param("userId") Long userId);
 }

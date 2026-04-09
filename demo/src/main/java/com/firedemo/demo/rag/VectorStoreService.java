@@ -1,6 +1,8 @@
 package com.firedemo.demo.rag;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.firedemo.demo.Entity.DocumentChunk;
+import com.firedemo.demo.Entity.DocumentChunkEntity;
 import com.firedemo.demo.mapper.DocumentChunkMapper;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;

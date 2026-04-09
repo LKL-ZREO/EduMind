@@ -1,7 +1,7 @@
 package com.firedemo.demo.rag;
 
+import com.firedemo.demo.Entity.DocumentChunk;
 import com.firedemo.demo.Service.OpenClawService;
-import com.firedemo.demo.DTO.StreamChunk;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;

@@ -53,6 +53,14 @@ public interface ChatHistoryService {
     List<ChatHistory> getUserHistory(Long userId);
 
     /**
+     * 删除用户的所有历史记录
+     *
+     * @param userId 用户ID
+     * @return 是否成功
+     */
+    boolean deleteByUserId(Long userId);
+
+    /**
      * 构建上下文提示词
      *
      * @param sessionId 会话ID

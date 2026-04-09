@@ -1,7 +1,7 @@
 package com.firedemo.demo.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
-import com.firedemo.demo.rag.DocumentChunkEntity;
+import com.firedemo.demo.Entity.DocumentChunkEntity;
 import org.apache.ibatis.annotations.Mapper;
 
 /**
