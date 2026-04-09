@@ -10,7 +10,7 @@ import org.springframework.stereotype.Component;
 public class OpenClawProperties {
     private String url;
     private String token;
-    private String agent = "Jarvis";
+    private String agent ="jarvis";
     private int connectTimeout = 5000;
     private int readTimeout = 120000;
 

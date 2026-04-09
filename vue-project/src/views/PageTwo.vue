@@ -288,12 +288,44 @@ export default {
       this.sessionId = this.generateSessionId()
     },
 
-    // 清空对话
-    clearChat() {
-      if (confirm('确定要清空所有对话吗？')) {
+    // 清空对话 - 调用后端接口删除历史并获取新sessionId
+    async clearChat() {
+      if (!confirm('确定要清空所有对话吗？')) {
+        return
+      }
+
+      const token = localStorage.getItem('token')
+      if (!token) {
+        // 未登录，直接清空前端
         this.messages = []
         this.sessionId = this.generateSessionId()
-        this.saveSession()
+        return
+      }
+
+      try {
+        const response = await fetch(`${this.apiBaseUrl}/chat/clear`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        })
+
+        if (!response.ok) {
+          throw new Error('清空对话失败')
+        }
+
+        const data = await response.json()
+        
+        // 清空前端消息并使用后端返回的新sessionId
+        this.messages = []
+        this.sessionId = data.sessionId
+        
+        console.log('对话已清空，新sessionId:', this.sessionId)
+      } catch (error) {
+        console.error('清空对话失败:', error)
+        // 失败时仍清空前端，但生成新sessionId
+        this.messages = []
+        this.sessionId = this.generateSessionId()
       }
     },
 
@@ -445,7 +477,7 @@ export default {
         this.isTyping = true
 
         // 步骤2：调用批改（带上sessionId保持会话）
-        const sessionId = localStorage.getItem('sessionId') || this.sessionId
+        const sessionId = this.sessionId
         const gradeRes = await fetch(`${this.apiBaseUrl}/chat/grade`, {
           method: 'POST',
           headers: {
@@ -643,12 +675,7 @@ export default {
       })
     },
 
-    // 清空对话
-    clearChat() {
-      if (confirm('确定要清空所有对话吗？')) {
-        this.messages = []
-      }
-    },
+
 
     // 获取当前时间
     getCurrentTime() {
