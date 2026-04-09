@@ -1,8 +1,10 @@
 package com.firedemo.demo.Service.ServiceImpl;
 
-import com.firedemo.demo.entity.ChatHistory;
+
+import com.firedemo.demo.Entity.ChatHistory;
+import com.firedemo.demo.Service.ChatHistoryService;
 import com.firedemo.demo.mapper.ChatHistoryMapper;
-import com.firedemo.demo.service.ChatHistoryService;
+
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;

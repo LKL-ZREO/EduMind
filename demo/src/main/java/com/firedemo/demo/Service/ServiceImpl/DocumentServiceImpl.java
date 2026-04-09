@@ -1,8 +1,9 @@
 package com.firedemo.demo.Service.ServiceImpl;
 
-import com.firedemo.demo.entity.Document;
+
+import com.firedemo.demo.Entity.Document;
+import com.firedemo.demo.Service.DocumentService;
 import com.firedemo.demo.mapper.DocumentMapper;
-import com.firedemo.demo.service.DocumentService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;

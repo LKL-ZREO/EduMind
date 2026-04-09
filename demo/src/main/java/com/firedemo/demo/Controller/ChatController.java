@@ -5,12 +5,13 @@ import com.firedemo.demo.DTO.ChatRequest;
 import com.firedemo.demo.DTO.ChatResponse;
 import com.firedemo.demo.DTO.EvaluationResultDTO;
 import com.firedemo.demo.DTO.GradeRequest;
+import com.firedemo.demo.Entity.ChatHistory;
+import com.firedemo.demo.Entity.HomeworkEvaluation;
+import com.firedemo.demo.Service.ChatHistoryService;
 import com.firedemo.demo.Service.FileStorageService;
 import com.firedemo.demo.Service.OpenClawService;
-import com.firedemo.demo.entity.ChatHistory;
-import com.firedemo.demo.entity.HomeworkEvaluation;
+
 import com.firedemo.demo.mapper.HomeworkEvaluationMapper;
-import com.firedemo.demo.service.ChatHistoryService;
 
 import com.firedemo.demo.utils.JwtUtil;
 import com.fasterxml.jackson.databind.ObjectMapper;

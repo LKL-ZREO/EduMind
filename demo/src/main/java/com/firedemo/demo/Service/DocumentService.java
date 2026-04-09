@@ -1,6 +1,7 @@
-package com.firedemo.demo.service;
+package com.firedemo.demo.Service;
 
-import com.firedemo.demo.entity.Document;
+
+import com.firedemo.demo.Entity.Document;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;

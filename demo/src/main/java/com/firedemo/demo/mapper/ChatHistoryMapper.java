@@ -1,7 +1,8 @@
 package com.firedemo.demo.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
-import com.firedemo.demo.entity.ChatHistory;
+
+import com.firedemo.demo.Entity.ChatHistory;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;

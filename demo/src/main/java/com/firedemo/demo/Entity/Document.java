@@ -1,4 +1,4 @@
-package com.firedemo.demo.entity;
+package com.firedemo.demo.Entity;
 
 import com.baomidou.mybatisplus.annotation.*;
 import lombok.Data;

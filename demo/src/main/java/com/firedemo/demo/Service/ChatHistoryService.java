@@ -1,6 +1,6 @@
-package com.firedemo.demo.service;
+package com.firedemo.demo.Service;
 
-import com.firedemo.demo.entity.ChatHistory;
+import com.firedemo.demo.Entity.ChatHistory;
 
 import java.util.List;
 
