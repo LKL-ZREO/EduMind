@@ -10,12 +10,12 @@ public interface OpenClawService {
     /**
      * 非流式对话
      */
-    String chat(String message);
+    String chat(String message,String status);
 
     /**
      * 非流式对话（带会话ID）
      */
-    String chat(String message, String sessionId);
+    String chat(String message, String sessionId,String status);
 
     /**
      * 流式对话 - Flux 方式
@@ -28,6 +28,11 @@ public interface OpenClawService {
     Flux<String> streamChat(String message, String sessionId);
 
     /**
+     * 流式对话 - Flux 方式（带会话ID和status）
+     */
+    Flux<String> streamChat(String message, String sessionId, String status);
+
+    /**
      * 流式对话 - SSE 方式
      */
     SseEmitter streamChatWithSse(String message);
@@ -36,6 +41,11 @@ public interface OpenClawService {
      * 流式对话 - SSE 方式（带会话ID）
      */
     SseEmitter streamChatWithSse(String message, String sessionId);
+
+    /**
+     * 流式对话 - SSE 方式（带会话ID和status）
+     */
+    SseEmitter streamChatWithSse(String message, String sessionId, Integer status);
 
     /**
      * 检查 OpenClaw 连接

@@ -44,7 +44,7 @@ public class UserServiceImpl implements UserService {
         // 3. 数据库字段赋值
         user.setCreateTime(LocalDateTime.now());
         user.setUpdateTime(LocalDateTime.now());
-        user.setStatus(1);
+        user.setStatus(Integer.valueOf(dto.getStatus()));
 
         // 4. 插入数据库
         userMapper.insert(user);
@@ -71,8 +71,8 @@ public class UserServiceImpl implements UserService {
             throw new RuntimeException("账号已被禁用");
         }
 
-        // 4. 生成 JWT
-        String token = jwtUtil.generateToken(user.getId(), user.getUsername());
+        // 4. 生成 JWT（带上 status，用于选择 agent：1=main, 2=jarvis）
+        String token = jwtUtil.generateToken(user.getId(), user.getUsername(), user.getStatus());
 
         // 5. 获取或生成 sessionId（查最近的历史记录）
         String sessionId = getOrCreateSessionId(user.getId());

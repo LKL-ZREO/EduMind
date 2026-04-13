@@ -135,8 +135,9 @@ public class ChatController {
         // 保存用户消息
         saveChatHistory(userId, sessionId, "user", request.getMessage(), null);
 
-        // 调用 OpenClaw
-        String response = openClawService.chat(request.getMessage(), sessionId);
+        // 获取用户 status 并调用 OpenClaw
+        Integer status = getCurrentUserStatus(httpRequest);
+        String response = openClawService.chat(request.getMessage(), sessionId, String.valueOf(status));
 
         // 保存 AI 回复
         saveChatHistory(userId, sessionId, "assistant", response, "OpenClaw");
@@ -180,7 +181,8 @@ public class ChatController {
             StringBuilder responseBuilder = new StringBuilder();
             
             try {
-                openClawService.streamChat(message, finalSessionId)
+                Integer status = getCurrentUserStatus(httpRequest);
+                openClawService.streamChat(message, finalSessionId, String.valueOf(status))
                         .doOnNext(chunk -> {
                             log.debug("发送SSE chunk: {}", chunk);
                             try {
@@ -410,6 +412,13 @@ public class ChatController {
             log.warn("解析 token 失败", e);
             return null;
         }
+    }
+
+    /**
+     * 从 request attribute 获取当前用户 status
+     */
+    private Integer getCurrentUserStatus(HttpServletRequest request) {
+        return (Integer) request.getAttribute("status");
     }
 
     /**

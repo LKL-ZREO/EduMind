@@ -80,8 +80,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         authentication.setDetails(userId);
         SecurityContextHolder.getContext().setAuthentication(authentication);
         
-        // 设置用户上下文（可选）
+        // 设置用户上下文
         request.setAttribute("userId", userId);
+        
+        // 设置 status 到上下文（status=1用main，status=2用jarvis）
+        Integer status = jwtUtil.getStatusFromToken(token);
+        request.setAttribute("status", status);
+        log.info("用户上下文: userId={}, status={}", userId, status);
 
         filterChain.doFilter(request, response);
     }

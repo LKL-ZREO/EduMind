@@ -75,24 +75,29 @@ public class OpenClawServiceImpl implements OpenClawService {
     }
 
     @Override
-    public String chat(String message) {
+    public String chat(String message,String status) {
         return chat(message, null);
     }
 
     @Override
-    public String chat(String message, String sessionId) {
+    public String chat(String message, String sessionId,String status) {
+        return chat(message, sessionId,status);
+    }
+
+    public String chat(String message, String sessionId, Integer status) {
         Map<String, Object> requestBody = buildRequest(message, false, sessionId);
+        String agent = resolveAgent(status);
 
         // 构建WebClient请求，添加session key头
         var requestSpec = openClawWebClient.post()
                 .uri("/v1/responses")
                 .contentType(MediaType.APPLICATION_JSON)
-                .header("x-openclaw-agent-id", properties.getAgent());
+                .header("x-openclaw-agent-id", agent);
 
         // 如果有sessionId，添加x-openclaw-session-key头
-        if (sessionId != null && !sessionId.isEmpty()) {
-            requestSpec = requestSpec.header("x-openclaw-session-key", sessionId);
-        }
+//        if (sessionId != null && !sessionId.isEmpty()) {
+//            requestSpec = requestSpec.header("x-openclaw-session-key", sessionId);
+//        }
 
         return requestSpec
                 .bodyValue(requestBody)
@@ -111,23 +116,29 @@ public class OpenClawServiceImpl implements OpenClawService {
 
     @Override
     public Flux<String> streamChat(String message, String sessionId) {
+        return streamChat(message, sessionId, null);
+    }
+
+    @Override
+    public Flux<String> streamChat(String message, String sessionId, String status) {
         Map<String, Object> requestBody = buildRequest(message, true, sessionId);
         
+        String agent = resolveAgent(Integer.valueOf(status));
         log.info("OpenClaw请求: user={}, message={}", sessionId, message.substring(0, Math.min(50, message.length())));
-        log.info("请求头: agent={}, session={}", properties.getAgent(), sessionId);
-        // 构建WebClient请求，添加session key头
+        log.info("请求头: agent={}, session={}, status={}", agent, sessionId, status);
+        
+        // 构建WebClient请求
         var requestSpec = openClawWebClient.post()
                 .uri("/v1/responses")
                 .contentType(MediaType.APPLICATION_JSON)
                 .accept(MediaType.TEXT_EVENT_STREAM)
-                .header("x-openclaw-agent-id", "jarvis");;
-//        // 如果有sessionId，添加x-openclaw-session-key头
-//        if (sessionId != null && !sessionId.isEmpty()) {
-//            requestSpec = requestSpec.header("x-openclaw-session-key",
-//                                            sessionId);
-//
-//        }
+                .header("x-openclaw-agent-id", agent);
         
+        // 如果有sessionId，添加x-openclaw-session-key头
+//        if (sessionId != null && !sessionId.isEmpty()) {
+//            requestSpec = requestSpec.header("x-openclaw-session-key", sessionId);
+//        }
+//
         return requestSpec
                 .bodyValue(requestBody)
                 .retrieve()
@@ -137,6 +148,17 @@ public class OpenClawServiceImpl implements OpenClawService {
                 .doOnError(e -> log.error("流式调用失败", e));
     }
 
+    /**
+     * 根据 status 解析 agent
+     * status=1 -> main, status=2 -> jarvis, 其他/默认 -> jarvis
+     */
+    private String resolveAgent(Integer status) {
+        if (status == null) {
+            return properties.getAgent(); // 默认
+        }
+        return properties.getStatusAgentMapping().getOrDefault(status, properties.getAgent());
+    }
+
     @Override
     public SseEmitter streamChatWithSse(String message) {
         return streamChatWithSse(message, null);
@@ -144,9 +166,14 @@ public class OpenClawServiceImpl implements OpenClawService {
 
     @Override
     public SseEmitter streamChatWithSse(String message, String sessionId) {
+        return streamChatWithSse(message, sessionId, null);
+    }
+
+    @Override
+    public SseEmitter streamChatWithSse(String message, String sessionId, Integer status) {
         SseEmitter emitter = new SseEmitter(120000L);
 
-        streamChat(message, sessionId)
+        streamChat(message, sessionId, String.valueOf(status))
                 .subscribe(
                         content -> {
                             try {

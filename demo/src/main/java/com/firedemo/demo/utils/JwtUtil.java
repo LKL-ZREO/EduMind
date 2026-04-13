@@ -4,6 +4,7 @@ import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
 import io.jsonwebtoken.security.Keys;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.stereotype.Component;
 
 import javax.crypto.SecretKey;
@@ -21,16 +22,31 @@ public class JwtUtil {
 
     // 生成 Token
     public String generateToken(Long userId, String username) {
+        return generateToken(userId, username, null);
+    }
+
+    // 生成 Token（带 status）
+    public String generateToken(Long userId, String username, Integer status) {
         Date now = new Date();
         Date expiry = new Date(now.getTime() + EXPIRATION);
 
-        return Jwts.builder()
+        var builder = Jwts.builder()
                 .setSubject(String.valueOf(userId))
                 .claim("username", username)
                 .setIssuedAt(now)
-                .setExpiration(expiry)
-                .signWith(key, SignatureAlgorithm.HS256)
-                .compact();
+                .setExpiration(expiry);
+        
+        if (status != null) {
+            builder.claim("status", status);
+        }
+        
+        return builder.signWith(key, SignatureAlgorithm.HS256).compact();
+    }
+
+    // 从 Token 获取 status
+    public Integer getStatusFromToken(String token) {
+        Claims claims = parseToken(token);
+        return claims.get("status", Integer.class);
     }
 
     // 解析 Token
@@ -62,5 +78,14 @@ public class JwtUtil {
         } catch (Exception e) {
             return false;
         }
+    }
+
+    // 从 request 获取 Token
+    public String extractTokenFromRequest(HttpServletRequest request) {
+        String header = request.getHeader("Authorization");
+        if (header != null && header.startsWith("Bearer ")) {
+            return header.substring(7);
+        }
+        return null;
     }
 }

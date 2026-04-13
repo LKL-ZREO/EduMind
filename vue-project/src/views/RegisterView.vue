@@ -2,18 +2,23 @@
 import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 
+// 身份类型
+type UserIdentity = 'student' | 'teacher'
+
 interface FormData {
   username: string
   email: string
   password: string
   confirmPassword: string
+  identity: UserIdentity
 }
 
 const form = reactive<FormData>({
   username: '',
   email: '',
   password: '',
-  confirmPassword: ''
+  confirmPassword: '',
+  identity: 'student'
 })
 
 const error = ref<string | null>(null)
@@ -24,36 +29,25 @@ const showConfirmPassword = ref(false)
 
 const router = useRouter()
 
+const getStatusByIdentity = (identity: UserIdentity) => {
+  return identity === 'student' ? 1 : 2
+}
+
 // 验证函数
 const validateForm = (): string | null => {
-  if (!form.username.trim()) {
-    return '请输入用户名'
-  }
-  if (form.username.length < 3) {
-    return '用户名至少需要3个字符'
-  }
-  if (!form.email.trim()) {
-    return '请输入邮箱地址'
-  }
+  if (!form.username.trim()) return '请输入用户名'
+  if (form.username.length < 3) return '用户名至少需要3个字符'
+  if (!form.email.trim()) return '请输入邮箱地址'
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-  if (!emailRegex.test(form.email)) {
-    return '请输入有效的邮箱地址'
-  }
-  if (!form.password) {
-    return '请输入密码'
-  }
-  if (form.password.length < 6) {
-    return '密码至少需要6个字符'
-  }
-  if (form.password !== form.confirmPassword) {
-    return '两次输入的密码不一致'
-  }
+  if (!emailRegex.test(form.email)) return '请输入有效的邮箱地址'
+  if (!form.password) return '请输入密码'
+  if (form.password.length < 6) return '密码至少需要6个字符'
+  if (form.password !== form.confirmPassword) return '两次输入的密码不一致'
   return null
 }
 
 async function submit(e: Event) {
-  e.preventDefault() // 👈 新增
-
+  e.preventDefault()
   const validationError = validateForm()
   if (validationError) {
     error.value = validationError
@@ -74,7 +68,8 @@ async function submit(e: Event) {
       body: JSON.stringify({
         username: form.username,
         email: form.email,
-        password: form.password
+        password: form.password,
+        status: getStatusByIdentity(form.identity)
       })
     })
 
@@ -111,6 +106,36 @@ async function submit(e: Event) {
 
       <form @submit.prevent="submit" class="form">
         <div class="form-group">
+          <label>选择身份</label>
+          <div class="identity-selector">
+            <label class="identity-option" :class="{ active: form.identity === 'student' }">
+              <input
+                type="radio"
+                v-model="form.identity"
+                value="student"
+                :disabled="loading"
+              />
+              <div class="identity-card">
+                <span class="icon">🎓</span>
+                <span class="label">学生</span>
+              </div>
+            </label>
+            <label class="identity-option" :class="{ active: form.identity === 'teacher' }">
+              <input
+                type="radio"
+                v-model="form.identity"
+                value="teacher"
+                :disabled="loading"
+              />
+              <div class="identity-card">
+                <span class="icon">👨‍🏫</span>
+                <span class="label">老师</span>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <div class="form-group">
           <label for="username">用户名</label>
           <input
             id="username"
@@ -146,13 +171,9 @@ async function submit(e: Event) {
               type="button"
               class="toggle-password"
               @click="showPassword = !showPassword"
-              :aria-label="showPassword ? '隐藏密码' : '显示密码'"
             >
               {{ showPassword ? '🙈' : '👁️' }}
             </button>
-          </div>
-          <div class="password-hint">
-            密码至少6位，建议包含数字和字母
           </div>
         </div>
 
@@ -170,7 +191,6 @@ async function submit(e: Event) {
               type="button"
               class="toggle-password"
               @click="showConfirmPassword = !showConfirmPassword"
-              :aria-label="showConfirmPassword ? '隐藏密码' : '显示密码'"
             >
               {{ showConfirmPassword ? '🙈' : '👁️' }}
             </button>
@@ -178,23 +198,14 @@ async function submit(e: Event) {
         </div>
 
         <div class="actions">
-            <button
-              type="submit"
-              :disabled="loading"
-              class="submit-btn"
-            >
+            <button type="submit" :disabled="loading" class="submit-btn">
               <span v-if="loading">注册中...</span>
               <span v-else>立即注册</span>
             </button>
         </div>
 
-        <div v-if="error" class="alert error">
-          {{ error }}
-        </div>
-
-        <div v-if="success" class="alert success">
-          {{ success }}
-        </div>
+        <div v-if="error" class="alert error">{{ error }}</div>
+        <div v-if="success" class="alert success">{{ success }}</div>
       </form>
 
       <div class="footer-link">
@@ -205,70 +216,70 @@ async function submit(e: Event) {
 </template>
 
 <style scoped>
-/* 样式保持不变 */
 .auth-page {
+  min-height: 100vh;
   display: flex;
+  align-items: center;
   justify-content: center;
-  align-items: flex-start;
-  min-height: auto;
-  background: transparent;
-  padding: 1rem 0.5rem;
+  padding: 1rem;
+  background-color: #f5f7ff;
 }
 
 .card {
   width: 100%;
-  max-width: 420px;
-  background: white;
-  border-radius: 12px;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+  max-width: 460px;
   padding: 1.5rem;
-  margin: 1rem 0;
+  background: white;
+  border-radius: 14px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
 }
 
-h1 {
-  margin: 0 0 0.5rem 0;
-  font-size: 1.75rem;
-  font-weight: 600;
-  color: #1a1f2d;
+.card h1 {
   text-align: center;
+  margin: 0 0 0.4rem;
+  color: #111827;
+  font-size: 1.5rem;
 }
 
 .subtitle {
-  margin: 0 0 2rem 0;
-  color: #6b7280;
   text-align: center;
+  color: #6b7280;
+  margin: 0 0 1.2rem;
   font-size: 0.9rem;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
 }
 
 .form-group {
-  margin-bottom: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
 }
 
-label {
-  display: block;
-  margin-bottom: 0.5rem;
+.form-group label {
   font-weight: 500;
   color: #374151;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
 }
 
-input {
-  width: 100%;
-  padding: 0.75rem 1rem;
+.form-group input {
+  padding: 0.7rem 1rem;
   border: 1px solid #d1d5db;
   border-radius: 8px;
-  font-size: 1rem;
-  transition: border-color 0.2s, box-shadow 0.2s;
-  box-sizing: border-box;
+  font-size: 0.95rem;
 }
 
-input:focus {
+.form-group input:focus {
   outline: none;
   border-color: #3b82f6;
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
-input:disabled {
+.form-group input:disabled {
   background-color: #f3f4f6;
   cursor: not-allowed;
 }
@@ -279,42 +290,33 @@ input:disabled {
   align-items: center;
 }
 
+.password-input-wrapper input {
+  width: 100%;
+  padding-right: 2.8rem;
+}
+
 .toggle-password {
   position: absolute;
-  right: 12px;
+  right: 0.7rem;
   background: none;
   border: none;
   cursor: pointer;
-  padding: 4px;
   font-size: 1.1rem;
-  color: #6b7280;
-}
-
-.toggle-password:hover {
-  color: #374151;
-}
-
-.password-hint {
-  margin-top: 0.5rem;
-  font-size: 0.8rem;
-  color: #9ca3af;
 }
 
 .actions {
-  margin: 1.5rem 0;
+  margin-top: 0.2rem;
 }
 
 .submit-btn {
   width: 100%;
-  padding: 0.875rem;
+  padding: 0.7rem 1rem;
   background-color: #3b82f6;
   color: white;
   border: none;
   border-radius: 8px;
-  font-size: 1rem;
+  font-size: 0.95rem;
   font-weight: 500;
-  cursor: pointer;
-  transition: background-color 0.2s;
 }
 
 .submit-btn:hover:not(:disabled) {
@@ -322,36 +324,36 @@ input:disabled {
 }
 
 .submit-btn:disabled {
-  background-color: #9ca3af;
+  background-color: #93c5fd;
   cursor: not-allowed;
 }
 
-
-
 .alert {
-  padding: 0.75rem;
+  padding: 0.6rem 1rem;
   border-radius: 6px;
-  margin-top: 1rem;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
+  text-align: center;
 }
 
 .alert.error {
-  background-color: #fee2e2;
+  background-color: #fef2f2;
   color: #dc2626;
-  border: 1px solid #fecaca;
 }
 
 .alert.success {
-  background-color: #d1fae5;
-  color: #059669;
-  border: 1px solid #a7f3d0;
+  background-color: #f0fdf4;
+  color: #16a34a;
 }
 
 .footer-link {
   text-align: center;
-  margin-top: 1.5rem;
-  padding-top: 1.5rem;
-  border-top: 1px solid #e5e7eb;
+  margin-top: 1rem;
+}
+
+.footer-link p {
+  color: #6b7280;
+  margin: 0;
+  font-size: 0.9rem;
 }
 
 .footer-link a {
@@ -360,17 +362,70 @@ input:disabled {
   font-weight: 500;
 }
 
-.footer-link a:hover {
-  text-decoration: underline;
+.identity-selector {
+  display: flex;
+  gap: 0.8rem;
+  margin-top: 0.3rem;
+}
+
+.identity-option {
+  flex: 1;
+  cursor: pointer;
+}
+
+.identity-option input[type="radio"] {
+  display: none;
+}
+
+.identity-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem 0.8rem;
+  border: 2px solid #e5e7eb;
+  border-radius: 10px;
+  transition: all 0.2s ease;
+  background-color: #f9fafb;
+}
+
+.identity-card .icon {
+  font-size: 1.6rem;
+  margin-bottom: 0.3rem;
+}
+
+.identity-card .label {
+  font-weight: 500;
+  color: #374151;
+  font-size: 0.9rem;
+}
+
+:deep(.identity-option.active .identity-card) {
+  border-color: #3b82f6;
+  background-color: #eff6ff;
+}
+
+:deep(.identity-option.active .identity-card .label) {
+  color: #3b82f6;
+}
+
+.identity-option:hover:not(.active) .identity-card {
+  border-color: #d1d5db;
+  background-color: #f3f4f6;
 }
 
 @media (max-width: 480px) {
-  .auth-page {
-    padding: 0.5rem;
+  .identity-selector {
+    flex-direction: column;
   }
-
-  .card {
-    padding: 1.5rem;
+  .identity-card {
+    padding: 0.8rem;
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 0.7rem;
+  }
+  .identity-card .icon {
+    font-size: 1.4rem;
   }
 }
 </style>
