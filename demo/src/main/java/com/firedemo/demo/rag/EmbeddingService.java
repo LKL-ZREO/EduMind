@@ -1,142 +1,110 @@
 package com.firedemo.demo.rag;
 
-import ai.djl.MalformedModelException;
-import ai.djl.Model;
-import ai.djl.huggingface.tokenizers.HuggingFaceTokenizer;
-import ai.djl.inference.Predictor;
-import ai.djl.ndarray.NDArray;
-import ai.djl.ndarray.NDList;
-import ai.djl.ndarray.NDManager;
-import ai.djl.ndarray.types.DataType;
-import ai.djl.repository.zoo.Criteria;
-import ai.djl.repository.zoo.ModelNotFoundException;
-import ai.djl.repository.zoo.ZooModel;
-import ai.djl.training.util.ProgressBar;
-import ai.djl.translate.Batchifier;
-import ai.djl.translate.Translator;
-import ai.djl.translate.TranslatorContext;
-import jakarta.annotation.PostConstruct;
-import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-import java.io.IOException;
-import java.nio.file.Paths;
-import java.util.List;
+import java.util.*;
 
 /**
- * 嵌入向量服务
- * 使用本地轻量级模型生成文本嵌入
+ * 简化版嵌入服务 - 使用关键词匹配代替深度学习模型
+ * 避免 HuggingFace 下载问题，适合国内网络环境
  */
 @Slf4j
 @Service
 public class EmbeddingService {
 
-    // 使用轻量级中文模型
-    private static final String MODEL_NAME = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2";
-    private static final int MAX_LENGTH = 512;
-    
-    private ZooModel<String, float[]> model;
-    private Predictor<String, float[]> predictor;
-
-    @PostConstruct
-    public void init() throws ModelNotFoundException, MalformedModelException, IOException {
-        log.info("Loading embedding model: {}", MODEL_NAME);
-        
-        Criteria<String, float[]> criteria = Criteria.builder()
-            .setTypes(String.class, float[].class)
-            .optModelUrls("djl://ai.djl.huggingface.pytorch/" + MODEL_NAME)
-            .optTranslator(new EmbeddingTranslator())
-            .optEngine("PyTorch")
-            .optProgress(new ProgressBar())
-            .build();
-        
-        model = criteria.loadModel();
-        predictor = model.newPredictor();
-        
-        log.info("Embedding model loaded successfully");
-    }
-
-    @PreDestroy
-    public void destroy() {
-        if (predictor != null) {
-            predictor.close();
-        }
-        if (model != null) {
-            model.close();
-        }
-    }
+    // 停用词
+    private static final Set<String> STOP_WORDS = Set.of(
+        "的", "了", "在", "是", "我", "有", "和", "就", "不", "人",
+        "都", "一", "一个", "上", "也", "很", "到", "说", "要", "去",
+        "你", "会", "着", "没有", "看", "好", "自己", "这", "那", "之"
+    );
 
     /**
-     * 单文本嵌入
+     * 简化版嵌入 - 基于词频的稀疏向量
+     * 把文本转成词频向量，用于余弦相似度计算
      */
     public float[] embed(String text) {
         try {
-            return predictor.predict(text);
+            // 提取关键词
+            Map<String, Integer> wordFreq = extractKeywords(text);
+            
+            // 构建固定维度的向量（用哈希映射到固定位置）
+            float[] vector = new float[384]; // 保持和原来一样的维度
+            
+            for (Map.Entry<String, Integer> entry : wordFreq.entrySet()) {
+                // 用词的哈希值决定位置
+                int idx = Math.abs(entry.getKey().hashCode()) % 384;
+                vector[idx] += entry.getValue();
+            }
+            
+            // L2 归一化
+            return normalize(vector);
+            
         } catch (Exception e) {
             log.error("Failed to embed text", e);
-            throw new RuntimeException("Embedding failed", e);
+            // 返回零向量作为降级
+            return new float[384];
         }
     }
 
     /**
-     * 批量嵌入（更高效）
+     * 批量嵌入
      */
     public List<float[]> embedBatch(List<String> texts) {
-        try {
-            return predictor.batchPredict(texts);
-        } catch (Exception e) {
-            log.error("Failed to batch embed texts", e);
-            throw new RuntimeException("Batch embedding failed", e);
+        List<float[]> results = new ArrayList<>();
+        for (String text : texts) {
+            results.add(embed(text));
         }
+        return results;
     }
 
     /**
-     * 自定义Translator用于生成嵌入向量
+     * 提取关键词
      */
-    private static class EmbeddingTranslator implements Translator<String, float[]> {
+    private Map<String, Integer> extractKeywords(String text) {
+        Map<String, Integer> freq = new HashMap<>();
         
-        private HuggingFaceTokenizer tokenizer;
-
-        @Override
-        public void prepare(TranslatorContext ctx) throws Exception {
-            tokenizer = HuggingFaceTokenizer.builder()
-                .optTokenizerName(MODEL_NAME)
-                .optMaxLength(MAX_LENGTH)
-                .optPadToMaxLength()
-                .optTruncation(true)
-                .build();
+        // 分词：按非中文字符分割
+        String[] tokens = text.toLowerCase()
+            .replaceAll("[^\\u4e00-\\u9fa5a-z0-9]", " ")
+            .split("\\s+");
+        
+        for (String token : tokens) {
+            if (token.length() < 2 || STOP_WORDS.contains(token)) {
+                continue;
+            }
+            freq.merge(token, 1, Integer::sum);
         }
-
-        @Override
-        public NDList processInput(TranslatorContext ctx, String input) throws Exception {
-            NDManager manager = ctx.getNDManager();
-            
-            // Tokenize - DJL 0.28.0 API
-            ai.djl.huggingface.tokenizers.Encoding encoding = tokenizer.encode(input);
-            long[] inputIds = encoding.getIds();
-            
-            NDArray inputIdsArray = manager.create(inputIds).expandDims(0);
-            
-            return new NDList(inputIdsArray);
+        
+        // 提取 2-gram
+        String cleanText = text.replaceAll("[^\\u4e00-\\u9fa5]", "");
+        for (int i = 0; i < cleanText.length() - 1; i++) {
+            String bigram = cleanText.substring(i, i + 2);
+            freq.merge(bigram, 1, Integer::sum);
         }
+        
+        return freq;
+    }
 
-        @Override
-        public float[] processOutput(TranslatorContext ctx, NDList list) throws Exception {
-            NDArray embeddings = list.singletonOrThrow();
-            
-            // 平均池化（mean pooling）
-            embeddings = embeddings.mean(new int[]{1});
-            
-            // L2归一化
-            embeddings = embeddings.normalize(2, 1);
-            
-            return embeddings.toFloatArray();
+    /**
+     * L2 归一化
+     */
+    private float[] normalize(float[] vector) {
+        double norm = 0;
+        for (float v : vector) {
+            norm += v * v;
         }
-
-        @Override
-        public Batchifier getBatchifier() {
-            return Batchifier.STACK;
+        norm = Math.sqrt(norm);
+        
+        if (norm < 1e-10) {
+            return vector; // 避免除零
         }
+        
+        float[] normalized = new float[vector.length];
+        for (int i = 0; i < vector.length; i++) {
+            normalized[i] = (float) (vector[i] / norm);
+        }
+        return normalized;
     }
 }

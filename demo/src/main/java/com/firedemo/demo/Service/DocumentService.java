@@ -56,4 +56,20 @@ public interface DocumentService {
      * @return 是否成功
      */
     boolean updateStatus(String docId, Integer status, Integer chunkCount);
+
+    /**
+     * 处理文档：读取内容、切割、生成向量并存储
+     *
+     * @param docId 文档ID
+     */
+    void processDocument(String docId);
+
+    /**
+     * 根据查询检索相关文档内容（全库共享）
+     *
+     * @param query  查询文本
+     * @param topK   返回条数
+     * @return 相关文档内容列表
+     */
+    List<String> searchRelevantContent(String query, int topK);
 }

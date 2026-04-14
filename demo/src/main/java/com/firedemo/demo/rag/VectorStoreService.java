@@ -33,7 +33,6 @@ public class VectorStoreService {
      */
     public void saveChunks(String documentId, List<DocumentChunk> chunks) {
         for (DocumentChunk chunk : chunks) {
-            chunk.setId(UUID.randomUUID().toString());
             chunk.setDocumentId(documentId);
             documentChunkMapper.insert(toEntity(chunk));
         }

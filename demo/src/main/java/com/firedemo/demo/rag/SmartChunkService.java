@@ -349,6 +349,7 @@ public class SmartChunkService {
      */
     private DocumentChunk createChunk(String content, int sectionIndex, int subIndex, int totalSections) {
         DocumentChunk chunk = new DocumentChunk();
+        chunk.setId(java.util.UUID.randomUUID().toString());
         chunk.setContent(content);
         chunk.setSectionIndex(sectionIndex);
         chunk.setSubIndex(subIndex);

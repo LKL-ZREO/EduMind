@@ -8,6 +8,7 @@ import com.firedemo.demo.DTO.GradeRequest;
 import com.firedemo.demo.Entity.ChatHistory;
 import com.firedemo.demo.Entity.HomeworkEvaluation;
 import com.firedemo.demo.Service.ChatHistoryService;
+import com.firedemo.demo.Service.DocumentService;
 import com.firedemo.demo.Service.FileStorageService;
 import com.firedemo.demo.Service.OpenClawService;
 
@@ -41,9 +42,15 @@ public class ChatController {
     private final OpenClawService openClawService;
     private final FileStorageService fileStorageService;
     private final ChatHistoryService chatHistoryService;
+    private final DocumentService documentService;
     private final HomeworkEvaluationMapper evaluationMapper;
     private final JwtUtil jwtUtil;
     private final ObjectMapper objectMapper;
+
+    // RAG 开关：是否启用文档检索
+    private static final boolean RAG_ENABLED = true;
+    // 检索文档条数
+    private static final int RAG_TOP_K = 3;
 
     private static final String TOKEN_PREFIX = "Bearer ";
 
@@ -137,7 +144,11 @@ public class ChatController {
 
         // 获取用户 status 并调用 OpenClaw
         Integer status = getCurrentUserStatus(httpRequest);
-        String response = openClawService.chat(request.getMessage(), sessionId, String.valueOf(status));
+
+        // RAG：检索相关文档内容
+        String messageWithContext = enhanceMessageWithRag(request.getMessage());
+
+        String response = openClawService.chat(messageWithContext, sessionId, String.valueOf(status));
 
         // 保存 AI 回复
         saveChatHistory(userId, sessionId, "assistant", response, "OpenClaw");
@@ -172,17 +183,20 @@ public class ChatController {
             sessionId = UUID.randomUUID().toString();
         }
 
-        // 保存用户消息
+        // RAG增强
+        String enhancedMessage = enhanceMessageWithRag(message);
+
+        // 保存用户消息（保存原始消息）
         saveChatHistory(userId, sessionId, "user", message, null);
 
         // 流式响应
         String finalSessionId = sessionId;
         StreamingResponseBody responseBody = outputStream -> {
             StringBuilder responseBuilder = new StringBuilder();
-            
+
             try {
                 Integer status = getCurrentUserStatus(httpRequest);
-                openClawService.streamChat(message, finalSessionId, String.valueOf(status))
+                openClawService.streamChat(enhancedMessage, finalSessionId, String.valueOf(status))
                         .doOnNext(chunk -> {
                             log.debug("发送SSE chunk: {}", chunk);
                             try {
@@ -442,6 +456,41 @@ public class ChatController {
         } catch (Exception e) {
             log.warn("保存对话记录失败", e);
             // 不影响主流程
+        }
+    }
+
+    /**
+     * RAG增强：检索相关文档内容并组装到消息中（全库共享）
+     */
+    private String enhanceMessageWithRag(String message) {
+        if (!RAG_ENABLED) {
+            return message;
+        }
+
+        try {
+            // 检索相关文档内容（全库共享）
+            List<String> relevantContents = documentService.searchRelevantContent(message, RAG_TOP_K);
+
+            if (relevantContents.isEmpty()) {
+                return message;
+            }
+
+            // 组装上下文
+            String context = String.join("\n\n---\n\n", relevantContents);
+
+            // 构建增强后的消息
+            return String.format("""
+                基于以下参考文档内容回答问题。如果文档中没有相关信息，请基于你的知识回答。
+
+                参考文档内容：
+                %s
+
+                用户问题：%s
+                """, context, message);
+
+        } catch (Exception e) {
+            log.warn("RAG enhancement failed, using original message", e);
+            return message;
         }
     }
 
