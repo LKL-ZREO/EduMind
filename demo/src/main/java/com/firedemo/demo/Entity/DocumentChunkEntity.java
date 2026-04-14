@@ -58,9 +58,14 @@ public class DocumentChunkEntity {
     private Integer charCount;
     
     /**
-     * 嵌入向量（逗号分隔的字符串）
+     * 嵌入向量（逗号分隔的字符串，兼容旧数据）
      */
     private String embedding;
+    
+    /**
+     * 向量字段（pgvector，用于高效检索）
+     */
+    private float[] embeddingVec;
     
     /**
      * 前一块摘要 (对应 prev_summary 字段)
