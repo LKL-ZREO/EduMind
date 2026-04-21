@@ -75,13 +75,22 @@ public class OpenClawServiceImpl implements OpenClawService {
     }
 
     @Override
-    public String chat(String message,String status) {
-        return chat(message, null);
+    public String chat(String message, String status) {
+        return chat(message, null, status);
     }
 
     @Override
-    public String chat(String message, String sessionId,String status) {
-        return chat(message, sessionId,status);
+    public String chat(String message, String sessionId, String status) {
+        // 根据status解析agentId
+        Integer statusCode = null;
+        if (status != null) {
+            try {
+                statusCode = Integer.parseInt(status);
+            } catch (NumberFormatException e) {
+                // 忽略解析错误
+            }
+        }
+        return chat(message, sessionId, statusCode);
     }
 
     public String chat(String message, String sessionId, Integer status) {

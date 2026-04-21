@@ -19,6 +19,7 @@ public class User {
     private String password;
     private String phone;
     private String email;
+    private Long classId;
 
     private LocalDateTime createTime;
     private LocalDateTime updateTime;

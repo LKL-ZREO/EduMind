@@ -88,4 +88,13 @@ public class JwtUtil {
         }
         return null;
     }
+
+    // 从 request 获取用户ID
+    public Long getUserIdFromRequest(HttpServletRequest request) {
+        String token = extractTokenFromRequest(request);
+        if (token != null && validateToken(token)) {
+            return getUserIdFromToken(token);
+        }
+        return null;
+    }
 }
