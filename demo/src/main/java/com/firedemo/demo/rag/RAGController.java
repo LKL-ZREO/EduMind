@@ -260,4 +260,23 @@ public class RAGController {
         private String sessionId;
         private Integer topK;
     }
+    
+    /**
+     * 检查今天是否已上传过该班级的数据
+     */
+    @GetMapping("/check-uploaded")
+    public Map<String, Object> checkUploaded(@RequestParam("classId") Long classId) {
+        String docIdPrefix = "dashboard_" + classId;
+        boolean exists = vectorStoreService.existsToday(docIdPrefix);
+        
+        Map<String, Object> result = new HashMap<>();
+        result.put("classId", classId);
+        result.put("uploadedToday", exists);
+        
+        if (exists) {
+            result.put("message", "今天已上传过该班级数据，请先删除旧数据再重新上传");
+        }
+        
+        return result;
+    }
 }

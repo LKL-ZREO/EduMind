@@ -175,6 +175,23 @@ public class VectorStoreService {
     }
 
     /**
+     * 检查今天是否已存在该前缀的文档
+     */
+    public boolean existsToday(String docIdPrefix) {
+        String today = java.time.LocalDate.now().toString();
+        String pattern = docIdPrefix + "_" + today + "%";
+        
+        String sql = "SELECT COUNT(*) FROM document_chunk WHERE doc_id LIKE ? LIMIT 1";
+        try {
+            Integer count = jdbcTemplate.queryForObject(sql, Integer.class, pattern);
+            return count != null && count > 0;
+        } catch (Exception e) {
+            log.warn("Failed to check exists today, assuming not exists", e);
+            return false;
+        }
+    }
+
+    /**
      * 将 float[] 转成 pgvector 字符串格式 [1.0,2.0,3.0,...]
      */
     private String vectorToString(float[] vector) {

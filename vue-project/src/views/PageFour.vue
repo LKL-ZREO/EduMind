@@ -16,6 +16,16 @@
           <span v-if="!loading">🔄 刷新</span>
           <span v-else>加载中...</span>
         </button>
+        <button
+          class="upload-rag-btn"
+          @click="uploadToRag"
+          :disabled="!selectedClass || uploadingToRag || ragUploadedToday"
+          :class="{ 'uploaded': ragUploadedToday }"
+        >
+          <span v-if="uploadingToRag">⏳ 上传中...</span>
+          <span v-else-if="ragUploadedToday">✅ 今日已上传</span>
+          <span v-else>🚀 上传到知识库</span>
+        </button>
       </div>
     </header>
 
@@ -282,6 +292,8 @@ export default {
       planType: 'review',
       selectedGoals: [],
       generatedPlan: '',
+      uploadingToRag: false,
+      ragUploadedToday: false,
       apiBaseUrl: 'http://localhost:8080/api',
 
       // 班级列表
@@ -335,6 +347,7 @@ export default {
     selectedClass(newVal) {
       if (newVal && newVal !== 'null') {
         this.loadAllData()
+        this.checkRagUploaded()
       }
     }
   },
@@ -523,6 +536,82 @@ export default {
       this.$message?.success('数据已刷新')
     },
 
+    // 检查今天是否已上传RAG
+    async checkRagUploaded() {
+      if (!this.selectedClass) return
+
+      try {
+        const response = await fetch(
+          `${this.apiBaseUrl}/dashboard/check-rag-uploaded?classId=${this.selectedClass}`,
+          { headers: { 'Authorization': `Bearer ${this.getToken()}` } }
+        )
+
+        if (response.ok) {
+          const result = await response.json()
+          if (result.code === 200) {
+            this.ragUploadedToday = result.data.uploadedToday
+          }
+        }
+      } catch (error) {
+        console.error('检查RAG上传状态失败:', error)
+      }
+    },
+
+    // 上传数据到RAG知识库
+    async uploadToRag() {
+      if (!this.selectedClass) {
+        this.$message?.error('请先选择班级')
+        return
+      }
+
+      if (this.ragUploadedToday) {
+        this.$message?.warning('今天已上传过该班级数据')
+        return
+      }
+
+      this.uploadingToRag = true
+
+      try {
+        // 收集当前页面所有数据
+        const data = {
+          classId: this.selectedClass,
+          className: this.classList.find(c => c.id === this.selectedClass)?.name,
+          metrics: this.metrics,
+          scoreDistribution: this.scoreDistribution,
+          knowledgeMastery: this.knowledgeMastery,
+          frequentErrors: this.frequentErrors,
+          students: this.students,
+          exportTime: new Date().toISOString()
+        }
+
+        const response = await fetch(`${this.apiBaseUrl}/dashboard/upload-to-rag`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${this.getToken()}`
+          },
+          body: JSON.stringify(data)
+        })
+
+        const result = await response.json()
+
+        if (response.ok && result.code === 200) {
+          this.ragUploadedToday = true
+          this.$message?.success(`上传成功！共 ${result.data.chunkCount} 个文档块`)
+        } else if (response.status === 409) {
+          this.ragUploadedToday = true
+          this.$message?.warning(result.message || '今天已上传过该班级数据')
+        } else {
+          throw new Error(result.message || '上传失败')
+        }
+      } catch (error) {
+        console.error('上传到RAG失败:', error)
+        this.$message?.error('上传到知识库失败: ' + error.message)
+      } finally {
+        this.uploadingToRag = false
+      }
+    },
+
     // 获取热力图颜色
     getHeatmapColor(mastery) {
       if (mastery >= 80) return '#52c41a'
@@ -680,6 +769,30 @@ export default {
 .refresh-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.upload-rag-btn {
+  padding: 0.5rem 1rem;
+  background: #52c41a;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: all 0.2s;
+}
+
+.upload-rag-btn:hover:not(:disabled) {
+  background: #45a049;
+}
+
+.upload-rag-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.upload-rag-btn.uploaded {
+  background: #1890ff;
 }
 
 /* 指标卡片 */

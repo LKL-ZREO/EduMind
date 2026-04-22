@@ -118,4 +118,49 @@ public class DashboardController {
         List<ClassInfoDTO> classes = dashboardService.getClassList(userId);
         return Result.success(classes);
     }
+    
+    private final com.firedemo.demo.Service.DashboardRagService dashboardRagService;
+    
+    /**
+     * 上传仪表盘数据到RAG知识库
+     */
+    @PostMapping("/upload-to-rag")
+    public Result uploadToRag(@RequestBody DashboardUploadDTO data, HttpServletRequest request) {
+        Long userId = jwtUtil.getUserIdFromRequest(request);
+        if (userId == null) {
+            return Result.error(401, "未登录");
+        }
+        
+        // 检查今天是否已上传
+        String docIdPrefix = "dashboard_" + data.getClassId();
+        if (vectorStoreService.existsToday(docIdPrefix)) {
+            return Result.error(409, "今天已上传过该班级数据，请先删除旧数据再重新上传");
+        }
+        
+        // 执行上传
+        java.util.Map<String, Object> result = dashboardRagService.uploadDashboard(data);
+        return Result.success(result);
+    }
+    
+    private final com.firedemo.demo.rag.VectorStoreService vectorStoreService;
+    
+    /**
+     * 检查今天是否已上传
+     */
+    @GetMapping("/check-rag-uploaded")
+    public Result checkRagUploaded(@RequestParam Long classId, HttpServletRequest request) {
+        Long userId = jwtUtil.getUserIdFromRequest(request);
+        if (userId == null) {
+            return Result.error(401, "未登录");
+        }
+        
+        String docIdPrefix = "dashboard_" + classId;
+        boolean exists = vectorStoreService.existsToday(docIdPrefix);
+        
+        java.util.Map<String, Object> result = new java.util.HashMap<>();
+        result.put("classId", classId);
+        result.put("uploadedToday", exists);
+        
+        return Result.success(result);
+    }
 }
