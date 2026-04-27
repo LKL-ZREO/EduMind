@@ -167,17 +167,49 @@ public class DocumentServiceImpl implements DocumentService {
         }
     }
 
+    // 相似度阈值，低于此值的结果将被过滤
+    private static final double SIMILARITY_THRESHOLD = 0.75;
+
     @Override
     public List<String> searchRelevantContent(String query, int topK) {
         // 1. 生成查询向量
         float[] queryEmbedding = embeddingService.embed(query);
 
-        // 2. 从向量存储中搜索（全库共享）
-        List<DocumentChunk> results = vectorStoreService.similaritySearch(queryEmbedding, topK);
+        // 2. 从向量存储中搜索（多查一些用于过滤）
+        List<DocumentChunk> results = vectorStoreService.similaritySearch(queryEmbedding, topK * 2);
 
-        // 3. 返回内容列表
+        // 3. 计算相似度并过滤低相似度结果
         return results.stream()
-                .map(DocumentChunk::getContent)
+                .map(chunk -> new ScoredChunk(chunk, cosineSimilarity(queryEmbedding, chunk.getEmbedding())))
+                .filter(sc -> sc.score >= SIMILARITY_THRESHOLD)
+                .sorted((a, b) -> Double.compare(b.score, a.score))
+                .limit(topK)
+                .map(sc -> sc.chunk.getContent())
                 .toList();
     }
+
+    /**
+     * 计算余弦相似度
+     */
+    private double cosineSimilarity(float[] a, float[] b) {
+        if (a.length != b.length) return 0;
+
+        double dot = 0;
+        double normA = 0;
+        double normB = 0;
+
+        for (int i = 0; i < a.length; i++) {
+            dot += a[i] * b[i];
+            normA += a[i] * a[i];
+            normB += b[i] * b[i];
+        }
+
+        if (normA == 0 || normB == 0) return 0;
+        return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+    }
+
+    /**
+     * 带分数的文档块
+     */
+    private record ScoredChunk(DocumentChunk chunk, double score) {}
 }
