@@ -1,7 +1,6 @@
 package com.firedemo.demo.Controller;
 
 
-import com.firedemo.demo.DTO.ChatRequest;
 import com.firedemo.demo.DTO.ChatResponse;
 import com.firedemo.demo.DTO.EvaluationResultDTO;
 import com.firedemo.demo.DTO.GradeRequest;
@@ -28,6 +27,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
@@ -91,20 +91,6 @@ public class ChatController {
     }
 
     /**
-     * 获取当前用户的会话列表
-     */
-    @GetMapping("/sessions")
-    public ResponseEntity<List<String>> getSessions(HttpServletRequest httpRequest) {
-        Long userId = getCurrentUserId(httpRequest);
-        if (userId == null) {
-            return ResponseEntity.status(401).build();
-        }
-
-        List<String> sessions = chatHistoryService.getUserSessions(userId);
-        return ResponseEntity.ok(sessions);
-    }
-
-    /**
      * 清空当前用户的所有对话历史，并生成新的 sessionId
      */
     @PostMapping("/clear")
@@ -126,47 +112,6 @@ public class ChatController {
                 "message", "对话历史已清空",
                 "sessionId", newSessionId
         ));
-    }
-
-    /**
-     * 普通聊天（非流式）
-     */
-    @PostMapping("/send")
-    public ResponseEntity<ChatResponse> sendMessage(@RequestBody ChatRequest request,
-                                                    HttpServletRequest httpRequest) {
-        log.debug("收到消息: {}, sessionId: {}", request.getMessage(), request.getSessionId());
-
-        // 获取当前用户ID
-        Long userId = getCurrentUserId(httpRequest);
-
-        // 生成 sessionId（如果没有）
-        String sessionId = request.getSessionId();
-        if (sessionId == null || sessionId.isEmpty()) {
-            sessionId = UUID.randomUUID().toString();
-        }
-
-        // 保存用户消息
-        saveChatHistory(userId, sessionId, "user", request.getMessage(), null);
-
-        // 获取用户 status 并调用 OpenClaw
-        Integer status = getCurrentUserStatus(httpRequest);
-
-        // RAG：检索相关文档内容
-        String messageWithContext = enhanceMessageWithRag(request.getMessage());
-
-        String response = openClawService.chat(messageWithContext, sessionId, String.valueOf(status));
-
-        // 保存 AI 回复
-        saveChatHistory(userId, sessionId, "assistant", response, "OpenClaw");
-
-        return ResponseEntity.ok(ChatResponse.builder()
-                .content(response)
-                .role("assistant")
-                .timestamp(Instant.now().toEpochMilli())
-                .model("OpenClaw")
-                .sessionId(sessionId)
-                .done(true)
-                .build());
     }
 
     /**
@@ -403,35 +348,6 @@ public class ChatController {
             }
         }
         return sb.toString();
-    }
-
-    /**
-     * 作业批改（通过文件路径，流式）
-     *
-     * @param request 批改请求
-     * @return SSE流式响应
-     */
-    @PostMapping(value = "/grade/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter gradeHomeworkStream(@Valid @RequestBody GradeRequest request) {
-        log.debug("收到流式作业批改请求: {}, 文件: {}", request.getRequirement(), request.getFilePath());
-
-        // 1. 读取文件内容
-        String fileContent = fileStorageService.readFileContent(request.getFilePath());
-
-        // 2. 构造批改消息
-        String message = String.format("""
-            请批改以下作业：
-
-            要求：%s
-
-            文件内容：
-            %s
-
-            请使用批改作业助手的标准格式输出结果。
-            """, request.getRequirement(), fileContent);
-
-        // 3. 流式调用（传入sessionId保持会话）
-        return openClawService.streamChatWithSse(message, request.getSessionId());
     }
 
     // ============ 私有方法 ============

@@ -1,10 +1,10 @@
 package com.firedemo.demo.Service.ServiceImpl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.firedemo.demo.Bean.OpenClawProperties;
 import com.firedemo.demo.DTO.OpenResponsesResponse;
-import com.firedemo.demo.DTO.StreamChunk;
+
 import com.firedemo.demo.Service.OpenClawService;
+import com.firedemo.demo.config.properties.OpenClawProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.publisher.Flux;
+
 
 import java.io.IOException;
 import java.util.List;
@@ -186,12 +187,7 @@ public class OpenClawServiceImpl implements OpenClawService {
                 .subscribe(
                         content -> {
                             try {
-                                StreamChunk chunk = StreamChunk.builder()
-                                        .content(content)
-                                        .done(false)
-                                        .build();
-                                emitter.send(SseEmitter.event()
-                                        .data(objectMapper.writeValueAsString(chunk)));
+                                emitter.send(SseEmitter.event().data(content));
                             } catch (IOException e) {
                                 log.error("发送 SSE 失败", e);
                                 emitter.completeWithError(e);

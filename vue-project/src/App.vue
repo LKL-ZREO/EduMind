@@ -1,26 +1,30 @@
 <script setup lang="ts">
-import { RouterLink, RouterView, useRouter } from 'vue-router'
-import {computed, watch } from 'vue'
+import { RouterLink, RouterView, useRouter, useRoute } from 'vue-router'
+import { computed, watch } from 'vue'
 
 const router = useRouter()
+const route = useRoute()
 
-// 🔴 直接用 localStorage 判断登录状态
-const isLoggedIn = computed(() => {
-  return !!localStorage.getItem('token')
-})
+// 登录状态
+const isLoggedIn = computed(() => !!localStorage.getItem('token'))
 
-// 获取用户名（从 localStorage）
+// 用户名
 const username = computed(() => {
   const userStr = localStorage.getItem('user')
   if (userStr) {
     try {
       const user = JSON.parse(userStr)
-      return user.username || '用户'
+      return user.username || '教师'
     } catch {
-      return '用户'
+      return '教师'
     }
   }
-  return '用户'
+  return '教师'
+})
+
+// 是否是老师端（显示导航栏）
+const showNav = computed(() => {
+  return route.path.startsWith('/teacher') || route.path === '/about'
 })
 
 // 登出
@@ -30,10 +34,10 @@ function logout() {
   router.push('/login')
 }
 
-// 未登录时强制跳转（排除登录和注册页）
+// 未登录时访问教师端 → 跳登录
 watch(isLoggedIn, (loggedIn) => {
-  const currentPath = router.currentRoute.value.path
-  if (!loggedIn && currentPath !== '/login' && currentPath !== '/register') {
+  const path = router.currentRoute.value.path
+  if (!loggedIn && path.startsWith('/teacher')) {
     router.push('/login')
   }
 }, { immediate: true })
@@ -41,11 +45,12 @@ watch(isLoggedIn, (loggedIn) => {
 
 <template>
   <div class="app-container">
-    <template v-if="isLoggedIn">
+    <!-- 学生端首页 / 登录注册页 → 不显示导航栏 -->
+    <template v-if="showNav">
       <header class="app-header">
         <div class="wrapper">
           <div class="brand">
-            <h2>个人博客系统</h2>
+            <h2>作业批改系统 · 后台</h2>
           </div>
           <div class="header-actions">
             <span class="user">{{ username }}</span>
@@ -57,29 +62,17 @@ watch(isLoggedIn, (loggedIn) => {
       <div class="app-layout">
         <aside class="sidebar">
           <nav>
-            <RouterLink to="/page1" class="nav-item">
-              <span class="icon">🏠</span>
-              首页
-            </RouterLink>
-            <RouterLink to="/page2" class="nav-item">
+            <RouterLink to="/teacher/chat" class="nav-item">
               <span class="icon">🎲</span>
               AI对话
             </RouterLink>
-            <RouterLink to="/page3" class="nav-item">
+            <RouterLink to="/teacher/docs" class="nav-item">
               <span class="icon">📝</span>
-              动态与评论区
+              知识库管理
             </RouterLink>
-            <RouterLink to="/page4" class="nav-item">
+            <RouterLink to="/teacher/data" class="nav-item">
               <span class="icon">🎒</span>
-              个人中心
-            </RouterLink>
-            <RouterLink to="/page4" class="nav-item">
-              <span class="icon">🛠️</span>
-              小工具
-            </RouterLink>
-            <RouterLink to="/page4" class="nav-item">
-              <span class="icon">🎮</span>
-              休闲小游戏
+              数据中心
             </RouterLink>
           </nav>
         </aside>
@@ -90,9 +83,9 @@ watch(isLoggedIn, (loggedIn) => {
       </div>
     </template>
 
-    <!-- 未登录时只显示登录/注册页 -->
+    <!-- 学生端 / 登录页 / 注册页 → 没有导航栏 -->
     <template v-else>
-      <main class="login-only">
+      <main class="full-page">
         <RouterView />
       </main>
     </template>
@@ -115,17 +108,18 @@ watch(isLoggedIn, (loggedIn) => {
   font-family: "Microsoft Yahei", sans-serif;
 }
 
-/* 未登录时的全屏居中布局 */
-.login-only {
+/* 学生端/登录注册页全屏 */
+.full-page {
   flex: 1;
   display: flex;
   justify-content: center;
   align-items: center;
   min-height: 100vh;
-  background-color: #1a1a1a;
+  background-color: #f5f7ff;
+  color: #333;
 }
 
-/* 顶部导航 */
+/* 顶部导航（老师端） */
 .app-header {
   background-color: #2a2a2a;
   border-bottom: 1px solid #444;
@@ -171,7 +165,7 @@ watch(isLoggedIn, (loggedIn) => {
   background-color: #333;
 }
 
-/* 主体布局 */
+/* 主布局（老师端） */
 .app-layout {
   display: flex;
   flex: 1;
@@ -229,7 +223,7 @@ watch(isLoggedIn, (loggedIn) => {
   background-color: #1a1a1a;
 }
 
-/* 移动端适配 */
+/* 移动端 */
 @media (max-width: 768px) {
   .app-layout {
     flex-direction: column;

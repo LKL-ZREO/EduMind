@@ -1,4 +1,4 @@
-package com.firedemo.demo.Bean;
+package com.firedemo.demo.config;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -9,6 +9,9 @@ import reactor.netty.http.client.HttpClient;
 
 import java.time.Duration;
 
+/**
+ * 应用配置
+ */
 @Configuration
 public class AppConfig {
 
