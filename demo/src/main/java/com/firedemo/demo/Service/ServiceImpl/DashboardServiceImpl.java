@@ -10,6 +10,7 @@ import com.firedemo.demo.Service.DashboardService;
 import com.firedemo.demo.mapper.ClassInfoMapper;
 import com.firedemo.demo.mapper.HomeworkEvaluationMapper;
 import com.firedemo.demo.mapper.HomeworkKnowledgeMapper;
+import com.firedemo.demo.mapper.SubmissionMapper;
 import com.firedemo.demo.mapper.UserMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -18,6 +19,8 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
+
+import com.firedemo.demo.Entity.Submission;
 
 /**
  * 仪表盘数据服务实现
@@ -31,38 +34,49 @@ public class DashboardServiceImpl implements DashboardService {
     private final UserMapper userMapper;
     private final ClassInfoMapper classInfoMapper;
     private final HomeworkKnowledgeMapper homeworkKnowledgeMapper;
+    private final SubmissionMapper submissionMapper;
     private final ObjectMapper objectMapper;
 
     @Override
     public DashboardMetricsDTO getMetrics(Long classId) {
         DashboardMetricsDTO metrics = new DashboardMetricsDTO();
         
-        // 学生总数
-        Integer studentCount = userMapper.countStudentsByClassId(classId);
+        // 学生总数 = submission 表独立提交者（sys_user 为教师用户，不统计学生）
+        Integer studentCount = submissionMapper.countDistinctStudentsByClassId(classId);
         metrics.setTotalStudents(studentCount != null ? studentCount : 0);
-        metrics.setStudentTrend(5); // 模拟趋势
+        metrics.setStudentTrend(0); // 暂无趋势计算
         
-        // 作业统计
+        // 作业统计（老师端 + 学生端）
         Integer totalHomework = evaluationMapper.countByClassId(classId);
-        metrics.setTotalHomework(totalHomework != null ? totalHomework : 0);
+        Integer submissionCount = submissionMapper.countByClassId(classId);
+        metrics.setTotalHomework((totalHomework != null ? totalHomework : 0) + (submissionCount != null ? submissionCount : 0));
         
         LocalDateTime weekAgo = LocalDateTime.now().minusDays(7);
         Integer newHomework = evaluationMapper.countNewByClassId(classId, weekAgo);
-        metrics.setNewHomework(newHomework != null ? newHomework : 0);
+        Integer newSubmission = submissionMapper.countNewByClassId(classId, weekAgo);
+        metrics.setNewHomework((newHomework != null ? newHomework : 0) + (newSubmission != null ? newSubmission : 0));
         
         // 计算平均分和需关注学生
         List<HomeworkEvaluation> evaluations = evaluationMapper.selectByClassId(classId);
-        if (!evaluations.isEmpty()) {
-            double avgScore = evaluations.stream()
-                .mapToInt(e -> parseScoreFromRawResponse(e.getRawResponse()))
+        List<Integer> submissionScores = submissionMapper.selectScoresByClassId(classId);
+        // 合并老师端和学生端分数做统计
+        List<Integer> allScores = new ArrayList<>();
+        for (HomeworkEvaluation e : evaluations) {
+            int score = parseScoreFromRawResponse(e.getRawResponse());
+            if (score > 0) allScores.add(score);
+        }
+        allScores.addAll(submissionScores);
+        
+        if (!allScores.isEmpty()) {
+            double avgScore = allScores.stream()
+                .mapToInt(Integer::intValue)
                 .average()
                 .orElse(0.0);
             metrics.setAvgScore(Math.round(avgScore * 10) / 10.0);
             metrics.setScoreTrend(3.2); // 模拟趋势
             
-            // 需关注学生（平均分<60）
-            long warningCount = evaluations.stream()
-                .mapToInt(e -> parseScoreFromRawResponse(e.getRawResponse()))
+            // 低分学生数（分数<60）
+            long warningCount = allScores.stream()
                 .filter(score -> score < 60)
                 .count();
             metrics.setWarningStudents((int) warningCount);
@@ -78,6 +92,7 @@ public class DashboardServiceImpl implements DashboardService {
     @Override
     public List<ScoreDistributionDTO> getScoreDistribution(Long classId) {
         List<HomeworkEvaluation> evaluations = evaluationMapper.selectByClassId(classId);
+        List<Integer> submissionScores = submissionMapper.selectScoresByClassId(classId);
         
         // 分数段统计
         int[] ranges = new int[5]; // 90-100, 80-89, 70-79, 60-69, <60
@@ -92,8 +107,15 @@ public class DashboardServiceImpl implements DashboardService {
             else if (score >= 60) ranges[3]++;
             else ranges[4]++;
         }
+        for (Integer score : submissionScores) {
+            if (score >= 90) ranges[0]++;
+            else if (score >= 80) ranges[1]++;
+            else if (score >= 70) ranges[2]++;
+            else if (score >= 60) ranges[3]++;
+            else ranges[4]++;
+        }
         
-        int total = evaluations.size();
+        int total = evaluations.size() + submissionScores.size();
         List<ScoreDistributionDTO> result = new ArrayList<>();
         for (int i = 0; i < 5; i++) {
             ScoreDistributionDTO dto = new ScoreDistributionDTO();
@@ -109,65 +131,59 @@ public class DashboardServiceImpl implements DashboardService {
 
     @Override
     public List<KnowledgeMasteryDTO> getKnowledgeMastery(Long classId) {
-        // 从 homework_knowledge 表查询知识点掌握度统计
-        List<Map<String, Object>> stats = homeworkKnowledgeMapper.selectKnowledgeStatsByClassId(classId);
+        // 从 homework_knowledge 表查询知识点掌握度统计（老师端）
+        List<Map<String, Object>> teacherStats = homeworkKnowledgeMapper.selectKnowledgeStatsByClassId(classId);
+        // 从 homework_knowledge 表查询知识点掌握度统计（学生端 submission 关联）
+        List<Map<String, Object>> studentStats = submissionMapper.selectKnowledgeStatsByClassId(classId);
         
-        List<KnowledgeMasteryDTO> result = new ArrayList<>();
+        // 合并
+        Map<String, KnowledgeMasteryDTO> merged = new LinkedHashMap<>();
         
-        // 使用实际作业分析出的知识点数据
-        for (Map<String, Object> stat : stats) {
+        for (Map<String, Object> stat : teacherStats) {
+            String name = (String) stat.get("knowledge_point");
             KnowledgeMasteryDTO dto = new KnowledgeMasteryDTO();
-            dto.setName((String) stat.get("knowledge_point"));
+            dto.setName(name);
             Object avgMasteryObj = stat.get("avg_mastery");
-            int mastery = 0;
-            if (avgMasteryObj != null) {
-                if (avgMasteryObj instanceof Number) {
-                    mastery = ((Number) avgMasteryObj).intValue();
-                }
-            }
-            dto.setMastery(mastery);
-            result.add(dto);
+            dto.setMastery(avgMasteryObj instanceof Number ? ((Number) avgMasteryObj).intValue() : 0);
+            merged.put(name, dto);
         }
         
-        return result;
+        for (Map<String, Object> stat : studentStats) {
+            String name = (String) stat.get("knowledge_point");
+            if (merged.containsKey(name)) {
+                // 取平均值
+                KnowledgeMasteryDTO existing = merged.get(name);
+                Object avgMasteryObj = stat.get("avg_mastery");
+                int studentMastery = avgMasteryObj instanceof Number ? ((Number) avgMasteryObj).intValue() : 0;
+                existing.setMastery((existing.getMastery() + studentMastery) / 2);
+            } else {
+                KnowledgeMasteryDTO dto = new KnowledgeMasteryDTO();
+                dto.setName(name);
+                Object avgMasteryObj = stat.get("avg_mastery");
+                dto.setMastery(avgMasteryObj instanceof Number ? ((Number) avgMasteryObj).intValue() : 0);
+                merged.put(name, dto);
+            }
+        }
+        
+        return new ArrayList<>(merged.values());
     }
 
     @Override
     public List<FrequentErrorDTO> getFrequentErrors(Long classId) {
         List<HomeworkEvaluation> evaluations = evaluationMapper.selectByClassId(classId);
+        List<Submission> submissions = submissionMapper.selectByClassId(classId);
         
         // 从raw_response解析错误统计
         Map<String, Integer> errorCountMap = new HashMap<>();
         Map<String, String> errorDifficultyMap = new HashMap<>();
         
+        // 解析 homework_evaluation 的 rawResponse
         for (HomeworkEvaluation eval : evaluations) {
-            try {
-                String cleaned = cleanRawResponse(eval.getRawResponse());
-                if (cleaned == null) continue;
-                JsonNode json = objectMapper.readTree(cleaned);
-                JsonNode suggestions = json.get("suggestions");
-                if (suggestions != null && suggestions.isArray()) {
-                    for (JsonNode suggestion : suggestions) {
-                        String issue = suggestion.get("issue").asText();
-                        String priority = suggestion.get("priority").asText();
-                        errorCountMap.merge(issue, 1, Integer::sum);
-                        errorDifficultyMap.putIfAbsent(issue, priority);
-                    }
-                }
-                
-                JsonNode errors = json.get("errors");
-                if (errors != null && errors.isArray()) {
-                    for (JsonNode error : errors) {
-                        String issue = error.get("issue").asText();
-                        String severity = error.get("severity").asText();
-                        errorCountMap.merge(issue, 1, Integer::sum);
-                        errorDifficultyMap.putIfAbsent(issue, 
-                            "critical".equals(severity) ? "high" : "medium");
-                    }
-                }
-            } catch (Exception e) {
-                log.warn("解析raw_response失败: {}", e.getMessage());
-            }
+            parseRawResponseForErrors(eval.getRawResponse(), errorCountMap, errorDifficultyMap);
+        }
+        // 解析 submission 的 rawResponse
+        for (Submission sub : submissions) {
+            parseRawResponseForErrors(sub.getRawResponse(), errorCountMap, errorDifficultyMap);
         }
         
         // 排序取TOP10
@@ -202,23 +218,24 @@ public class DashboardServiceImpl implements DashboardService {
 
     @Override
     public List<StudentOverviewDTO> getStudentOverview(Long classId, String sortBy, String keyword) {
+        // 老师端学生
         List<User> students = userMapper.selectStudentsByClassId(classId);
+        // 学生端提交者（从文件名解析，可能有重复提交）
+        List<Map<String, Object>> submissionStudents = submissionMapper.selectStudentOverviewByClassId(classId);
         
-        List<StudentOverviewDTO> result = new ArrayList<>();
+        Map<String, StudentOverviewDTO> studentMap = new LinkedHashMap<>();
         Random random = new Random();
         
+        // 处理老师端学生
         for (User student : students) {
-            // 搜索过滤
             if (keyword != null && !keyword.isEmpty() && 
                 !student.getUsername().contains(keyword)) {
                 continue;
             }
-            
             StudentOverviewDTO dto = new StudentOverviewDTO();
             dto.setId(student.getId());
             dto.setName(student.getUsername());
             
-            // 查询学生作业统计
             List<HomeworkEvaluation> studentEvals = evaluationMapper.selectByUserId(student.getId());
             dto.setHomeworkCount(studentEvals.size());
             
@@ -228,14 +245,10 @@ public class DashboardServiceImpl implements DashboardService {
                     .average()
                     .orElse(0.0);
                 dto.setAvgScore((int) Math.round(avgScore));
-                
-                // 统计错误数
                 int errorCount = studentEvals.stream()
                     .mapToInt(e -> parseErrorCountFromRawResponse(e.getRawResponse()))
                     .sum();
                 dto.setErrorCount(errorCount);
-                
-                // 模拟趋势
                 dto.setTrend(random.nextInt(10) - 5);
             } else {
                 dto.setAvgScore(0);
@@ -244,8 +257,39 @@ public class DashboardServiceImpl implements DashboardService {
             }
             
             dto.setNeedAttention(dto.getAvgScore() < 70 || dto.getErrorCount() > 15);
-            result.add(dto);
+            studentMap.put(student.getUsername(), dto);
         }
+        
+        // 处理学生端提交者
+        for (Map<String, Object> row : submissionStudents) {
+            String name = (String) row.get("student_name");
+            if (keyword != null && !keyword.isEmpty() && !name.contains(keyword)) {
+                continue;
+            }
+            
+            Number count = (Number) row.get("homework_count");
+            Number avgScore = (Number) row.get("avg_score");
+            
+            if (studentMap.containsKey(name)) {
+                // 合并已有学生
+                StudentOverviewDTO dto = studentMap.get(name);
+                dto.setHomeworkCount(dto.getHomeworkCount() + count.intValue());
+                dto.setAvgScore((dto.getAvgScore() + avgScore.intValue()) / 2);
+            } else {
+                // 仅从学生端提交（没有系统账号）
+                StudentOverviewDTO dto = new StudentOverviewDTO();
+                dto.setId(0L);
+                dto.setName(name);
+                dto.setHomeworkCount(count.intValue());
+                dto.setAvgScore(avgScore.intValue());
+                dto.setErrorCount(0);
+                dto.setTrend(0);
+                dto.setNeedAttention(avgScore.intValue() < 70);
+                studentMap.put(name, dto);
+            }
+        }
+        
+        List<StudentOverviewDTO> result = new ArrayList<>(studentMap.values());
         
         // 排序
         switch (sortBy) {
@@ -340,6 +384,41 @@ public class DashboardServiceImpl implements DashboardService {
             log.warn("解析错误数失败: {}", e.getMessage());
         }
         return 0;
+    }
+
+    /**
+     * 从 raw_response JSON 中解析错误/建议，填充到 errorCountMap 和 errorDifficultyMap
+     */
+    private void parseRawResponseForErrors(String rawResponse,
+                                            Map<String, Integer> errorCountMap,
+                                            Map<String, String> errorDifficultyMap) {
+        try {
+            String cleaned = cleanRawResponse(rawResponse);
+            if (cleaned == null) return;
+            JsonNode json = objectMapper.readTree(cleaned);
+            JsonNode suggestions = json.get("suggestions");
+            if (suggestions != null && suggestions.isArray()) {
+                for (JsonNode suggestion : suggestions) {
+                    String issue = suggestion.get("issue").asText();
+                    String priority = suggestion.get("priority").asText();
+                    errorCountMap.merge(issue, 1, Integer::sum);
+                    errorDifficultyMap.putIfAbsent(issue, priority);
+                }
+            }
+            
+            JsonNode errors = json.get("errors");
+            if (errors != null && errors.isArray()) {
+                for (JsonNode error : errors) {
+                    String issue = error.get("issue").asText();
+                    String severity = error.get("severity").asText();
+                    errorCountMap.merge(issue, 1, Integer::sum);
+                    errorDifficultyMap.putIfAbsent(issue,
+                        "critical".equals(severity) ? "high" : "medium");
+                }
+            }
+        } catch (Exception e) {
+            log.warn("解析raw_response失败: {}", e.getMessage());
+        }
     }
 
     private String convertDifficultyLabel(String priority) {

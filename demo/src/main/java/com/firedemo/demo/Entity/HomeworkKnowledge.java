@@ -19,6 +19,8 @@ public class HomeworkKnowledge {
 
     private Long evaluationId;
 
+    private Long submissionId;
+
     private String knowledgePoint;
 
     private Integer mastery;

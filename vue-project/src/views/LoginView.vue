@@ -75,7 +75,7 @@ async function submit() {
 
     // 跳转
     const redirect = route.query.redirect as string
-    router.push(redirect || '/page1')
+    router.push(redirect || '/teacher/chat')
 
   } catch (err) {
     error.value = err instanceof Error ? err.message : '登录失败'
@@ -144,6 +144,9 @@ async function submit() {
 
       <div class="footer-link">
         <p>还没有账户？<router-link to="/register">立即注册</router-link></p>
+      </div>
+      <div class="footer-link">
+        <p><router-link to="/" class="back-link">← 返回作业提交页</router-link></p>
       </div>
     </div>
   </div>

@@ -2,23 +2,18 @@
 import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 
-// 身份类型
-type UserIdentity = 'student' | 'teacher'
-
 interface FormData {
   username: string
   email: string
   password: string
   confirmPassword: string
-  identity: UserIdentity
 }
 
 const form = reactive<FormData>({
   username: '',
   email: '',
   password: '',
-  confirmPassword: '',
-  identity: 'student'
+  confirmPassword: ''
 })
 
 const error = ref<string | null>(null)
@@ -29,9 +24,7 @@ const showConfirmPassword = ref(false)
 
 const router = useRouter()
 
-const getStatusByIdentity = (identity: UserIdentity) => {
-  return identity === 'student' ? 1 : 2
-}
+
 
 // 验证函数
 const validateForm = (): string | null => {
@@ -68,8 +61,7 @@ async function submit(e: Event) {
       body: JSON.stringify({
         username: form.username,
         email: form.email,
-        password: form.password,
-        status: getStatusByIdentity(form.identity)
+        password: form.password
       })
     })
 
@@ -105,36 +97,6 @@ async function submit(e: Event) {
       <p class="subtitle">填写信息开始使用我们的服务</p>
 
       <form @submit.prevent="submit" class="form">
-        <div class="form-group">
-          <label>选择身份</label>
-          <div class="identity-selector">
-            <label class="identity-option" :class="{ active: form.identity === 'student' }">
-              <input
-                type="radio"
-                v-model="form.identity"
-                value="student"
-                :disabled="loading"
-              />
-              <div class="identity-card">
-                <span class="icon">🎓</span>
-                <span class="label">学生</span>
-              </div>
-            </label>
-            <label class="identity-option" :class="{ active: form.identity === 'teacher' }">
-              <input
-                type="radio"
-                v-model="form.identity"
-                value="teacher"
-                :disabled="loading"
-              />
-              <div class="identity-card">
-                <span class="icon">👨‍🏫</span>
-                <span class="label">老师</span>
-              </div>
-            </label>
-          </div>
-        </div>
-
         <div class="form-group">
           <label for="username">用户名</label>
           <input
@@ -210,6 +172,9 @@ async function submit(e: Event) {
 
       <div class="footer-link">
         <p>已有账户？<router-link to="/login">立即登录</router-link></p>
+      </div>
+      <div class="footer-link">
+        <p><router-link to="/" class="back-link">← 返回作业提交页</router-link></p>
       </div>
     </div>
   </div>
@@ -362,70 +327,5 @@ async function submit(e: Event) {
   font-weight: 500;
 }
 
-.identity-selector {
-  display: flex;
-  gap: 0.8rem;
-  margin-top: 0.3rem;
-}
 
-.identity-option {
-  flex: 1;
-  cursor: pointer;
-}
-
-.identity-option input[type="radio"] {
-  display: none;
-}
-
-.identity-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 1rem 0.8rem;
-  border: 2px solid #e5e7eb;
-  border-radius: 10px;
-  transition: all 0.2s ease;
-  background-color: #f9fafb;
-}
-
-.identity-card .icon {
-  font-size: 1.6rem;
-  margin-bottom: 0.3rem;
-}
-
-.identity-card .label {
-  font-weight: 500;
-  color: #374151;
-  font-size: 0.9rem;
-}
-
-:deep(.identity-option.active .identity-card) {
-  border-color: #3b82f6;
-  background-color: #eff6ff;
-}
-
-:deep(.identity-option.active .identity-card .label) {
-  color: #3b82f6;
-}
-
-.identity-option:hover:not(.active) .identity-card {
-  border-color: #d1d5db;
-  background-color: #f3f4f6;
-}
-
-@media (max-width: 480px) {
-  .identity-selector {
-    flex-direction: column;
-  }
-  .identity-card {
-    padding: 0.8rem;
-    flex-direction: row;
-    justify-content: flex-start;
-    gap: 0.7rem;
-  }
-  .identity-card .icon {
-    font-size: 1.4rem;
-  }
-}
 </style>

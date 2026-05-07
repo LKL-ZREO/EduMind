@@ -307,15 +307,29 @@ public class ChatController {
             return response;
         }
         String trimmed = response.trim();
-        // 去掉 ```json 开头
-        if (trimmed.startsWith("```json")) {
-            trimmed = trimmed.substring(7).trim();
-        } else if (trimmed.startsWith("```")) {
-            trimmed = trimmed.substring(3).trim();
+        // 查找第一个 ```json 或 ```
+        int start = trimmed.indexOf("```json");
+        if (start == -1) {
+            start = trimmed.indexOf("```");
         }
-        // 去掉 ``` 结尾
+        if (start != -1) {
+            trimmed = trimmed.substring(start);
+            int firstNewline = trimmed.indexOf('\n');
+            if (firstNewline != -1) {
+                trimmed = trimmed.substring(firstNewline + 1).trim();
+            } else {
+                trimmed = trimmed.substring(3).trim();
+            }
+        }
+        // 去掉结尾的 ```
         if (trimmed.endsWith("```")) {
             trimmed = trimmed.substring(0, trimmed.length() - 3).trim();
+        }
+        // 尝试找到 JSON 的完整范围
+        int jsonStart = trimmed.indexOf('{');
+        int jsonEnd = trimmed.lastIndexOf('}');
+        if (jsonStart != -1 && jsonEnd != -1 && jsonEnd > jsonStart) {
+            trimmed = trimmed.substring(jsonStart, jsonEnd + 1);
         }
         return trimmed;
     }

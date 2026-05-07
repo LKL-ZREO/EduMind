@@ -61,7 +61,7 @@ public class SecurityConfig {
                 })
             )
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/api/auth/**", "/api/chat/health", "/api/onebot/rag").permitAll()
+                .requestMatchers("/api/auth/**", "/api/chat/health", "/api/onebot/rag", "/api/homework/**").permitAll()
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                 .requestMatchers("/error").permitAll()
                 .anyRequest().authenticated()

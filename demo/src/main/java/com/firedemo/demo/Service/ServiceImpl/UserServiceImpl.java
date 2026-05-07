@@ -44,7 +44,8 @@ public class UserServiceImpl implements UserService {
         // 3. 数据库字段赋值
         user.setCreateTime(LocalDateTime.now());
         user.setUpdateTime(LocalDateTime.now());
-        user.setStatus(Integer.valueOf(dto.getStatus()));
+        // status 为空时默认老师身份（2），学生不再注册系统账户
+        user.setStatus(dto.getStatus() != null ? Integer.valueOf(dto.getStatus()) : 2);
 
         // 4. 插入数据库
         userMapper.insert(user);
