@@ -49,4 +49,11 @@ public interface SubmissionMapper extends BaseMapper<Submission> {
 
     @Select("SELECT COUNT(DISTINCT student_name) FROM submission WHERE class_id = #{classId}")
     Integer countDistinctStudentsByClassId(@Param("classId") Long classId);
+
+    /**
+     * 查询学生提交记录，按作业序号排序（用于成长曲线）
+     */
+    @Select("SELECT * FROM submission WHERE student_name = #{studentName} AND class_id = #{classId} " +
+            "AND assignment_no IS NOT NULL ORDER BY assignment_no ASC")
+    List<Submission> selectByStudentAndClassOrderByNo(@Param("studentName") String studentName, @Param("classId") Long classId);
 }

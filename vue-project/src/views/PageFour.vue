@@ -212,11 +212,65 @@
                 </span>
               </div>
             </div>
+            <button class="trend-btn" @click="showProgress(student)">📈 趋势</button>
             <button class="student-action" @click="viewStudentDetail(student)">详情</button>
           </div>
         </div>
       </div>
     </section>
+
+    <!-- 📈 学生成长曲线弹窗 -->
+    <div v-if="showProgressModal" class="modal-overlay" @click.self="showProgressModal = false">
+      <div class="modal-content wide">
+        <div class="modal-header">
+          <h3>📈 {{ progressData.studentName }} 的学习成长曲线</h3>
+          <button class="close-btn" @click="showProgressModal = false">×</button>
+        </div>
+        <div class="modal-body">
+          <!-- 统计小卡片 -->
+          <div class="progress-stats">
+            <div class="stat-card">
+              <span class="stat-num">{{ progressData.totalCount }}</span>
+              <span class="stat-label">完成作业</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-num">{{ progressData.avgScore }}</span>
+              <span class="stat-label">平均分</span>
+            </div>
+            <div class="stat-card" :class="progressData.trend > 0 ? 'trend-up' : 'trend-down'">
+              <span class="stat-num">{{ progressData.trend > 0 ? '+' : '' }}{{ progressData.trend }}</span>
+              <span class="stat-label">成长趋势</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-num">{{ progressData.maxScore }}</span>
+              <span class="stat-label">最高分</span>
+            </div>
+          </div>
+          <!-- 曲线图 -->
+          <div ref="progressChartRef" class="progress-chart"></div>
+          <!-- 作业历史 -->
+          <div class="progress-table-wrap" v-if="progressData.points && progressData.points.length > 0">
+            <table class="progress-table">
+              <thead>
+                <tr><th>次数</th><th>作业名称</th><th>日期</th><th>得分</th><th>环比</th></tr>
+              </thead>
+              <tbody>
+                <tr v-for="p in progressData.points" :key="p.no">
+                  <td>第{{ p.no }}次</td>
+                  <td>{{ p.assignmentName }}</td>
+                  <td>{{ p.date }}</td>
+                  <td :class="scoreColorClass(p.score)">{{ p.score }}</td>
+                  <td :class="changeClass(p.change)">
+                    {{ p.change !== 0 ? (p.change > 0 ? '↑+' : '↓') + Math.abs(p.change) : '-' }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div v-else class="empty-hint">暂无成长数据</div>
+        </div>
+      </div>
+    </div>
 
     <!-- AI 教案生成弹窗 -->
     <div v-if="showTeachingPlanModal" class="modal-overlay" @click.self="closeModal">
@@ -278,6 +332,8 @@
 </template>
 
 <script>
+import * as echarts from 'echarts'
+
 export default {
   name: 'TeacherDashboard',
   data() {
@@ -335,7 +391,19 @@ export default {
       frequentErrors: [],
 
       // 学生列表
-      students: []
+      students: [],
+
+      // 成长曲线
+      showProgressModal: false,
+      progressData: {
+        studentName: '',
+        totalCount: 0,
+        avgScore: 0,
+        maxScore: 0,
+        trend: 0,
+        points: []
+      },
+      progressChartRef: null
     }
   },
 
@@ -634,6 +702,129 @@ export default {
     // 查看学生详情
     viewStudentDetail(student) {
       alert(`学生详情：${student.name}\n\n平均分：${student.avgScore}\n作业数：${student.homeworkCount}\n错题数：${student.errorCount}`)
+    },
+
+    // 📈 查看学生成长曲线
+    async showProgress(student) {
+      this.progressData = {
+        studentName: student.name,
+        totalCount: 0,
+        avgScore: 0,
+        maxScore: 0,
+        trend: 0,
+        points: []
+      }
+      this.showProgressModal = true
+
+      try {
+        const response = await fetch(
+          `${this.apiBaseUrl}/student/progress?studentName=${encodeURIComponent(student.name)}&classId=${this.selectedClass}`,
+          { headers: { 'Authorization': `Bearer ${this.getToken()}` } }
+        )
+
+        if (!response.ok) {
+          const err = await response.json()
+          this.$message?.error(err.message || '获取成长数据失败')
+          return
+        }
+
+        const result = await response.json()
+        if (result.code === 200) {
+          this.progressData = result.data
+          // 等 DOM 更新后渲染图表
+          this.$nextTick(() => this.renderProgressChart(result.data.points))
+        }
+      } catch (error) {
+        console.error('加载成长曲线失败:', error)
+        this.$message?.error('加载成长曲线失败')
+      }
+    },
+
+    // 📈 渲染曲线图
+    renderProgressChart(points) {
+      if (!points || points.length === 0) return
+
+      const container = this.$refs.progressChartRef
+      if (!container) return
+
+      const chart = echarts.init(container)
+
+      chart.setOption({
+        tooltip: {
+          trigger: 'axis',
+          formatter: function(params) {
+            const p = points[params[0].dataIndex]
+            return `<div style="padding:8px;font-size:14px">
+              <b>第${p.no}次作业</b><br/>
+              ${p.assignmentName}<br/>
+              得分: <span style="color:#667eea;font-weight:bold;">${p.score}</span> 分<br/>
+              提交: ${p.date}
+            </div>`
+          }
+        },
+        grid: {
+          left: '3%',
+          right: '4%',
+          bottom: '10%',
+          containLabel: true
+        },
+        xAxis: {
+          type: 'category',
+          data: points.map(p => `第${p.no}次`),
+          axisLabel: { color: '#666' }
+        },
+        yAxis: {
+          type: 'value',
+          min: 0,
+          max: 100,
+          name: '分数',
+          nameTextStyle: { color: '#666' },
+          axisLabel: { color: '#666' }
+        },
+        series: [{
+          data: points.map(p => p.score),
+          type: 'line',
+          smooth: true,
+          symbol: 'circle',
+          symbolSize: 10,
+          lineStyle: { width: 3, color: '#667eea' },
+          areaStyle: {
+            color: {
+              type: 'linear',
+              x: 0, y: 0, x2: 0, y2: 1,
+              colorStops: [
+                { offset: 0, color: 'rgba(102,126,234,0.3)' },
+                { offset: 1, color: 'rgba(102,126,234,0.05)' }
+              ]
+            }
+          },
+          markLine: {
+            silent: true,
+            data: [
+              { type: 'average', name: '平均分', lineStyle: { color: '#faad14', type: 'dashed' } },
+              { yAxis: 60, lineStyle: { color: '#f5222d', type: 'dashed' }, label: { formatter: '及格线' } }
+            ]
+          }
+        }]
+      })
+
+      // 窗口自适应
+      window.addEventListener('resize', () => chart.resize())
+    },
+
+    // 分数颜色
+    scoreColorClass(score) {
+      if (score >= 90) return 'score-excellent'
+      if (score >= 80) return 'score-good'
+      if (score >= 60) return 'score-pass'
+      return 'score-fail'
+    },
+
+    // 环比变化颜色
+    changeClass(change) {
+      if (change > 0) return 'change-up'
+      if (change < 0) return 'change-down'
+      return ''
     },
 
     // 打开教案生成弹窗
@@ -1484,5 +1675,114 @@ export default {
   .knowledge-heatmap {
     grid-template-columns: repeat(2, 1fr);
   }
+}
+
+/* ========== 📈 成长曲线弹窗样式 ========== */
+.modal-content.wide {
+  max-width: 720px;
+  width: 90%;
+}
+
+.progress-stats {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.stat-card {
+  flex: 1;
+  background: #f5f7fa;
+  border-radius: 10px;
+  padding: 14px;
+  text-align: center;
+}
+
+.stat-card .stat-num {
+  display: block;
+  font-size: 24px;
+  font-weight: bold;
+  color: #333;
+}
+
+.stat-card .stat-label {
+  display: block;
+  font-size: 13px;
+  color: #999;
+  margin-top: 4px;
+}
+
+.stat-card.trend-up .stat-num {
+  color: #52c41a;
+}
+
+.stat-card.trend-down .stat-num {
+  color: #f5222d;
+}
+
+.progress-chart {
+  width: 100%;
+  height: 300px;
+  margin-bottom: 20px;
+}
+
+.progress-table-wrap {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.progress-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.progress-table th {
+  background: #f5f7fa;
+  padding: 10px 12px;
+  text-align: left;
+  color: #666;
+  font-weight: 600;
+  border-bottom: 2px solid #e8e8e8;
+}
+
+.progress-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid #f0f0f0;
+  color: #333;
+}
+
+.progress-table tr:hover td {
+  background: #fafafa;
+}
+
+.score-excellent { color: #52c41a; font-weight: 600; }
+.score-good { color: #1890ff; font-weight: 600; }
+.score-pass { color: #d46b08; font-weight: 600; }
+.score-fail { color: #cf1322; font-weight: 600; }
+
+.change-up { color: #52c41a; font-weight: 600; }
+.change-down { color: #cf1322; font-weight: 600; }
+
+.empty-hint {
+  text-align: center;
+  padding: 30px;
+  color: #999;
+}
+
+.trend-btn {
+  padding: 6px 12px;
+  border: 1px solid #e8e8e8;
+  border-radius: 6px;
+  background: white;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.2s;
+  margin-right: 6px;
+}
+
+.trend-btn:hover {
+  border-color: #667eea;
+  background: #f0f2ff;
+  color: #667eea;
 }
 </style>
