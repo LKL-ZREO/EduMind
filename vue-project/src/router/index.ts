@@ -43,6 +43,18 @@ const router = createRouter({
       meta: { requiresAuth: true }
     },
     {
+      path: '/teacher/tasks',
+      name: 'tasks',
+      component: () => import('../views/PageFive.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
+      path: '/teacher/tasks/:id',
+      name: 'taskDetail',
+      component: () => import('../views/TaskDetail.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
       path: '/teacher/data',
       name: 'data',
       component: () => import('../views/PageFour.vue'),

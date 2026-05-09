@@ -48,4 +48,25 @@ public class Submission {
     private String rawResponse;
 
     private LocalDateTime submittedAt;
+
+    /** 关联的作业任务ID */
+    private Long taskId;
+
+    /** 当前提交次数（第几次） */
+    private Integer submitCount;
+
+    /** 剩余提交次数 */
+    private Integer remainingAttempts;
+
+    /** 是否逾期提交 */
+    private Boolean isLate;
+
+    /** 是否应用了逾期扣分 */
+    private Boolean penaltyApplied;
+
+    /** 扣分后的最终分数 */
+    private Integer finalScore;
+
+    /** 作业序号（用于成长曲线） */
+    private Integer assignmentNo;
 }

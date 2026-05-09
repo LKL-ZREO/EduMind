@@ -4,11 +4,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.firedemo.demo.DTO.EvaluationResultDTO;
 import com.firedemo.demo.Entity.ClassInfo;
 import com.firedemo.demo.Entity.HomeworkKnowledge;
+import com.firedemo.demo.Entity.HomeworkTask;
 import com.firedemo.demo.Entity.Submission;
 import com.firedemo.demo.Service.FileStorageService;
 import com.firedemo.demo.Service.OpenClawService;
 import com.firedemo.demo.mapper.ClassInfoMapper;
 import com.firedemo.demo.mapper.HomeworkKnowledgeMapper;
+import com.firedemo.demo.mapper.HomeworkTaskMapper;
 import com.firedemo.demo.mapper.SubmissionMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import jakarta.validation.constraints.NotNull;
@@ -19,9 +21,13 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * 作业提交控制器（学生端公开接口，无需登录）
@@ -37,6 +43,7 @@ public class HomeworkController {
     private final SubmissionMapper submissionMapper;
     private final ClassInfoMapper classInfoMapper;
     private final HomeworkKnowledgeMapper knowledgeMapper;
+    private final HomeworkTaskMapper taskMapper;
     private final ObjectMapper objectMapper;
 
     /** 文件名正则：姓名_班级_作业名称.扩展名 */
@@ -44,16 +51,79 @@ public class HomeworkController {
             Pattern.compile("^(.+)_(.+)_(.+)\\.\\w+$");
 
     /**
+     * 获取公开的班级列表（学生端使用）
+     */
+    @GetMapping("/classes")
+    public ResponseEntity<?> getPublicClasses() {
+        List<ClassInfo> classes = classInfoMapper.selectList(null);
+        List<Map<String, Object>> result = classes.stream().map(c -> {
+            Map<String, Object> m = new java.util.LinkedHashMap<>();
+            m.put("id", c.getId());
+            m.put("name", c.getName());
+            return m;
+        }).collect(java.util.stream.Collectors.toList());
+        return ResponseEntity.ok(Map.of("code", 200, "data", result));
+    }
+
+    /**
+     * 获取公开的作业列表（学生端使用，按班级筛选）
+     */
+    @GetMapping("/tasks")
+    public ResponseEntity<?> getPublicTasks(@RequestParam Long classId) {
+        List<HomeworkTask> tasks = taskMapper.selectByClassId(classId);
+        List<Map<String, Object>> result = tasks.stream().filter(t ->
+                !"closed".equals(t.getStatus())
+        ).map(t -> {
+            Map<String, Object> m = new java.util.LinkedHashMap<>();
+            m.put("id", t.getId());
+            m.put("taskName", t.getTaskName());
+            m.put("deadline", t.getDeadline());
+            m.put("allowLate", t.getAllowLate());
+            m.put("latePenalty", t.getLatePenalty());
+            return m;
+        }).collect(java.util.stream.Collectors.toList());
+        return ResponseEntity.ok(Map.of("code", 200, "data", result));
+    }
+
+    /**
+     * 获取学生提交状态
+     */
+    @GetMapping("/submit-status")
+    public ResponseEntity<?> getSubmitStatus(
+            @RequestParam String studentName,
+            @RequestParam Long taskId) {
+        Long count = submissionMapper.selectCount(
+                new LambdaQueryWrapper<Submission>()
+                        .eq(Submission::getStudentName, studentName)
+                        .eq(Submission::getTaskId, taskId)
+        );
+        int remaining = Math.max(0, 3 - count.intValue());
+        return ResponseEntity.ok(Map.of(
+                "code", 200,
+                "data", Map.of(
+                        "submitCount", count,
+                        "remainingAttempts", remaining
+                )
+        ));
+    }
+
+    /**
      * 学生提交作业（公开接口，无需登录）
      *
-     * @param file       作业文件
-     * @param requirement 作业要求（可选）
+     * @param file            作业文件
+     * @param requirement     作业要求（可选）
+     * @param expectedClassId 前端选中的班级ID（可选，用于校验）
+     * @param expectedTaskId  前端选中的作业ID（可选，用于校验）
+     * @param confirm         是否确认跳过校验（用于处理警告后直接提交）
      * @return 提交结果
      */
     @PostMapping("/submit")
     public ResponseEntity<?> submitHomework(
             @RequestParam("file") @NotNull MultipartFile file,
-            @RequestParam(value = "requirement", required = false) String requirement) {
+            @RequestParam(value = "requirement", required = false) String requirement,
+            @RequestParam(value = "expectedClassId", required = false) Long expectedClassId,
+            @RequestParam(value = "expectedTaskId", required = false) Long expectedTaskId,
+            @RequestParam(value = "confirm", required = false, defaultValue = "false") boolean confirm) {
 
         String originalFileName = file.getOriginalFilename();
         if (originalFileName == null || originalFileName.isEmpty()) {
@@ -94,7 +164,51 @@ public class HomeworkController {
             ));
         }
 
-        // 3. 保存文件到磁盘
+        // 3. 文件名与选择项校验（非 confirm 时）
+        if (!confirm && (expectedClassId != null || expectedTaskId != null)) {
+            Map<String, Object> warnings = new LinkedHashMap<>();
+
+            // 3a. 班级校验
+            if (expectedClassId != null) {
+                ClassInfo selectedClass = classInfoMapper.selectById(expectedClassId);
+                if (selectedClass != null && !selectedClass.getName().equals(className)) {
+                    warnings.put("classMismatch", Map.of(
+                            "fileNameValue", className,
+                            "selectedValue", selectedClass.getName()
+                    ));
+                }
+            }
+
+            // 3b. 作业名称校验（互相包含匹配）
+            if (expectedTaskId != null) {
+                HomeworkTask task = taskMapper.selectById(expectedTaskId);
+                if (task != null) {
+                    String taskName = task.getTaskName();
+                    boolean matches = assignmentName.contains(taskName) || taskName.contains(assignmentName);
+                    if (!matches) {
+                        warnings.put("taskMismatch", Map.of(
+                                "fileNameValue", assignmentName,
+                                "selectedValue", taskName
+                        ));
+                    }
+                }
+            }
+
+            if (!warnings.isEmpty()) {
+                return ResponseEntity.ok(Map.of(
+                        "code", 300,
+                        "message", "文件名与选择项不匹配，请确认",
+                        "data", Map.of(
+                                "warnings", warnings,
+                                "studentName", studentName,
+                                "parsedClassName", className,
+                                "parsedAssignmentName", assignmentName
+                        )
+                ));
+            }
+        }
+
+        // 4. 保存文件到磁盘
         String filePath;
         try {
             filePath = fileStorageService.storeFile(file);
@@ -105,7 +219,7 @@ public class HomeworkController {
             ));
         }
 
-        // 4. 读取文件内容
+        // 5. 读取文件内容
         String fileContent = fileStorageService.readFileContent(filePath);
         if (fileContent == null || fileContent.isEmpty()) {
             return ResponseEntity.badRequest().body(Map.of(
@@ -113,7 +227,7 @@ public class HomeworkController {
             ));
         }
 
-        // 5. 构造批改消息
+        // 6. 构造批改消息
         String message = String.format("""
             请批改以下作业，并以JSON格式返回结果：
 
@@ -130,7 +244,7 @@ public class HomeworkController {
                 requirement != null ? requirement : "无特殊要求",
                 fileContent);
 
-        // 6. 调用 OpenClaw 批改
+        // 7. 调用 OpenClaw 批改
         String response;
         try {
             response = openClawService.chat(message, "homework_" + Instant.now().toEpochMilli());
@@ -141,18 +255,29 @@ public class HomeworkController {
             ));
         }
 
-        // 7. 解析并保存
+        // 8. 解析并保存
         Long submissionId;
         try {
             String jsonStr = extractJsonFromMarkdown(response);
             EvaluationResultDTO evaluation = objectMapper.readValue(jsonStr, EvaluationResultDTO.class);
+
+            // 计算提交次数和作业序号
+            Long existingCount = submissionMapper.selectCount(
+                    new LambdaQueryWrapper<Submission>()
+                            .eq(Submission::getStudentName, studentName)
+                            .eq(Submission::getClassId, classInfo.getId())
+                            .eq(expectedTaskId != null, Submission::getTaskId, expectedTaskId)
+            );
+            int submitCount = existingCount.intValue() + 1;
+
             submissionId = saveSubmission(studentName, className, classInfo.getId(), assignmentName,
-                    originalFileName, filePath, file.getSize(), evaluation, response);
+                    originalFileName, filePath, file.getSize(), evaluation, response,
+                    expectedTaskId, submitCount);
         } catch (Exception e) {
             log.warn("解析评价JSON失败，保存原始响应: {}", e.getMessage());
-            // 保存原始响应，无结构化数据
             submissionId = saveRawSubmission(studentName, className, classInfo.getId(), assignmentName,
-                    originalFileName, filePath, file.getSize(), response);
+                    originalFileName, filePath, (int) file.getSize(), response,
+                    expectedTaskId, 1);
         }
 
         return ResponseEntity.ok(Map.of(
@@ -168,11 +293,12 @@ public class HomeworkController {
     }
 
     /**
-     * 保存批改结果到 submission 表和 homework_knowledge 表
+     * 保存批改结果
      */
     private Long saveSubmission(String studentName, String className, Long classId,
                                  String assignmentName, String fileName, String filePath,
-                                 long fileSize, EvaluationResultDTO evaluation, String rawResponse) {
+                                 long fileSize, EvaluationResultDTO evaluation, String rawResponse,
+                                 Long taskId, int submitCount) {
         Submission submission = new Submission();
         submission.setStudentName(studentName);
         submission.setClassName(className);
@@ -195,6 +321,27 @@ public class HomeworkController {
         }
         submission.setSuggestions(suggestionsStr);
         submission.setRawResponse(rawResponse);
+        submission.setTaskId(taskId);
+        submission.setSubmitCount(submitCount);
+        submission.setRemainingAttempts(Math.max(0, 3 - submitCount));
+
+        // 逾期判断
+        if (taskId != null) {
+            HomeworkTask task = taskMapper.selectById(taskId);
+            if (task != null && task.getDeadline() != null && LocalDateTime.now().isAfter(task.getDeadline())) {
+                submission.setIsLate(true);
+                if (task.getAllowLate() != null && task.getAllowLate() && task.getLatePenalty() != null && task.getLatePenalty() > 0) {
+                    submission.setPenaltyApplied(true);
+                    int penalty = (int) Math.ceil(
+                            java.time.Duration.between(task.getDeadline(), LocalDateTime.now()).toDays()
+                    ) * task.getLatePenalty();
+                    int finalScore = Math.max(0, (evaluation.getTotalScore() != null ? evaluation.getTotalScore() : 0) - penalty);
+                    submission.setFinalScore(finalScore);
+                }
+            }
+        }
+
+        submission.setAssignmentNo(submitCount);
 
         submissionMapper.insert(submission);
 
@@ -210,8 +357,8 @@ public class HomeworkController {
             }
         }
 
-        log.info("学生作业提交已保存: studentName={}, className={}, assignmentName={}, totalScore={}",
-                studentName, className, assignmentName, evaluation.getTotalScore());
+        log.info("学生作业提交已保存: studentName={}, className={}, assignmentName={}, totalScore={}, submitCount={}",
+                studentName, className, assignmentName, evaluation.getTotalScore(), submitCount);
         return submission.getId();
     }
 
@@ -220,7 +367,8 @@ public class HomeworkController {
      */
     private Long saveRawSubmission(String studentName, String className, Long classId,
                                     String assignmentName, String fileName, String filePath,
-                                    long fileSize, String rawResponse) {
+                                    long fileSize, String rawResponse,
+                                    Long taskId, int submitCount) {
         Submission submission = new Submission();
         submission.setStudentName(studentName);
         submission.setClassName(className);
@@ -230,6 +378,10 @@ public class HomeworkController {
         submission.setFilePath(filePath);
         submission.setFileSize(fileSize);
         submission.setRawResponse(rawResponse);
+        submission.setTaskId(taskId);
+        submission.setSubmitCount(submitCount);
+        submission.setRemainingAttempts(Math.max(0, 3 - submitCount));
+        submission.setAssignmentNo(submitCount);
         submissionMapper.insert(submission);
 
         log.info("学生作业提交已保存（原始响应）: studentName={}, className={}, assignmentName={}",
@@ -240,22 +392,16 @@ public class HomeworkController {
     /**
      * 从markdown代码块中提取JSON字符串
      */
-    /**
-     * 从markdown代码块中提取JSON字符串
-     * 处理 ```json ... ``` 包裹的JSON，以及前缀文本
-     */
     private String extractJsonFromMarkdown(String response) {
         if (response == null || response.isEmpty()) {
             return response;
         }
         String trimmed = response.trim();
-        // 查找第一个 ```json 或 ```
         int start = trimmed.indexOf("```json");
         if (start == -1) {
             start = trimmed.indexOf("```");
         }
         if (start != -1) {
-            // 跳过 ``` 标记
             trimmed = trimmed.substring(start);
             int firstNewline = trimmed.indexOf('\n');
             if (firstNewline != -1) {
@@ -264,11 +410,9 @@ public class HomeworkController {
                 trimmed = trimmed.substring(3).trim();
             }
         }
-        // 去掉结尾的 ```
         if (trimmed.endsWith("```")) {
             trimmed = trimmed.substring(0, trimmed.length() - 3).trim();
         }
-        // 尝试找到 JSON 的完整范围（从 { 到最后一个 }）
         int jsonStart = trimmed.indexOf('{');
         int jsonEnd = trimmed.lastIndexOf('}');
         if (jsonStart != -1 && jsonEnd != -1 && jsonEnd > jsonStart) {
