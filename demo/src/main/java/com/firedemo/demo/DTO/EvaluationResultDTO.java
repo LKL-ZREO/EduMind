@@ -16,6 +16,12 @@ public class EvaluationResultDTO {
     @JsonProperty("totalScore")
     private Integer totalScore;
 
+    @JsonProperty("contentScore")
+    private Integer contentScore;
+
+    @JsonProperty("formatScore")
+    private Integer formatScore;
+
     @JsonProperty("maxScore")
     private Integer maxScore;
 
@@ -25,8 +31,11 @@ public class EvaluationResultDTO {
     @JsonProperty("overallComment")
     private String overallComment;
 
-    @JsonProperty("highlights")
-    private List<String> highlights;
+    @JsonProperty("strengths")
+    private List<String> strengths;
+
+    @JsonProperty("weaknesses")
+    private List<String> weaknesses;
 
     @JsonProperty("suggestions")
     private List<SuggestionItem> suggestions;
@@ -54,8 +63,10 @@ public class EvaluationResultDTO {
      * 错误项
      */
     @Data
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class ErrorItem {
         private Integer line;
+        private String type;
         private String issue;
         private String severity;
     }

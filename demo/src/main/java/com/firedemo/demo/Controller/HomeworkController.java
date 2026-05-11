@@ -40,15 +40,18 @@ public class HomeworkController {
 
     private final FileStorageService fileStorageService;
     private final OpenClawService openClawService;
+    private final com.firedemo.demo.Service.OneBotHttpService oneBotHttpService;
     private final SubmissionMapper submissionMapper;
     private final ClassInfoMapper classInfoMapper;
     private final HomeworkKnowledgeMapper knowledgeMapper;
     private final HomeworkTaskMapper taskMapper;
+    private final com.firedemo.demo.mapper.StudentQqBindingMapper studentQqBindingMapper;
+    private final com.firedemo.demo.mapper.ClassStudentMapper classStudentMapper;
     private final ObjectMapper objectMapper;
 
-    /** 文件名正则：姓名_班级_作业名称.扩展名 */
+    /** 文件名正则：学号_姓名_班级_作业名称.扩展名 */
     private static final Pattern FILE_NAME_PATTERN =
-            Pattern.compile("^(.+)_(.+)_(.+)\\.\\w+$");
+            Pattern.compile("^(.+)_(.+)_(.+)_(.+)\\.\\w+$");
 
     /**
      * 获取公开的班级列表（学生端使用）
@@ -86,18 +89,15 @@ public class HomeworkController {
     }
 
     /**
-     * 获取学生提交状态
+     * 获取学生提交状态（按学号查询）
      */
     @GetMapping("/submit-status")
     public ResponseEntity<?> getSubmitStatus(
-            @RequestParam String studentName,
+            @RequestParam String studentId,
             @RequestParam Long taskId) {
-        Long count = submissionMapper.selectCount(
-                new LambdaQueryWrapper<Submission>()
-                        .eq(Submission::getStudentName, studentName)
-                        .eq(Submission::getTaskId, taskId)
-        );
-        int remaining = Math.max(0, 3 - count.intValue());
+        Integer count = submissionMapper.countByStudentIdAndTaskId(studentId, taskId);
+        if (count == null) count = 0;
+        int remaining = Math.max(0, 3 - count);
         return ResponseEntity.ok(Map.of(
                 "code", 200,
                 "data", Map.of(
@@ -132,23 +132,47 @@ public class HomeworkController {
             ));
         }
 
-        // 1. 解析文件名
+        // 1. 解析文件名（新格式：学号_姓名_班级_作业名称.扩展名）
         Matcher matcher = FILE_NAME_PATTERN.matcher(originalFileName);
         if (!matcher.matches()) {
             return ResponseEntity.badRequest().body(Map.of(
                     "code", 400,
-                    "message", "文件名格式错误，请使用「姓名_班级_作业名称.扩展名」格式，例如：张三_计科2101_第三次作业.pdf"
+                    "message", "文件名格式错误，请使用「学号_姓名_班级_作业名称.扩展名」格式，例如：202103001_张三_计科2101_第三次作业.pdf"
             ));
         }
 
-        String studentName = matcher.group(1).trim();
-        String className = matcher.group(2).trim();
-        String assignmentName = matcher.group(3).trim();
+        String studentId = matcher.group(1).trim();
+        String studentName = matcher.group(2).trim();
+        String className = matcher.group(3).trim();
+        String assignmentName = matcher.group(4).trim();
 
-        if (studentName.isEmpty() || className.isEmpty() || assignmentName.isEmpty()) {
+        if (studentId.isEmpty() || studentName.isEmpty() || className.isEmpty() || assignmentName.isEmpty()) {
             return ResponseEntity.badRequest().body(Map.of(
                     "code", 400, "message", "文件名各部分不能为空"
             ));
+        }
+
+        // 1.5 检查QQ号绑定（首次提交需要绑定）
+        String qqNumber = studentQqBindingMapper.selectQqByStudentId(studentId);
+        if (qqNumber == null) {
+            return ResponseEntity.ok(Map.of(
+                    "code", 401,
+                    "message", "请先绑定QQ号",
+                    "needBind", true,
+                    "data", Map.of("studentId", studentId, "studentName", studentName)
+            ));
+        }
+
+        // 1.6 检查提交次数限制
+        if (expectedTaskId != null) {
+            Integer existingCount = submissionMapper.countByStudentIdAndTaskId(studentId, expectedTaskId);
+            if (existingCount == null) existingCount = 0;
+            if (existingCount >= 3) {
+                return ResponseEntity.badRequest().body(Map.of(
+                        "code", 400,
+                        "message", "该学号已提交3次，次数已达上限"
+                ));
+            }
         }
 
         // 2. 校验班级是否存在
@@ -200,6 +224,7 @@ public class HomeworkController {
                         "message", "文件名与选择项不匹配，请确认",
                         "data", Map.of(
                                 "warnings", warnings,
+                                "studentId", studentId,
                                 "studentName", studentName,
                                 "parsedClassName", className,
                                 "parsedAssignmentName", assignmentName
@@ -259,35 +284,47 @@ public class HomeworkController {
         Long submissionId;
         try {
             String jsonStr = extractJsonFromMarkdown(response);
+            log.debug("提取到的JSON: jsonStr长度={}, 前100字符={}", jsonStr.length(), 
+                jsonStr.substring(0, Math.min(100, jsonStr.length())));
             EvaluationResultDTO evaluation = objectMapper.readValue(jsonStr, EvaluationResultDTO.class);
+            log.debug("解析成功: totalScore={}, strengths={}, contentScore={}", 
+                evaluation.getTotalScore(), 
+                evaluation.getStrengths() != null ? evaluation.getStrengths().size() : null,
+                evaluation.getContentScore());
 
-            // 计算提交次数和作业序号
-            Long existingCount = submissionMapper.selectCount(
-                    new LambdaQueryWrapper<Submission>()
-                            .eq(Submission::getStudentName, studentName)
-                            .eq(Submission::getClassId, classInfo.getId())
-                            .eq(expectedTaskId != null, Submission::getTaskId, expectedTaskId)
-            );
-            int submitCount = existingCount.intValue() + 1;
+            // 计算提交次数和作业序号（按学号统计）
+            Integer existingCount = expectedTaskId != null ? 
+                    submissionMapper.countByStudentIdAndTaskId(studentId, expectedTaskId) : 0;
+            if (existingCount == null) existingCount = 0;
+            int submitCount = existingCount + 1;
 
-            submissionId = saveSubmission(studentName, className, classInfo.getId(), assignmentName,
+            submissionId = saveSubmission(studentId, studentName, className, classInfo.getId(), assignmentName,
                     originalFileName, filePath, file.getSize(), evaluation, response,
                     expectedTaskId, submitCount);
         } catch (Exception e) {
-            log.warn("解析评价JSON失败，保存原始响应: {}", e.getMessage());
-            submissionId = saveRawSubmission(studentName, className, classInfo.getId(), assignmentName,
+            log.warn("解析评价JSON失败，保存原始响应: {}", e.getMessage(), e);
+            submissionId = saveRawSubmission(studentId, studentName, className, classInfo.getId(), assignmentName,
                     originalFileName, filePath, (int) file.getSize(), response,
                     expectedTaskId, 1);
         }
+
+        // 计算最终返回的提交次数和剩余次数
+        Integer finalCount = expectedTaskId != null ? 
+                submissionMapper.countByStudentIdAndTaskId(studentId, expectedTaskId) : 1;
+        if (finalCount == null) finalCount = 1;
+        int remainingAttempts = Math.max(0, 3 - finalCount);
 
         return ResponseEntity.ok(Map.of(
                 "code", 200,
                 "message", "作业提交成功",
                 "data", Map.of(
                         "submissionId", submissionId,
+                        "studentId", studentId,
                         "studentName", studentName,
                         "className", className,
-                        "assignmentName", assignmentName
+                        "assignmentName", assignmentName,
+                        "submitCount", finalCount,
+                        "remainingAttempts", remainingAttempts
                 )
         ));
     }
@@ -295,11 +332,12 @@ public class HomeworkController {
     /**
      * 保存批改结果
      */
-    private Long saveSubmission(String studentName, String className, Long classId,
+    private Long saveSubmission(String studentId, String studentName, String className, Long classId,
                                  String assignmentName, String fileName, String filePath,
                                  long fileSize, EvaluationResultDTO evaluation, String rawResponse,
                                  Long taskId, int submitCount) {
         Submission submission = new Submission();
+        submission.setStudentId(studentId);
         submission.setStudentName(studentName);
         submission.setClassName(className);
         submission.setClassId(classId);
@@ -308,10 +346,12 @@ public class HomeworkController {
         submission.setFilePath(filePath);
         submission.setFileSize(fileSize);
         submission.setTotalScore(evaluation.getTotalScore());
-        submission.setContentScore(evaluation.getTotalScore());
+        submission.setContentScore(evaluation.getContentScore() != null ? evaluation.getContentScore() : evaluation.getTotalScore());
         submission.setOverallComment(evaluation.getOverallComment());
-        submission.setStrengths(evaluation.getHighlights() != null ?
-                String.join(",", evaluation.getHighlights()) : "");
+        submission.setStrengths(evaluation.getStrengths() != null ?
+                String.join(",", evaluation.getStrengths()) : "");
+        submission.setWeaknesses(evaluation.getWeaknesses() != null ?
+                String.join(",", evaluation.getWeaknesses()) : "");
         String suggestionsStr = "";
         if (evaluation.getSuggestions() != null) {
             suggestionsStr = evaluation.getSuggestions().stream()
@@ -359,17 +399,34 @@ public class HomeworkController {
 
         log.info("学生作业提交已保存: studentName={}, className={}, assignmentName={}, totalScore={}, submitCount={}",
                 studentName, className, assignmentName, evaluation.getTotalScore(), submitCount);
+
+        // 自动加入班级学生名单
+        if (classId != null && studentId != null && studentName != null) {
+            classStudentMapper.insertIgnore(classId, studentId, studentName, "auto");
+        }
+
+        // 成绩不理想时发送QQ私聊提醒
+        if (evaluation.getTotalScore() != null && evaluation.getTotalScore() < 60) {
+            String qqNumber = studentQqBindingMapper.selectQqByStudentId(studentId);
+            if (qqNumber != null) {
+                oneBotHttpService.sendPrivateMessage(qqNumber, String.format(
+                        "同学你好，你的作业「%s」得分 %d 分，成绩不太理想。建议多向老师或机器人提问，获取学习帮助。",
+                        assignmentName, evaluation.getTotalScore()));
+            }
+        }
+
         return submission.getId();
     }
 
     /**
      * 保存无法解析JSON的原始响应
      */
-    private Long saveRawSubmission(String studentName, String className, Long classId,
+    private Long saveRawSubmission(String studentId, String studentName, String className, Long classId,
                                     String assignmentName, String fileName, String filePath,
                                     long fileSize, String rawResponse,
                                     Long taskId, int submitCount) {
         Submission submission = new Submission();
+        submission.setStudentId(studentId);
         submission.setStudentName(studentName);
         submission.setClassName(className);
         submission.setClassId(classId);
@@ -397,27 +454,60 @@ public class HomeworkController {
             return response;
         }
         String trimmed = response.trim();
-        int start = trimmed.indexOf("```json");
-        if (start == -1) {
-            start = trimmed.indexOf("```");
-        }
-        if (start != -1) {
-            trimmed = trimmed.substring(start);
-            int firstNewline = trimmed.indexOf('\n');
-            if (firstNewline != -1) {
-                trimmed = trimmed.substring(firstNewline + 1).trim();
-            } else {
-                trimmed = trimmed.substring(3).trim();
-            }
-        }
-        if (trimmed.endsWith("```")) {
-            trimmed = trimmed.substring(0, trimmed.length() - 3).trim();
-        }
+        // 直接找第一个 { 和最后一个 }，不管前面有什么文字
         int jsonStart = trimmed.indexOf('{');
         int jsonEnd = trimmed.lastIndexOf('}');
         if (jsonStart != -1 && jsonEnd != -1 && jsonEnd > jsonStart) {
             trimmed = trimmed.substring(jsonStart, jsonEnd + 1);
+            log.debug("extractJsonFromMarkdown 提取成功, json长度={}", trimmed.length());
+            return trimmed;
         }
-        return trimmed;
+        log.warn("extractJsonFromMarkdown 未找到JSON花括号, raw开头={}", trimmed.substring(0, Math.min(100, trimmed.length())));
+        return response;
+    }
+
+    // ============ QQ绑定接口 ============
+
+    /**
+     * 检查QQ号绑定状态
+     */
+    @GetMapping("/check-qq-binding")
+    public ResponseEntity<?> checkQqBinding(@RequestParam String studentId) {
+        String qqNumber = studentQqBindingMapper.selectQqByStudentId(studentId);
+        if (qqNumber == null) {
+            return ResponseEntity.ok(Map.of(
+                    "code", 401,
+                    "message", "请先绑定QQ号",
+                    "needBind", true
+            ));
+        }
+        return ResponseEntity.ok(Map.of(
+                "code", 200,
+                "data", Map.of("qqNumber", qqNumber)
+        ));
+    }
+
+    /**
+     * 绑定QQ号
+     */
+    @PostMapping("/bind-qq")
+    public ResponseEntity<?> bindQq(@RequestBody BindQqRequest req) {
+        // 校验QQ号格式
+        if (req.getQqNumber() == null || !req.getQqNumber().matches("\\d{5,11}")) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "code", 400, "message", "QQ号格式不正确，应为5-11位数字"
+            ));
+        }
+
+        // 保存绑定
+        studentQqBindingMapper.insertOrUpdate(req.getStudentId(), req.getQqNumber(), req.getStudentName());
+        return ResponseEntity.ok(Map.of("code", 200, "message", "绑定成功"));
+    }
+
+    @lombok.Data
+    public static class BindQqRequest {
+        private String studentId;
+        private String studentName;
+        private String qqNumber;
     }
 }

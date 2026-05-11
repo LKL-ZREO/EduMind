@@ -24,4 +24,10 @@ public interface ClassInfoMapper extends BaseMapper<ClassInfo> {
      */
     @Select("SELECT COUNT(*) FROM sys_user WHERE class_id = #{classId} AND status = 1")
     Integer selectStudentCount(Long classId);
+
+    /**
+     * 根据班级ID查询QQ群号
+     */
+    @Select("SELECT qq_group_id FROM class_info WHERE id = #{classId}")
+    String selectQqGroupIdById(Long classId);
 }

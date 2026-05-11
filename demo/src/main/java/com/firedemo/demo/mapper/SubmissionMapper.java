@@ -16,19 +16,58 @@ import java.util.Map;
 @Mapper
 public interface SubmissionMapper extends BaseMapper<Submission> {
 
-    @Select("SELECT * FROM submission WHERE class_id = #{classId} ORDER BY submitted_at DESC")
+    /**
+     * 查询班级所有提交（每个学生每个作业只取最新）
+     */
+    @Select("SELECT s.* FROM submission s " +
+            "INNER JOIN (" +
+            "  SELECT student_id, task_id, MAX(submitted_at) as max_time " +
+            "  FROM submission WHERE class_id = #{classId} AND student_id IS NOT NULL " +
+            "  GROUP BY student_id, task_id" +
+            ") latest ON s.student_id = latest.student_id AND s.task_id = latest.task_id AND s.submitted_at = latest.max_time " +
+            "ORDER BY s.submitted_at DESC")
     List<Submission> selectByClassId(@Param("classId") Long classId);
 
-    @Select("SELECT * FROM submission WHERE student_name = #{studentName} AND class_id = #{classId} ORDER BY submitted_at DESC")
+    /**
+     * 查询学生提交记录（每个作业只取最新）
+     */
+    @Select("SELECT s.* FROM submission s " +
+            "INNER JOIN (" +
+            "  SELECT task_id, MAX(submitted_at) as max_time " +
+            "  FROM submission WHERE student_name = #{studentName} AND class_id = #{classId} " +
+            "  GROUP BY task_id" +
+            ") latest ON s.task_id = latest.task_id AND s.submitted_at = latest.max_time " +
+            "ORDER BY s.submitted_at DESC")
     List<Submission> selectByStudentAndClass(@Param("studentName") String studentName, @Param("classId") Long classId);
 
-    @Select("SELECT COUNT(*) FROM submission WHERE class_id = #{classId}")
+    /**
+     * 统计班级提交数（每个学生每个作业只算一次）
+     */
+    @Select("SELECT COUNT(*) FROM (" +
+            "  SELECT DISTINCT student_id, task_id FROM submission " +
+            "  WHERE class_id = #{classId} AND student_id IS NOT NULL" +
+            ") t")
     Integer countByClassId(@Param("classId") Long classId);
 
-    @Select("SELECT COUNT(*) FROM submission WHERE class_id = #{classId} AND submitted_at >= #{since}")
+    /**
+     * 统计班级新增提交数（每个学生每个作业只算一次）
+     */
+    @Select("SELECT COUNT(*) FROM (" +
+            "  SELECT DISTINCT student_id, task_id FROM submission " +
+            "  WHERE class_id = #{classId} AND submitted_at >= #{since} AND student_id IS NOT NULL" +
+            ") t")
     Integer countNewByClassId(@Param("classId") Long classId, @Param("since") LocalDateTime since);
 
-    @Select("SELECT total_score FROM submission WHERE class_id = #{classId} AND total_score IS NOT NULL")
+    /**
+     * 查询班级所有分数（每个学生每个作业只取最新）
+     */
+    @Select("SELECT s.total_score FROM submission s " +
+            "INNER JOIN (" +
+            "  SELECT student_id, task_id, MAX(submitted_at) as max_time " +
+            "  FROM submission WHERE class_id = #{classId} AND student_id IS NOT NULL " +
+            "  GROUP BY student_id, task_id" +
+            ") latest ON s.student_id = latest.student_id AND s.task_id = latest.task_id AND s.submitted_at = latest.max_time " +
+            "WHERE s.total_score IS NOT NULL")
     List<Integer> selectScoresByClassId(@Param("classId") Long classId);
 
     @Select("SELECT hk.knowledge_point, AVG(hk.mastery) as avg_mastery, COUNT(*) as count " +
@@ -42,18 +81,53 @@ public interface SubmissionMapper extends BaseMapper<Submission> {
             "WHERE hk.submission_id IN (SELECT id FROM submission WHERE class_id = #{classId}) AND hk.mastery < 70")
     List<String> selectWeakKnowledgePoints(@Param("classId") Long classId);
 
-    @Select("SELECT student_name, COUNT(*) as homework_count, AVG(total_score) as avg_score " +
-            "FROM submission WHERE class_id = #{classId} " +
-            "GROUP BY student_name ORDER BY avg_score DESC NULLS LAST")
+    /**
+     * 查询学生概览（每个作业只取最新，按学号分组）
+     */
+    @Select("SELECT s.student_id as student_id, s.student_name as student_name, " +
+            "COUNT(*) as homework_count, AVG(s.total_score) as avg_score " +
+            "FROM submission s " +
+            "INNER JOIN (" +
+            "  SELECT student_id, task_id, MAX(submitted_at) as max_time " +
+            "  FROM submission WHERE class_id = #{classId} AND student_id IS NOT NULL " +
+            "  GROUP BY student_id, task_id" +
+            ") latest ON s.student_id = latest.student_id AND s.task_id = latest.task_id AND s.submitted_at = latest.max_time " +
+            "GROUP BY s.student_id, s.student_name ORDER BY avg_score DESC NULLS LAST")
     List<Map<String, Object>> selectStudentOverviewByClassId(@Param("classId") Long classId);
 
-    @Select("SELECT COUNT(DISTINCT student_name) FROM submission WHERE class_id = #{classId}")
+    /**
+     * 统计班级学生数（按学号去重）
+     */
+    @Select("SELECT COUNT(DISTINCT student_id) FROM submission WHERE class_id = #{classId} AND student_id IS NOT NULL")
     Integer countDistinctStudentsByClassId(@Param("classId") Long classId);
 
     /**
-     * 查询学生提交记录，按作业序号排序（用于成长曲线）
+     * 查询学生提交记录，按作业序号排序（用于成长曲线，每个作业只取最新）
      */
-    @Select("SELECT * FROM submission WHERE student_name = #{studentName} AND class_id = #{classId} " +
-            "AND assignment_no IS NOT NULL ORDER BY assignment_no ASC")
+    @Select("SELECT s.* FROM submission s " +
+            "INNER JOIN (" +
+            "  SELECT task_id, MAX(submitted_at) as max_time " +
+            "  FROM submission WHERE student_name = #{studentName} AND class_id = #{classId} " +
+            "  GROUP BY task_id" +
+            ") latest ON s.task_id = latest.task_id AND s.submitted_at = latest.max_time " +
+            "WHERE s.assignment_no IS NOT NULL ORDER BY s.assignment_no ASC")
     List<Submission> selectByStudentAndClassOrderByNo(@Param("studentName") String studentName, @Param("classId") Long classId);
+
+    /**
+     * 根据学号查询学生提交记录，按作业序号排序
+     */
+    @Select("SELECT s.* FROM submission s " +
+            "INNER JOIN (" +
+            "  SELECT task_id, MAX(submitted_at) as max_time " +
+            "  FROM submission WHERE student_id = #{studentId} AND class_id = #{classId} " +
+            "  GROUP BY task_id" +
+            ") latest ON s.task_id = latest.task_id AND s.submitted_at = latest.max_time " +
+            "WHERE s.assignment_no IS NOT NULL ORDER BY s.assignment_no ASC")
+    List<Submission> selectByStudentIdAndClassOrderByNo(@Param("studentId") String studentId, @Param("classId") Long classId);
+
+    /**
+     * 根据学号和作业任务ID查询提交次数
+     */
+    @Select("SELECT COUNT(*) FROM submission WHERE student_id = #{studentId} AND task_id = #{taskId}")
+    Integer countByStudentIdAndTaskId(@Param("studentId") String studentId, @Param("taskId") Long taskId);
 }

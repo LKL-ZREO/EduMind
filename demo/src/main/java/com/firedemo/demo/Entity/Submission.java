@@ -69,4 +69,7 @@ public class Submission {
 
     /** 作业序号（用于成长曲线） */
     private Integer assignmentNo;
+
+    /** 学号（用于游客提交次数统计） */
+    private String studentId;
 }

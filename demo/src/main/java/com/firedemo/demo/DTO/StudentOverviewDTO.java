@@ -10,6 +10,8 @@ public class StudentOverviewDTO {
 
     private Long id;
     private String name;
+    /** 学号（匹配submission.student_id） */
+    private String studentId;
     private Integer avgScore;
     private Integer homeworkCount;
     private Integer errorCount;

@@ -8,22 +8,22 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 /**
- * 班级信息实体
+ * 班级学生关系实体
  */
 @Data
-@TableName("class_info")
-public class ClassInfo {
+@TableName("class_student")
+public class ClassStudent {
 
     @TableId(type = IdType.AUTO)
     private Long id;
 
-    private String name;
+    private Long classId;
 
-    private Long teacherId;
+    private String studentId;
 
-    private String description;
+    private String studentName;
 
-    private String qqGroupId;
+    private String source; // 'auto'=自动收集, 'manual'=手动导入
 
     private LocalDateTime createdAt;
 }

@@ -30,6 +30,7 @@ public class StudentProgressController {
     public Result<Map<String, Object>> getStudentProgress(
             @RequestParam String studentName,
             @RequestParam Long classId,
+            @RequestParam(required = false) String studentId,
             HttpServletRequest request) {
 
         Long userId = jwtUtil.getUserIdFromRequest(request);
@@ -38,7 +39,12 @@ public class StudentProgressController {
         }
 
         // 查询该学生提交记录，按作业序号排序
-        List<Submission> submissions = submissionMapper.selectByStudentAndClassOrderByNo(studentName, classId);
+        List<Submission> submissions;
+        if (studentId != null && !studentId.isEmpty()) {
+            submissions = submissionMapper.selectByStudentIdAndClassOrderByNo(studentId, classId);
+        } else {
+            submissions = submissionMapper.selectByStudentAndClassOrderByNo(studentName, classId);
+        }
         if (submissions.isEmpty()) {
             return Result.error(404, "暂无提交记录");
         }

@@ -24,7 +24,7 @@ public class AppConfig {
     @Bean
     public WebClient openClawWebClient() {
         HttpClient httpClient = HttpClient.create()
-                .responseTimeout(Duration.ofSeconds(120));
+                .responseTimeout(Duration.ofSeconds(300));
 
         return WebClient.builder()
                 .baseUrl(openClawUrl)

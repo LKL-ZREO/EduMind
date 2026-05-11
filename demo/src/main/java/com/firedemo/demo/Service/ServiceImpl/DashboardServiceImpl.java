@@ -260,19 +260,24 @@ public class DashboardServiceImpl implements DashboardService {
             studentMap.put(student.getUsername(), dto);
         }
         
-        // 处理学生端提交者
+        // 处理学生端提交者（已按学号去重，每个作业只算最新）
         for (Map<String, Object> row : submissionStudents) {
+            String studentId = (String) row.get("student_id");
             String name = (String) row.get("student_name");
-            if (keyword != null && !keyword.isEmpty() && !name.contains(keyword)) {
+            if (keyword != null && !keyword.isEmpty() && 
+                !name.contains(keyword) && !studentId.contains(keyword)) {
                 continue;
             }
             
             Number count = (Number) row.get("homework_count");
             Number avgScore = (Number) row.get("avg_score");
             
-            if (studentMap.containsKey(name)) {
+            // 用学号作为key避免重名冲突
+            String key = studentId != null ? studentId : name;
+            
+            if (studentMap.containsKey(key)) {
                 // 合并已有学生
-                StudentOverviewDTO dto = studentMap.get(name);
+                StudentOverviewDTO dto = studentMap.get(key);
                 dto.setHomeworkCount(dto.getHomeworkCount() + count.intValue());
                 dto.setAvgScore((dto.getAvgScore() + avgScore.intValue()) / 2);
             } else {
@@ -280,12 +285,13 @@ public class DashboardServiceImpl implements DashboardService {
                 StudentOverviewDTO dto = new StudentOverviewDTO();
                 dto.setId(0L);
                 dto.setName(name);
+                dto.setStudentId(studentId);
                 dto.setHomeworkCount(count.intValue());
                 dto.setAvgScore(avgScore.intValue());
                 dto.setErrorCount(0);
                 dto.setTrend(0);
                 dto.setNeedAttention(avgScore.intValue() < 70);
-                studentMap.put(name, dto);
+                studentMap.put(key, dto);
             }
         }
         

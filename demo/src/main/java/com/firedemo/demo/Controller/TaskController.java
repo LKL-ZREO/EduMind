@@ -15,7 +15,6 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
 import java.util.*;
-import java.util.stream.Collectors;
 
 /**
  * 作业任务管理（教师端，需登录）
@@ -28,6 +27,10 @@ public class TaskController {
 
     private final HomeworkTaskMapper taskMapper;
     private final SubmissionMapper submissionMapper;
+    private final com.firedemo.demo.mapper.ClassInfoMapper classInfoMapper;
+    private final com.firedemo.demo.Service.TaskReminderService taskReminderService;
+    private final com.firedemo.demo.Service.TaskReminderScheduleService taskReminderScheduleService;
+    private final com.firedemo.demo.mapper.ClassStudentMapper classStudentMapper;
     private final JwtUtil jwtUtil;
 
     /**
@@ -51,6 +54,13 @@ public class TaskController {
 
         taskMapper.insert(task);
         log.info("创建作业: taskId={}, taskName={}, classId={}", task.getId(), req.getTaskName(), req.getClassId());
+
+        // 发送作业发布通知
+        taskReminderService.sendTaskPublishedNotification(
+                req.getClassId(), req.getTaskName(), req.getDeadline());
+
+        // 注册截止提醒定时任务
+        taskReminderScheduleService.scheduleReminderTasks(task.getId());
 
         return Result.success(task);
     }
@@ -115,20 +125,27 @@ public class TaskController {
             item.put("status", task.getStatus());
             item.put("createdAt", task.getCreatedAt());
 
-            // 统计：已提交人数、总提交次数、平均分
+            // 统计：已提交人数、总提交次数、平均分（每个学生只取最新）
             List<Submission> submissions = submissionMapper.selectList(
                     new LambdaQueryWrapper<Submission>()
                             .eq(Submission::getTaskId, task.getId())
+                            .orderByDesc(Submission::getSubmittedAt)
             );
 
-            long submittedCount = submissions.stream()
-                    .map(Submission::getStudentName)
-                    .distinct()
-                    .count();
+            // 按学号去重，只保留最新提交
+            Map<String, Submission> latestByStudent = new LinkedHashMap<>();
+            for (Submission s : submissions) {
+                String key = s.getStudentId() != null ? s.getStudentId() : s.getStudentName();
+                if (!latestByStudent.containsKey(key)) {
+                    latestByStudent.put(key, s);
+                }
+            }
+            List<Submission> latestSubmissions = new ArrayList<>(latestByStudent.values());
 
-            int totalSubmissions = submissions.size();
+            long submittedCount = latestByStudent.size();
+            int totalSubmissions = latestSubmissions.size();
 
-            double avgScore = submissions.stream()
+            double avgScore = latestSubmissions.stream()
                     .filter(s -> s.getTotalScore() != null)
                     .mapToInt(Submission::getTotalScore)
                     .average()
@@ -168,12 +185,22 @@ public class TaskController {
         result.put("latePenalty", task.getLatePenalty());
         result.put("status", task.getStatus());
 
-        // 提交列表
+        // 提交列表（每个学生只取最新）
         List<Submission> submissions = submissionMapper.selectList(
                 new LambdaQueryWrapper<Submission>()
                         .eq(Submission::getTaskId, task.getId())
-                        .orderByDesc(Submission::getTotalScore)
+                        .orderByDesc(Submission::getSubmittedAt)
         );
+
+        // 按学号去重，只保留最新提交
+        Map<String, Submission> latestByStudent = new LinkedHashMap<>();
+        for (Submission s : submissions) {
+            String key = s.getStudentId() != null ? s.getStudentId() : s.getStudentName();
+            if (!latestByStudent.containsKey(key)) {
+                latestByStudent.put(key, s);
+            }
+        }
+        List<Submission> latestSubmissions = new ArrayList<>(latestByStudent.values());
 
         // 成绩分布
         Map<String, Integer> dist = new LinkedHashMap<>();
@@ -184,9 +211,8 @@ public class TaskController {
         dist.put("fail", 0);      // <60
 
         List<Map<String, Object>> studentList = new ArrayList<>();
-        Set<String> submittedStudents = new HashSet<>();
 
-        for (Submission s : submissions) {
+        for (Submission s : latestSubmissions) {
             if (s.getTotalScore() != null) {
                 if (s.getTotalScore() >= 90) dist.merge("excellent", 1, Integer::sum);
                 else if (s.getTotalScore() >= 80) dist.merge("good", 1, Integer::sum);
@@ -195,29 +221,27 @@ public class TaskController {
                 else dist.merge("fail", 1, Integer::sum);
             }
 
-            if (!submittedStudents.contains(s.getStudentName())) {
-                submittedStudents.add(s.getStudentName());
-                Map<String, Object> si = new LinkedHashMap<>();
-                si.put("studentName", s.getStudentName());
-                si.put("score", s.getTotalScore());
-                si.put("isLate", s.getIsLate() != null && s.getIsLate());
-                si.put("penaltyApplied", s.getPenaltyApplied() != null && s.getPenaltyApplied());
-                si.put("finalScore", s.getFinalScore());
-                si.put("submittedAt", s.getSubmittedAt());
-                studentList.add(si);
-            }
+            Map<String, Object> si = new LinkedHashMap<>();
+            si.put("studentName", s.getStudentName());
+            si.put("studentId", s.getStudentId());
+            si.put("score", s.getTotalScore());
+            si.put("isLate", s.getIsLate() != null && s.getIsLate());
+            si.put("penaltyApplied", s.getPenaltyApplied() != null && s.getPenaltyApplied());
+            si.put("finalScore", s.getFinalScore());
+            si.put("submittedAt", s.getSubmittedAt());
+            studentList.add(si);
         }
 
         // 统计
-        double avgScore = submissions.stream()
+        double avgScore = latestSubmissions.stream()
                 .filter(s -> s.getTotalScore() != null)
                 .mapToInt(Submission::getTotalScore)
                 .average()
                 .orElse(0);
 
         result.put("distribution", dist);
-        result.put("submittedCount", submittedStudents.size());
-        result.put("totalSubmissions", submissions.size());
+        result.put("submittedCount", latestByStudent.size());
+        result.put("totalSubmissions", latestSubmissions.size());
         result.put("avgScore", Math.round(avgScore * 10.0) / 10.0);
         result.put("submissions", studentList);
 
@@ -239,6 +263,37 @@ public class TaskController {
         taskMapper.updateById(task);
 
         return Result.success(null);
+    }
+
+    /**
+     * 测试提醒功能（立即发送）
+     */
+    @PostMapping("/{id}/test-reminder")
+    public Result testReminder(@PathVariable Long id) {
+        HomeworkTask task = taskMapper.selectById(id);
+        if (task == null) {
+            return Result.error(404, "作业不存在");
+        }
+
+        String groupId = classInfoMapper.selectQqGroupIdById(task.getClassId());
+        if (groupId == null || groupId.isEmpty()) {
+            return Result.error(400, "班级未配置QQ群号");
+        }
+
+        // 查询班级学生总数和已提交数
+        Integer totalStudents = classStudentMapper.countByClassId(task.getClassId());
+        Integer submittedCount = classStudentMapper.countSubmittedByTaskId(task.getClassId(), task.getId());
+        if (totalStudents == null) totalStudents = 0;
+        if (submittedCount == null) submittedCount = 0;
+        int unsubmittedCount = totalStudents - submittedCount;
+
+        // 立即发送1小时前提醒（测试）
+        taskReminderService.sendDeadlineReminder1h(task.getId());
+
+        return Result.success(Map.of(
+                "message", String.format("测试提醒已发送！班级共%d人，已交%d人，未交%d人", 
+                        totalStudents, submittedCount, unsubmittedCount)
+        ));
     }
 
     // ========== DTO ==========

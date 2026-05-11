@@ -257,11 +257,12 @@ public class ChatController {
             entity.setFilePath(request.getFilePath());
             entity.setRequirement(request.getRequirement());
             entity.setTotalScore(evaluation.getTotalScore());
-            // 简单处理：总分作为内容分，格式分设为null
-            entity.setContentScore(evaluation.getTotalScore());
+            entity.setContentScore(evaluation.getContentScore() != null ? evaluation.getContentScore() : evaluation.getTotalScore());
             entity.setOverallComment(evaluation.getOverallComment());
-            entity.setStrengths(evaluation.getHighlights() != null ? 
-                String.join(",", evaluation.getHighlights()) : "");
+            entity.setStrengths(evaluation.getStrengths() != null ? 
+                String.join(",", evaluation.getStrengths()) : "");
+            entity.setWeaknesses(evaluation.getWeaknesses() != null ?
+                String.join(",", evaluation.getWeaknesses()) : "");
             // 建议列表转为字符串
             String suggestionsStr = "";
             if (evaluation.getSuggestions() != null) {
@@ -348,8 +349,8 @@ public class ChatController {
         sb.append("### 总体评语\n");
         sb.append(evaluation.getOverallComment()).append("\n\n");
         sb.append("### 亮点\n");
-        if (evaluation.getHighlights() != null) {
-            for (String highlight : evaluation.getHighlights()) {
+        if (evaluation.getStrengths() != null) {
+            for (String highlight : evaluation.getStrengths()) {
                 sb.append("- ").append(highlight).append("\n");
             }
         }
