@@ -147,6 +147,12 @@
             <artifactId>tokenizers</artifactId>
             <version>0.28.0</version>
         </dependency>
+        <!-- DJL ONNX Runtime 引擎 - 轻量 CPU 推理，无需 PyTorch 原生库 -->
+        <dependency>
+            <groupId>ai.djl.onnxruntime</groupId>
+            <artifactId>onnxruntime-engine</artifactId>
+            <version>0.28.0</version>
+        </dependency>
         <dependency>
             <groupId>org.mybatis.spring.boot</groupId>
             <artifactId>mybatis-spring-boot-starter-test</artifactId>

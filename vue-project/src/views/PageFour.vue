@@ -717,8 +717,10 @@ export default {
       this.showProgressModal = true
 
       try {
+        const params = new URLSearchParams({ studentName: student.name, classId: this.selectedClass })
+        if (student.studentId) params.append('studentId', student.studentId)
         const response = await fetch(
-          `${this.apiBaseUrl}/student/progress?studentName=${encodeURIComponent(student.name)}&classId=${this.selectedClass}`,
+          `${this.apiBaseUrl}/student/progress?${params}`,
           { headers: { 'Authorization': `Bearer ${this.getToken()}` } }
         )
 

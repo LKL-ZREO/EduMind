@@ -13,8 +13,7 @@ import org.springframework.stereotype.Service;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.util.Collections;
-import java.util.List;
+import java.util.*;
 import java.util.stream.Collectors;
 
 
@@ -222,7 +221,7 @@ public class VectorStoreService {
     /**
      * 解码嵌入向量
      */
-    private float[] decodeEmbedding(String str) {
+    private static float[] decodeEmbedding(String str) {
         if (str == null || str.isEmpty()) return null;
         String[] parts = str.split(",");
         float[] embedding = new float[parts.length];
@@ -335,5 +334,116 @@ public class VectorStoreService {
         }
     }
 
-    private record ScoredChunk(DocumentChunk chunk, double score) {}
+    /**
+     * 关键词检索 —— RRF 混合检索的第二路
+     * <p>从查询中提取关键词，通过 ILIKE 匹配 chunk 内容，按命中数排序。
+     * 中文场景下 pg_trgm/tsvector 分词效果不佳，ILIKE 是最务实的选择。
+     */
+    public List<ScoredChunk> keywordSearch(String query, int topK) {
+        Set<String> keywords = extractKeywords(query);
+        if (keywords.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        // 动态构建 SQL：每个关键词一个 CASE WHEN，求和作为 keyword_score
+        StringBuilder sql = new StringBuilder();
+        sql.append("""
+            SELECT id, doc_id, doc_name, chunk_index, sub_index, content,
+                   token_count, char_count, embedding, prev_summary, next_summary, created_at,
+                   (""");
+
+        List<String> kwList = new ArrayList<>(keywords);
+        List<Object> params = new ArrayList<>();
+        for (int i = 0; i < kwList.size(); i++) {
+            if (i > 0) sql.append(" + ");
+            sql.append("CASE WHEN content ILIKE ? THEN 1 ELSE 0 END");
+            params.add("%" + kwList.get(i) + "%");
+        }
+
+        sql.append("""
+            ) AS keyword_score
+            FROM document_chunk
+            WHERE\s""");
+
+        for (int i = 0; i < kwList.size(); i++) {
+            if (i > 0) sql.append(" OR ");
+            sql.append("content ILIKE ?");
+            params.add("%" + kwList.get(i) + "%");
+        }
+
+        sql.append("""
+           \sORDER BY keyword_score DESC
+            LIMIT ?
+            """);
+        params.add(topK);
+
+        try {
+            return jdbcTemplate.query(sql.toString(), new ScoredChunkRowMapper(), params.toArray());
+        } catch (Exception e) {
+            log.error("Keyword search failed", e);
+            return Collections.emptyList();
+        }
+    }
+
+    /**
+     * 提取关键词（中文按字切 2-gram + 英文按空格分词）
+     */
+    private Set<String> extractKeywords(String text) {
+        Set<String> keywords = new LinkedHashSet<>();
+        if (text == null || text.isBlank()) {
+            return keywords;
+        }
+
+        String lower = text.toLowerCase();
+
+        // 英文/数字分词
+        String[] tokens = lower.replaceAll("[^\\u4e00-\\u9fa5a-z0-9]", " ")
+                .split("\\s+");
+        for (String token : tokens) {
+            if (token.length() >= 2) {
+                keywords.add(token);
+            }
+        }
+
+        // 中文 2-gram
+        String chinese = lower.replaceAll("[^\\u4e00-\\u9fa5]", "");
+        for (int i = 0; i < chinese.length() - 1; i++) {
+            keywords.add(chinese.substring(i, i + 2));
+        }
+
+        return keywords;
+    }
+
+    /**
+     * RRF 用打分 chunk
+     */
+    public record ScoredChunk(DocumentChunk chunk, double score) {}
+
+    /**
+     * 带 keyword_score 列的 RowMapper
+     */
+    private static class ScoredChunkRowMapper implements RowMapper<ScoredChunk> {
+        @Override
+        public ScoredChunk mapRow(ResultSet rs, int rowNum) throws SQLException {
+            DocumentChunk chunk = new DocumentChunk();
+            chunk.setId(rs.getString("id"));
+            chunk.setDocumentId(rs.getString("doc_id"));
+            chunk.setDocumentName(rs.getString("doc_name"));
+            chunk.setSectionIndex(rs.getInt("chunk_index"));
+            chunk.setSubIndex(rs.getInt("sub_index"));
+            chunk.setContent(rs.getString("content"));
+            chunk.setTokenCount(rs.getInt("token_count"));
+            chunk.setCharCount(rs.getInt("char_count"));
+            chunk.setPrevSummary(rs.getString("prev_summary"));
+            chunk.setNextSummary(rs.getString("next_summary"));
+
+            String embeddingStr = rs.getString("embedding");
+            if (embeddingStr != null) {
+                chunk.setEmbedding(decodeEmbedding(embeddingStr));
+            }
+
+            double score = rs.getDouble("keyword_score");
+            return new ScoredChunk(chunk, score);
+        }
+    }
 }

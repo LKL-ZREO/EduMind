@@ -16,10 +16,18 @@ const selectedTask = computed(() => {
   return tasks.value.find(t => t.id === selectedTaskId.value) || null
 })
 
-// 提交状态
+// 提交状态（提交后从后端返回获取）
 const submitCount = ref(0)
 const remainingAttempts = ref(3)
 const maxAttempts = 3
+const submittedStudentId = ref('')
+
+// QQ绑定弹窗
+const showQqBindDialog = ref(false)
+const bindStudentId = ref('')
+const bindStudentName = ref('')
+const qqNumberInput = ref('')
+const bindLoading = ref(false)
 
 // 文件名校验
 const fileNameWarnings = ref<string[]>([])
@@ -80,8 +88,6 @@ async function onClassChange() {
 }
 
 async function onTaskChange() {
-  submitCount.value = 0
-  remainingAttempts.value = 3
   fileNameWarnings.value = []
   showConfirmSubmit.value = false
   // 重新倒计时
@@ -124,33 +130,22 @@ function updateCountdown() {
   }
 }
 
-async function checkSubmitStatus() {
-  if (!selectedTaskId.value) return
-  // 从文件名获取学生姓名
-  if (!file.value) return
-  const studentName = parseFileName(file.value.name)?.studentName
-  if (!studentName) return
-
-  try {
-    const res = await fetch(`${apiBaseUrl}/api/homework/submit-status?studentName=${encodeURIComponent(studentName)}&taskId=${selectedTaskId.value}`)
-    const data = await res.json()
-    if (data.code === 200) {
-      submitCount.value = data.data.submitCount
-      remainingAttempts.value = data.data.remainingAttempts
-    }
-  } catch (e) {
-    console.error('检查提交状态失败', e)
-  }
+// 提交成功后更新状态（从后端返回获取）
+function updateSubmitStatusFromResponse(data: { submitCount: number, remainingAttempts: number, studentId: string }) {
+  submitCount.value = data.submitCount
+  remainingAttempts.value = data.remainingAttempts
+  submittedStudentId.value = data.studentId
 }
 
-// 文件名解析
-function parseFileName(name: string): { studentName: string; className: string; assignmentName: string } | null {
-  const match = name.match(/^(.+)_(.+)_(.+)\.\w+$/)
+// 文件名解析（新格式：学号_姓名_班级_作业名.扩展名）
+function parseFileName(name: string): { studentId: string; studentName: string; className: string; assignmentName: string } | null {
+  const match = name.match(/^(.+)_(.+)_(.+)_(.+)\.\w+$/)
   if (!match) return null
   return {
-    studentName: match[1].trim(),
-    className: match[2].trim(),
-    assignmentName: match[3].trim()
+    studentId: match[1].trim(),
+    studentName: match[2].trim(),
+    className: match[3].trim(),
+    assignmentName: match[4].trim()
   }
 }
 
@@ -158,7 +153,7 @@ function validateFileName(name: string): string[] {
   const warnings: string[] = []
   const parsed = parseFileName(name)
   if (!parsed) {
-    warnings.push('文件名格式不正确，请使用「姓名_班级_作业名.扩展名」格式')
+    warnings.push('文件名格式不正确，请使用「学号_姓名_班级_作业名.扩展名」格式，例如：202103001_张三_计科2101_第三次作业.pdf')
     return warnings
   }
 
@@ -211,8 +206,6 @@ function onFileSelected(e: Event) {
       showConfirmSubmit.value = true
     }
   }
-
-  checkSubmitStatus()
 }
 
 function dropHandler(e: DragEvent) {
@@ -234,15 +227,12 @@ function dropHandler(e: DragEvent) {
   }
 
   file.value = f
-
   if (selectedTaskId.value) {
     fileNameWarnings.value = validateFileName(f.name)
     if (fileNameWarnings.value.length > 0) {
       showConfirmSubmit.value = true
     }
   }
-
-  checkSubmitStatus()
 }
 
 function dragOverHandler(e: DragEvent) {
@@ -270,11 +260,6 @@ async function submit() {
 
   if (!fileSizeOk.value) {
     error.value = `文件超过 ${MAX_SIZE_MB}MB 限制`
-    return
-  }
-
-  if (remainingAttempts.value <= 0) {
-    error.value = `提交次数已达上限（${maxAttempts}次），无法继续提交`
     return
   }
 
@@ -314,6 +299,16 @@ async function submit() {
 
     const result = await res.json()
 
+    // 需要绑定QQ号
+    if (result.code === 401 && result.needBind) {
+      bindStudentId.value = result.data?.studentId || ''
+      bindStudentName.value = result.data?.studentName || ''
+      showQqBindDialog.value = true
+      uploading.value = false
+      progress.value = 0
+      return
+    }
+
     if (result.code === 300) {
       // 警告，显示差异信息
       const warns = result.data?.warnings || {}
@@ -333,12 +328,16 @@ async function submit() {
 
     progress.value = 100
     uploaded.value = true
+
+    // 从后端返回获取提交次数和剩余次数
+    if (result.data) {
+      updateSubmitStatusFromResponse(result.data)
+    }
+
     file.value = null
     showConfirmSubmit.value = false
     fileNameWarnings.value = []
     pendingSubmit.value = false
-    submitCount.value++
-    remainingAttempts.value = Math.max(0, remainingAttempts.value - 1)
   } catch (err) {
     error.value = err instanceof Error ? err.message : '上传失败，请检查网络后重试'
     progress.value = 0
@@ -350,6 +349,45 @@ async function submit() {
 function confirmSubmitAnyway() {
   pendingSubmit.value = true
   submit()
+}
+
+// ===== QQ绑定 =====
+async function bindQq() {
+  if (!qqNumberInput.value || !qqNumberInput.value.match(/^\d{5,11}$/)) {
+    alert('请输入正确的QQ号（5-11位数字）')
+    return
+  }
+
+  bindLoading.value = true
+  try {
+    const res = await fetch(`${apiBaseUrl}/api/homework/bind-qq`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        studentId: bindStudentId.value,
+        studentName: bindStudentName.value,
+        qqNumber: qqNumberInput.value
+      })
+    })
+    const data = await res.json()
+    if (data.code === 200) {
+      showQqBindDialog.value = false
+      qqNumberInput.value = ''
+      // 自动重新提交
+      submit()
+    } else {
+      alert(data.message || '绑定失败')
+    }
+  } catch (e) {
+    alert('绑定失败，请检查网络')
+  } finally {
+    bindLoading.value = false
+  }
+}
+
+function cancelBind() {
+  showQqBindDialog.value = false
+  qqNumberInput.value = ''
 }
 </script>
 
@@ -389,12 +427,7 @@ function confirmSubmitAnyway() {
         {{ countdown }}
       </div>
 
-      <!-- 提交次数 -->
-      <div v-if="selectedTaskId" class="attempts-bar">
-        提交次数：<b>{{ submitCount }}</b> / {{ maxAttempts }}
-        <span v-if="remainingAttempts <= 0" class="attempts-exhausted">（已达上限）</span>
-        <span v-else class="attempts-remaining">（剩余 {{ remainingAttempts }} 次）</span>
-      </div>
+
     </div>
 
     <!-- 上传区域 -->
@@ -456,7 +489,12 @@ function confirmSubmitAnyway() {
 
     <!-- 成功提示 -->
     <div v-if="uploaded" class="success-banner">
-      ✅ 作业提交成功！
+      <div class="success-title">✅ 作业提交成功！</div>
+      <div class="success-detail">
+        <div>学号：{{ submittedStudentId }}</div>
+        <div>本次为第 <b>{{ submitCount }}</b> 次提交</div>
+        <div>剩余提交次数：<b>{{ remainingAttempts }}</b> 次</div>
+      </div>
     </div>
 
     <!-- 错误提示 -->
@@ -467,9 +505,41 @@ function confirmSubmitAnyway() {
     <!-- 文件名规范说明 -->
     <div class="usage">
       <h3>📋 文件名命名规范</h3>
-      <p>建议按以下格式命名文件，方便老师批改时识别：</p>
-      <code>姓名_班级_作业名称.pdf</code>
-      <p class="example">例如：<strong>张三_计科2101_第三次作业.pdf</strong></p>
+      <p>请按以下格式命名文件，用于识别身份和统计提交次数：</p>
+      <code>学号_姓名_班级_作业名称.pdf</code>
+      <p class="example">例如：<strong>202103001_张三_计科2101_第三次作业.pdf</strong></p>
+    </div>
+
+    <!-- QQ绑定弹窗 -->
+    <div v-if="showQqBindDialog" class="dialog-overlay" @click="cancelBind">
+      <div class="dialog-content" @click.stop>
+        <h3>🔔 首次提交，请绑定QQ号</h3>
+        <p class="dialog-desc">绑定后，当作业成绩不理想时，我们会通过QQ私聊提醒你。</p>
+        <div class="form-group">
+          <label>学号</label>
+          <input type="text" :value="bindStudentId" disabled class="input-disabled" />
+        </div>
+        <div class="form-group">
+          <label>姓名</label>
+          <input type="text" :value="bindStudentName" disabled class="input-disabled" />
+        </div>
+        <div class="form-group">
+          <label>QQ号</label>
+          <input
+            type="text"
+            v-model="qqNumberInput"
+            placeholder="请输入你的QQ号"
+            maxlength="11"
+            @keyup.enter="bindQq"
+          />
+        </div>
+        <div class="dialog-actions">
+          <button class="btn-cancel" @click="cancelBind">取消</button>
+          <button class="btn-confirm" @click="bindQq" :disabled="bindLoading">
+            {{ bindLoading ? '绑定中...' : '绑定并提交' }}
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -867,12 +937,26 @@ function confirmSubmitAnyway() {
 /* 成功/错误 */
 .success-banner {
   margin-top: 1rem;
-  padding: 0.75rem 1rem;
+  padding: 1rem;
   background: #f0fff4;
   border: 1px solid #9ae6b4;
   border-radius: 8px;
   color: #276749;
-  font-size: 0.95rem;
+}
+
+.success-title {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
+.success-detail {
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+
+.success-detail b {
+  color: #276749;
 }
 
 .error-banner {
@@ -920,5 +1004,114 @@ function confirmSubmitAnyway() {
   margin: 0.5rem 0 0;
   font-size: 0.85rem;
   color: #718096;
+}
+
+/* QQ绑定弹窗 */
+.dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.dialog-content {
+  background: white;
+  border-radius: 12px;
+  padding: 1.5rem;
+  width: 90%;
+  max-width: 400px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+}
+
+.dialog-content h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1.1rem;
+}
+
+.dialog-desc {
+  color: #718096;
+  font-size: 0.85rem;
+  margin-bottom: 1rem;
+}
+
+.dialog-content .form-group {
+  margin-bottom: 1rem;
+}
+
+.dialog-content label {
+  display: block;
+  margin-bottom: 0.4rem;
+  font-size: 0.85rem;
+  color: #4a5568;
+  font-weight: 500;
+}
+
+.dialog-content input {
+  width: 100%;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  box-sizing: border-box;
+}
+
+.dialog-content input:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+.input-disabled {
+  background: #f7fafc;
+  color: #a0aec0;
+}
+
+.dialog-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+}
+
+.btn-cancel {
+  flex: 1;
+  padding: 0.6rem;
+  background: transparent;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  cursor: pointer;
+  color: #4a5568;
+  font-size: 0.9rem;
+  transition: all 0.2s;
+}
+
+.btn-cancel:hover {
+  background: #f7fafc;
+}
+
+.btn-confirm {
+  flex: 1;
+  padding: 0.6rem;
+  background: #667eea;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  color: white;
+  font-size: 0.9rem;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.btn-confirm:hover {
+  background: #5a6fd6;
+}
+
+.btn-confirm:disabled {
+  background: #ccc;
+  cursor: not-allowed;
 }
 </style>

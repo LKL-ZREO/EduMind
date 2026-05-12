@@ -23,7 +23,7 @@ public class OnebotRagController {
 
     private final DocumentService documentService;
 
-    private static final int RAG_TOP_K = 3;
+    private static final int RAG_TOP_K = 6;
 
     /**
      * RAG 增强接口 - 供 OneBot 插件调用
