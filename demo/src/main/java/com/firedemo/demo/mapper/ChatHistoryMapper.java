@@ -43,7 +43,7 @@ public interface ChatHistoryMapper extends BaseMapper<ChatHistory> {
      * @param userId 用户ID
      * @return 历史记录列表
      */
-    @Select("SELECT * FROM chat_history WHERE user_id = #{userId} ORDER BY session_id, created_at ASC")
+    @Select("SELECT * FROM chat_history WHERE user_id = #{userId} ORDER BY session_id, created_at ASC LIMIT 200")
     List<ChatHistory> selectByUserId(@Param("userId") Long userId);
 
     /**

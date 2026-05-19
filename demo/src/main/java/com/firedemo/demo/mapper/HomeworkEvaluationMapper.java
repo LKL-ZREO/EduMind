@@ -8,6 +8,7 @@ import org.apache.ibatis.annotations.Select;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 作业评价Mapper
@@ -16,10 +17,22 @@ import java.util.List;
 public interface HomeworkEvaluationMapper extends BaseMapper<HomeworkEvaluation> {
 
     /**
+     * 查询班级所有作业评价（仅分数，不含 raw_response）
+     */
+    @Select("SELECT total_score FROM homework_evaluation WHERE class_id = #{classId} AND total_score IS NOT NULL")
+    List<Integer> selectScoresByClassId(@Param("classId") Long classId);
+
+    /**
      * 查询班级所有作业评价
      */
     @Select("SELECT * FROM homework_evaluation WHERE class_id = #{classId} ORDER BY created_at DESC")
     List<HomeworkEvaluation> selectByClassId(@Param("classId") Long classId);
+
+    /**
+     * 查询班级所有 raw_response（仅用于错误统计，不拉全字段）
+     */
+    @Select("SELECT raw_response FROM homework_evaluation WHERE class_id = #{classId} AND raw_response IS NOT NULL")
+    List<String> selectRawResponsesByClassId(@Param("classId") Long classId);
 
     /**
      * 查询班级作业数量
@@ -38,4 +51,12 @@ public interface HomeworkEvaluationMapper extends BaseMapper<HomeworkEvaluation>
      */
     @Select("SELECT * FROM homework_evaluation WHERE user_id = #{userId} ORDER BY created_at DESC")
     List<HomeworkEvaluation> selectByUserId(@Param("userId") Long userId);
+
+    /**
+     * 批量查询学生平均分和错误数（避免N+1）
+     */
+    @Select("SELECT user_id, COUNT(*) as homework_count, AVG(total_score) as avg_score " +
+            "FROM homework_evaluation WHERE class_id = #{classId} AND total_score IS NOT NULL " +
+            "GROUP BY user_id")
+    List<Map<String, Object>> selectStudentStatsByClassId(@Param("classId") Long classId);
 }

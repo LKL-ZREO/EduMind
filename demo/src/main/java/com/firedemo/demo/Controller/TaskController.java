@@ -111,7 +111,14 @@ public class TaskController {
     public Result getTasks(@RequestParam Long classId) {
         List<HomeworkTask> tasks = taskMapper.selectByClassId(classId);
 
-        // 为每个作业附加统计信息
+        // 批量查询当前班级所有作业的统计（一条SQL替代N条）
+        List<Map<String, Object>> taskStats = submissionMapper.selectTaskStatsByClassId(classId);
+        Map<Long, Map<String, Object>> statsMap = new HashMap<>();
+        for (Map<String, Object> row : taskStats) {
+            Long taskId = ((Number) row.get("task_id")).longValue();
+            statsMap.put(taskId, row);
+        }
+
         List<Map<String, Object>> result = new ArrayList<>();
         for (HomeworkTask task : tasks) {
             Map<String, Object> item = new LinkedHashMap<>();
@@ -125,37 +132,19 @@ public class TaskController {
             item.put("status", task.getStatus());
             item.put("createdAt", task.getCreatedAt());
 
-            // 统计：已提交人数、总提交次数、平均分（每个学生只取最新）
-            List<Submission> submissions = submissionMapper.selectList(
-                    new LambdaQueryWrapper<Submission>()
-                            .eq(Submission::getTaskId, task.getId())
-                            .orderByDesc(Submission::getSubmittedAt)
-            );
-
-            // 按学号去重，只保留最新提交
-            Map<String, Submission> latestByStudent = new LinkedHashMap<>();
-            for (Submission s : submissions) {
-                String key = s.getStudentId() != null ? s.getStudentId() : s.getStudentName();
-                if (!latestByStudent.containsKey(key)) {
-                    latestByStudent.put(key, s);
-                }
+            // 从批量统计中取值
+            Map<String, Object> stats = statsMap.get(task.getId());
+            if (stats != null) {
+                Number count = (Number) stats.get("submitted_count");
+                Number avg = (Number) stats.get("avg_score");
+                item.put("submittedCount", count != null ? count.intValue() : 0);
+                item.put("avgScore", avg != null ? avg.doubleValue() : 0.0);
+            } else {
+                item.put("submittedCount", 0);
+                item.put("avgScore", 0.0);
             }
-            List<Submission> latestSubmissions = new ArrayList<>(latestByStudent.values());
+            item.put("totalSubmissions", item.get("submittedCount"));
 
-            long submittedCount = latestByStudent.size();
-            int totalSubmissions = latestSubmissions.size();
-
-            double avgScore = latestSubmissions.stream()
-                    .filter(s -> s.getTotalScore() != null)
-                    .mapToInt(Submission::getTotalScore)
-                    .average()
-                    .orElse(0);
-
-            item.put("submittedCount", submittedCount);
-            item.put("totalSubmissions", totalSubmissions);
-            item.put("avgScore", Math.round(avgScore * 10.0) / 10.0);
-
-            // 判断过期
             boolean expired = task.getDeadline() != null && task.getDeadline().isBefore(LocalDateTime.now());
             item.put("expired", expired);
 

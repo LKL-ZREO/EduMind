@@ -104,7 +104,13 @@ public interface SubmissionMapper extends BaseMapper<Submission> {
     /**
      * 查询学生提交记录，按作业序号排序（用于成长曲线，每个作业只取最新）
      */
-    @Select("SELECT s.* FROM submission s " +
+    @Select("SELECT s.id, s.student_name, s.student_id, s.class_name, s.class_id, " +
+            "s.assignment_name, s.file_name, s.file_path, s.file_size, " +
+            "s.total_score, s.content_score, s.overall_comment, " +
+            "s.strengths, s.weaknesses, s.suggestions, s.status, s.error_message, " +
+            "s.submitted_at, s.task_id, s.submit_count, s.remaining_attempts, " +
+            "s.is_late, s.penalty_applied, s.final_score, s.assignment_no " +
+            "FROM submission s " +
             "INNER JOIN (" +
             "  SELECT task_id, MAX(submitted_at) as max_time " +
             "  FROM submission WHERE student_name = #{studentName} AND class_id = #{classId} " +
@@ -116,7 +122,13 @@ public interface SubmissionMapper extends BaseMapper<Submission> {
     /**
      * 根据学号查询学生提交记录，按作业序号排序
      */
-    @Select("SELECT s.* FROM submission s " +
+    @Select("SELECT s.id, s.student_name, s.student_id, s.class_name, s.class_id, " +
+            "s.assignment_name, s.file_name, s.file_path, s.file_size, " +
+            "s.total_score, s.content_score, s.overall_comment, " +
+            "s.strengths, s.weaknesses, s.suggestions, s.status, s.error_message, " +
+            "s.submitted_at, s.task_id, s.submit_count, s.remaining_attempts, " +
+            "s.is_late, s.penalty_applied, s.final_score, s.assignment_no " +
+            "FROM submission s " +
             "INNER JOIN (" +
             "  SELECT task_id, MAX(submitted_at) as max_time " +
             "  FROM submission WHERE student_id = #{studentId} AND class_id = #{classId} " +
@@ -130,4 +142,19 @@ public interface SubmissionMapper extends BaseMapper<Submission> {
      */
     @Select("SELECT COUNT(*) FROM submission WHERE student_id = #{studentId} AND task_id = #{taskId}")
     Integer countByStudentIdAndTaskId(@Param("studentId") String studentId, @Param("taskId") Long taskId);
+
+    /**
+     * 查询班级所有 raw_response（仅用于错误统计）
+     */
+    @Select("SELECT raw_response FROM submission WHERE class_id = #{classId} AND raw_response IS NOT NULL")
+    List<String> selectRawResponsesByClassId(@Param("classId") Long classId);
+
+    /**
+     * 批量查询班级下所有作业的统计（每个学生只取最新提交）
+     */
+    @Select("SELECT task_id, COUNT(DISTINCT student_id) as submitted_count, " +
+            "ROUND(AVG(total_score)) as avg_score FROM submission " +
+            "WHERE class_id = #{classId} AND total_score IS NOT NULL " +
+            "GROUP BY task_id")
+    List<Map<String, Object>> selectTaskStatsByClassId(@Param("classId") Long classId);
 }

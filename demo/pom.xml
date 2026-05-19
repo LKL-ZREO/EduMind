@@ -75,6 +75,13 @@
             <artifactId>HikariCP</artifactId>
         </dependency>
 
+        <!-- Redisson Redis客户端（Stream消息队列） -->
+        <dependency>
+            <groupId>org.redisson</groupId>
+            <artifactId>redisson</artifactId>
+            <version>3.29.0</version>
+        </dependency>
+
         <!-- JWT 依赖 -->
         <dependency>
             <groupId>io.jsonwebtoken</groupId>

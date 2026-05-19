@@ -240,22 +240,16 @@ export default {
     async loadTasks() {
       if (!this.classList.length) return
       try {
-        const allTasks = []
-        for (const cls of this.classList) {
-          try {
-            const response = await fetch(`${this.apiBaseUrl}/tasks?classId=${cls.id}`, {
+        const results = await Promise.allSettled(
+          this.classList.map(cls =>
+            fetch(`${this.apiBaseUrl}/tasks?classId=${cls.id}`, {
               headers: { 'Authorization': `Bearer ${this.getToken()}` }
-            })
-            if (!response.ok) continue
-            const result = await response.json()
-            if (result.code === 200) {
-              allTasks.push(...result.data)
-            }
-          } catch (e) {
-            console.error(`加载班级 ${cls.id} 任务失败`, e)
-          }
-        }
-        this.tasks = allTasks
+            }).then(r => r.ok ? r.json() : Promise.reject(r.status))
+          )
+        )
+        this.tasks = results
+          .filter(r => r.status === 'fulfilled' && r.value.code === 200)
+          .flatMap(r => r.value.data)
       } catch (e) {
         console.error('加载任务失败', e)
       }

@@ -72,4 +72,10 @@ public class Submission {
 
     /** 学号（用于游客提交次数统计） */
     private String studentId;
+
+    /** 批改状态：PENDING / PROCESSING / COMPLETED / FAILED */
+    private String status;
+
+    /** 批改失败时的错误信息 */
+    private String errorMessage;
 }

@@ -70,6 +70,10 @@ watch(isLoggedIn, (loggedIn) => {
               <span class="icon">📝</span>
               知识库管理
             </RouterLink>
+            <RouterLink to="/teacher/tasks" class="nav-item">
+              <span class="icon">📋</span>
+              作业管理
+            </RouterLink>
             <RouterLink to="/teacher/data" class="nav-item">
               <span class="icon">🎒</span>
               数据中心

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { RouterLink } from 'vue-router'
+import request from '@/api/request'
 
 // ===== 班级 & 作业选择 =====
 const classes = ref<Array<{id: number, name: string}>>([])
@@ -41,6 +42,12 @@ const uploaded = ref(false)
 const error = ref('')
 const progress = ref(0)
 
+// 异步批改轮询
+const submissionId = ref<number | null>(null)
+const gradingStatus = ref('')  // PENDING / PROCESSING / COMPLETED / FAILED
+const gradingResult = ref<any>(null)
+let pollTimer: ReturnType<typeof setInterval> | null = null
+
 const MAX_SIZE_MB = 20
 const acceptTypes = '.pdf,.doc,.docx,.txt,.jpg,.jpeg,.png,.zip,.rar'
 
@@ -54,6 +61,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   if (countdownTimer) clearInterval(countdownTimer)
+  stopPolling()
 })
 
 // ===== 方法 =====
@@ -329,6 +337,14 @@ async function submit() {
     progress.value = 100
     uploaded.value = true
 
+    // 保存 submissionId，启动轮询
+    if (result.data?.submissionId) {
+      submissionId.value = result.data.submissionId
+      gradingStatus.value = 'PENDING'
+      gradingResult.value = null
+      startPolling()
+    }
+
     // 从后端返回获取提交次数和剩余次数
     if (result.data) {
       updateSubmitStatusFromResponse(result.data)
@@ -388,6 +404,61 @@ async function bindQq() {
 function cancelBind() {
   showQqBindDialog.value = false
   qqNumberInput.value = ''
+}
+
+// ===== 异步批改轮询 =====
+function startPolling() {
+  stopPolling()
+  pollResult()
+  pollTimer = setInterval(pollResult, 2000)
+}
+
+function stopPolling() {
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+}
+
+async function pollResult() {
+  if (!submissionId.value) return
+
+  try {
+    const res = await request.get(`/homework/result/${submissionId.value}`)
+    const data = res.data
+
+    if (data.code === 200 && data.data) {
+      const s = data.data
+      gradingStatus.value = s.status
+
+      if (s.status === 'COMPLETED') {
+        stopPolling()
+        gradingResult.value = s
+      } else if (s.status === 'FAILED') {
+        stopPolling()
+        gradingResult.value = s
+      }
+    }
+  } catch (e) {
+    console.error('轮询批改结果失败', e)
+  }
+}
+
+const gradingStatusText: Record<string, string> = {
+  PENDING: '📋 排队中...',
+  PROCESSING: '🤖 正在批改中...',
+  COMPLETED: '✅ 批改完成',
+  FAILED: '❌ 批改失败',
+}
+
+function scoreColor(score: number): string {
+  if (score >= 80) return 'score-high'
+  if (score >= 60) return 'score-mid'
+  return 'score-low'
+}
+
+function joinArray(arr: string[]): string {
+  return arr?.join('、') || ''
 }
 </script>
 
@@ -487,7 +558,58 @@ function cancelBind() {
       </div>
     </div>
 
-    <!-- 成功提示 -->
+    <!-- 批改进度 & 结果 -->
+    <div v-if="uploaded && submissionId" class="grading-section">
+      <div class="grading-card">
+        <!-- 进度状态 -->
+        <div v-if="gradingStatus !== 'COMPLETED' && gradingStatus !== 'FAILED'" class="grading-progress">
+          <div class="grading-spinner"></div>
+          <div class="grading-status">{{ gradingStatusText[gradingStatus] || '📋 排队中...' }}</div>
+          <div class="grading-sub">submissionId: {{ submissionId }} | 每 2 秒自动刷新</div>
+        </div>
+
+        <!-- 批改完成 -->
+        <div v-else-if="gradingStatus === 'COMPLETED' && gradingResult" class="grading-done">
+          <div class="score-circle" :class="scoreColor(gradingResult.totalScore)">
+            <span class="score-num">{{ gradingResult.totalScore }}</span>
+            <span class="score-label">分</span>
+          </div>
+          <div class="result-title">{{ gradingStatusText['COMPLETED'] }}</div>
+
+          <div class="result-details" v-if="gradingResult">
+            <div class="detail-row" v-if="gradingResult.overallComment">
+              <span class="detail-label">📝 综合评语</span>
+              <span class="detail-value">{{ gradingResult.overallComment }}</span>
+            </div>
+            <div class="detail-row" v-if="gradingResult.strengths?.length">
+              <span class="detail-label">👍 优点</span>
+              <span class="detail-value">{{ joinArray(gradingResult.strengths) }}</span>
+            </div>
+            <div class="detail-row" v-if="gradingResult.weaknesses?.length">
+              <span class="detail-label">👎 不足</span>
+              <span class="detail-value">{{ joinArray(gradingResult.weaknesses) }}</span>
+            </div>
+            <div class="detail-row" v-if="gradingResult.suggestions">
+              <span class="detail-label">💡 建议</span>
+              <span class="detail-value">{{ gradingResult.suggestions }}</span>
+            </div>
+            <div class="detail-row" v-if="gradingResult.finalScore != null && gradingResult.finalScore !== gradingResult.totalScore">
+              <span class="detail-label">⚠️ 最终分数（逾期扣分后）</span>
+              <span class="detail-value final-score">{{ gradingResult.finalScore }} 分</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 批改失败 -->
+        <div v-else-if="gradingStatus === 'FAILED'" class="grading-failed">
+          <div class="failed-icon">❌</div>
+          <div class="result-title">{{ gradingStatusText['FAILED'] }}</div>
+          <div class="error-message" v-if="gradingResult?.errorMessage">{{ gradingResult.errorMessage }}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 旧成功提示（保留兼容） -->
     <div v-if="uploaded" class="success-banner">
       <div class="success-title">✅ 作业提交成功！</div>
       <div class="success-detail">
@@ -1113,5 +1235,154 @@ function cancelBind() {
 .btn-confirm:disabled {
   background: #ccc;
   cursor: not-allowed;
+}
+
+/* ===== 批改进度 & 结果 ===== */
+.grading-section {
+  margin-top: 1rem;
+}
+
+.grading-card {
+  background: white;
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  text-align: center;
+}
+
+.grading-progress {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.grading-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid #e2e8f0;
+  border-top-color: #667eea;
+  border-radius: 50%;
+  animation: grading-spin 0.8s linear infinite;
+}
+
+@keyframes grading-spin {
+  to { transform: rotate(360deg); }
+}
+
+.grading-status {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #2d3748;
+}
+
+.grading-sub {
+  font-size: 0.8rem;
+  color: #a0aec0;
+}
+
+/* 批改完成 */
+.grading-done {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.score-circle {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-weight: 700;
+}
+
+.score-circle.score-high {
+  background: linear-gradient(135deg, #48bb78, #38a169);
+}
+
+.score-circle.score-mid {
+  background: linear-gradient(135deg, #ed8936, #dd6b20);
+}
+
+.score-circle.score-low {
+  background: linear-gradient(135deg, #fc8181, #e53e3e);
+}
+
+.score-num {
+  font-size: 1.8rem;
+  line-height: 1;
+}
+
+.score-label {
+  font-size: 0.75rem;
+}
+
+.result-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #2d3748;
+}
+
+.result-details {
+  width: 100%;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-top: 0.25rem;
+}
+
+.detail-row {
+  padding: 0.5rem 0.75rem;
+  background: #f7fafc;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.detail-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #4a5568;
+}
+
+.detail-value {
+  font-size: 0.85rem;
+  color: #718096;
+  line-height: 1.5;
+}
+
+.final-score {
+  color: #e53e3e;
+  font-weight: 600;
+}
+
+/* 批改失败 */
+.grading-failed {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.failed-icon {
+  font-size: 2.5rem;
+}
+
+.error-message {
+  font-size: 0.85rem;
+  color: #e53e3e;
+  padding: 0.5rem 0.75rem;
+  background: #fff5f5;
+  border-radius: 8px;
+  border: 1px solid #feb2b2;
+  max-width: 100%;
+  word-break: break-word;
 }
 </style>
