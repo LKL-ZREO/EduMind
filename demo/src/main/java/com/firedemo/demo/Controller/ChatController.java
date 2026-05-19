@@ -1,5 +1,8 @@
 package com.firedemo.demo.Controller;
 
+import com.firedemo.demo.common.annotation.RateLimit;
+import com.firedemo.demo.common.annotation.RateLimit.Dimension;
+import com.firedemo.demo.common.annotation.RateLimit.TimeUnit;
 
 import com.firedemo.demo.DTO.ChatResponse;
 import com.firedemo.demo.DTO.EvaluationResultDTO;
@@ -115,8 +118,9 @@ public class ChatController {
     }
 
     /**
-     * 流式聊天（SSE）
+     * 流式聊天（SSE）— 全局限流 + IP限流
      */
+    @RateLimit(dimensions = {Dimension.GLOBAL, Dimension.IP}, count = 10, interval = 60, timeUnit = TimeUnit.SECONDS)
     @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public ResponseEntity<StreamingResponseBody> streamMessage(@RequestParam String message,
                                                                @RequestParam(required = false) String sessionId,
@@ -192,11 +196,9 @@ public class ChatController {
     }
 
     /**
-     * 作业批改（通过文件路径，非流式）
-     *
-     * @param request 批改请求
-     * @return 批改结果
+     * 作业批改 — 全局 + 用户限流
      */
+    @RateLimit(dimensions = {Dimension.GLOBAL, Dimension.USER}, count = 5, interval = 60, timeUnit = TimeUnit.SECONDS)
     @PostMapping("/grade")
     public ResponseEntity<ChatResponse> gradeHomework(@Valid @RequestBody GradeRequest request,
                                                        HttpServletRequest httpRequest) {

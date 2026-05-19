@@ -1,15 +1,20 @@
 package com.firedemo.demo.Controller;
 
 import com.firedemo.demo.DTO.*;
+import com.firedemo.demo.Service.DashboardRagService;
 import com.firedemo.demo.Service.DashboardService;
-import com.firedemo.demo.config.Result;
+import com.firedemo.demo.common.exception.ErrorCode;
+import com.firedemo.demo.common.result.Result;
+import com.firedemo.demo.rag.VectorStoreService;
 import com.firedemo.demo.utils.JwtUtil;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
+import org.redisson.api.RBloomFilter;
 import org.springframework.web.bind.annotation.*;
 
-
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 仪表盘数据控制器
@@ -21,6 +26,9 @@ public class DashboardController {
 
     private final DashboardService dashboardService;
     private final JwtUtil jwtUtil;
+    private final DashboardRagService dashboardRagService;
+    private final VectorStoreService vectorStoreService;
+    private final RBloomFilter<String> classIdBloomFilter;
 
     /**
      * 获取核心指标
@@ -33,6 +41,10 @@ public class DashboardController {
         Long userId = jwtUtil.getUserIdFromRequest(request);
         if (userId == null) {
             return Result.error(401, "未登录");
+        }
+        // 布隆过滤器防穿透 — 不存在的班级ID直接拦截
+        if (!classIdBloomFilter.contains(String.valueOf(classId))) {
+            return Result.error(ErrorCode.DATA_NOT_FOUND.getCode(), "班级不存在");
         }
         
         DashboardMetricsDTO metrics = dashboardService.getMetrics(classId);
@@ -50,6 +62,9 @@ public class DashboardController {
         if (userId == null) {
             return Result.error(401, "未登录");
         }
+        if (!classIdBloomFilter.contains(String.valueOf(classId))) {
+            return Result.error(ErrorCode.DATA_NOT_FOUND.getCode(), "班级不存在");
+        }
         
         List<ScoreDistributionDTO> distribution = dashboardService.getScoreDistribution(classId);
         return Result.success(distribution);
@@ -66,6 +81,9 @@ public class DashboardController {
         if (userId == null) {
             return Result.error(401, "未登录");
         }
+        if (!classIdBloomFilter.contains(String.valueOf(classId))) {
+            return Result.error(ErrorCode.DATA_NOT_FOUND.getCode(), "班级不存在");
+        }
         
         List<KnowledgeMasteryDTO> mastery = dashboardService.getKnowledgeMastery(classId);
         return Result.success(mastery);
@@ -81,6 +99,9 @@ public class DashboardController {
         Long userId = jwtUtil.getUserIdFromRequest(request);
         if (userId == null) {
             return Result.error(401, "未登录");
+        }
+        if (!classIdBloomFilter.contains(String.valueOf(classId))) {
+            return Result.error(ErrorCode.DATA_NOT_FOUND.getCode(), "班级不存在");
         }
         
         List<FrequentErrorDTO> errors = dashboardService.getFrequentErrors(classId);
@@ -99,6 +120,9 @@ public class DashboardController {
         Long userId = jwtUtil.getUserIdFromRequest(request);
         if (userId == null) {
             return Result.error(401, "未登录");
+        }
+        if (!classIdBloomFilter.contains(String.valueOf(classId))) {
+            return Result.error(ErrorCode.DATA_NOT_FOUND.getCode(), "班级不存在");
         }
         
         List<StudentOverviewDTO> students = dashboardService.getStudentOverview(classId, sortBy, keyword);
@@ -119,8 +143,6 @@ public class DashboardController {
         return Result.success(classes);
     }
     
-    private final com.firedemo.demo.Service.DashboardRagService dashboardRagService;
-    
     /**
      * 上传仪表盘数据到RAG知识库
      */
@@ -130,6 +152,9 @@ public class DashboardController {
         if (userId == null) {
             return Result.error(401, "未登录");
         }
+        if (!classIdBloomFilter.contains(String.valueOf(data.getClassId()))) {
+            return Result.error(ErrorCode.DATA_NOT_FOUND.getCode(), "班级不存在");
+        }
         
         // 检查今天是否已上传
         String docIdPrefix = "dashboard_" + data.getClassId();
@@ -138,11 +163,9 @@ public class DashboardController {
         }
         
         // 执行上传
-        java.util.Map<String, Object> result = dashboardRagService.uploadDashboard(data);
+        Map<String, Object> result = dashboardRagService.uploadDashboard(data);
         return Result.success(result);
     }
-    
-    private final com.firedemo.demo.rag.VectorStoreService vectorStoreService;
     
     /**
      * 检查今天是否已上传
@@ -153,11 +176,14 @@ public class DashboardController {
         if (userId == null) {
             return Result.error(401, "未登录");
         }
+        if (!classIdBloomFilter.contains(String.valueOf(classId))) {
+            return Result.error(ErrorCode.DATA_NOT_FOUND.getCode(), "班级不存在");
+        }
         
         String docIdPrefix = "dashboard_" + classId;
         boolean exists = vectorStoreService.existsToday(docIdPrefix);
         
-        java.util.Map<String, Object> result = new java.util.HashMap<>();
+        Map<String, Object> result = new HashMap<>();
         result.put("classId", classId);
         result.put("uploadedToday", exists);
         

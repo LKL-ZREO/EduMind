@@ -27,8 +27,23 @@
         <url/>
     </scm>
     <properties>
-        <java.version>17</java.version>
+        <java.version>21</java.version>
+        <spring-ai.version>2.0.0-M1</spring-ai.version>
+        <spring-boot.version>4.0.4</spring-boot.version>
     </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.springframework.ai</groupId>
+                <artifactId>spring-ai-bom</artifactId>
+                <version>${spring-ai.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
     <dependencies>
         <!-- 已移除 Redis，改用 PostgreSQL -->
         <dependency>
@@ -52,6 +67,16 @@
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
         </dependency>
+        <!-- Spring AOP + AspectJ（限流切面） -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-aop</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.aspectj</groupId>
+            <artifactId>aspectjweaver</artifactId>
+        </dependency>
+
         <!-- Spring Security 安全框架（必加） -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -80,6 +105,16 @@
             <groupId>org.redisson</groupId>
             <artifactId>redisson</artifactId>
             <version>3.29.0</version>
+        </dependency>
+
+        <!-- Spring Boot Cache + Caffeine 本地缓存 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-cache</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.github.ben-manes.caffeine</groupId>
+            <artifactId>caffeine</artifactId>
         </dependency>
 
         <!-- JWT 依赖 -->
@@ -111,10 +146,6 @@
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
             <optional>true</optional>
-        </dependency>
-        <dependency>
-            <groupId>com.fasterxml.jackson.core</groupId>
-            <artifactId>jackson-databind</artifactId>
         </dependency>
         <!-- 参数校验 -->
         <dependency>
@@ -167,6 +198,19 @@
             <scope>test</scope>
         </dependency>
 
+        <!-- OpenAPI 文档 (Spring Boot 4.x 兼容) -->
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+            <version>3.0.0</version>
+        </dependency>
+
+        <!-- Spring AI 2.0 - OpenAI 兼容模式 (OpenClaw Gateway) -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-model-openai</artifactId>
+        </dependency>
+
         <!-- Apache Tika - 文档解析 -->
         <dependency>
             <groupId>org.apache.tika</groupId>
@@ -209,5 +253,16 @@
             </plugin>
         </plugins>
     </build>
+
+    <repositories>
+        <repository>
+            <id>spring-milestones</id>
+            <name>Spring Milestones</name>
+            <url>https://repo.spring.io/milestone</url>
+            <snapshots>
+                <enabled>false</enabled>
+            </snapshots>
+        </repository>
+    </repositories>
 
 </project>

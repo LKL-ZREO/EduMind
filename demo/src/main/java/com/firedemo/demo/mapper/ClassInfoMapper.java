@@ -30,4 +30,10 @@ public interface ClassInfoMapper extends BaseMapper<ClassInfo> {
      */
     @Select("SELECT qq_group_id FROM class_info WHERE id = #{classId}")
     String selectQqGroupIdById(Long classId);
+
+    /**
+     * 查询所有班级ID（布隆过滤器初始化用）
+     */
+    @Select("SELECT id FROM class_info")
+    List<Long> selectAllIds();
 }

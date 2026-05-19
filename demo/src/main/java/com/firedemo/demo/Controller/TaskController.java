@@ -3,7 +3,8 @@ package com.firedemo.demo.Controller;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.firedemo.demo.Entity.HomeworkTask;
 import com.firedemo.demo.Entity.Submission;
-import com.firedemo.demo.config.Result;
+
+import com.firedemo.demo.common.result.Result;
 import com.firedemo.demo.mapper.HomeworkTaskMapper;
 import com.firedemo.demo.mapper.SubmissionMapper;
 import com.firedemo.demo.utils.JwtUtil;

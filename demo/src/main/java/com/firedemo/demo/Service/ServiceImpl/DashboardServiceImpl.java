@@ -14,6 +14,8 @@ import com.firedemo.demo.mapper.SubmissionMapper;
 import com.firedemo.demo.mapper.UserMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.CacheConfig;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -28,6 +30,7 @@ import com.firedemo.demo.Entity.Submission;
 @Slf4j
 @Service
 @RequiredArgsConstructor
+@CacheConfig(cacheNames = "dashboard")
 public class DashboardServiceImpl implements DashboardService {
 
     private final HomeworkEvaluationMapper evaluationMapper;
@@ -160,6 +163,7 @@ public class DashboardServiceImpl implements DashboardService {
     }
 
     @Override
+    @Cacheable(key = "'metrics:' + #classId", sync = true)
     public DashboardMetricsDTO getMetrics(Long classId) {
         DashboardMetricsDTO metrics = new DashboardMetricsDTO();
         
@@ -207,6 +211,7 @@ public class DashboardServiceImpl implements DashboardService {
     }
 
     @Override
+    @Cacheable(key = "'scoreDist:' + #classId", sync = true)
     public List<ScoreDistributionDTO> getScoreDistribution(Long classId) {
         // 按每个学生的平均分统计（学生学情概览数据），而非每份作业
         List<Map<String, Object>> studentOverview = submissionMapper.selectStudentOverviewByClassId(classId);
@@ -243,6 +248,7 @@ public class DashboardServiceImpl implements DashboardService {
     }
 
     @Override
+    @Cacheable(key = "'knowledge:' + #classId", sync = true)
     public List<KnowledgeMasteryDTO> getKnowledgeMastery(Long classId) {
         // 从 homework_knowledge 表查询知识点掌握度统计（老师端）
         List<Map<String, Object>> teacherStats = homeworkKnowledgeMapper.selectKnowledgeStatsByClassId(classId);
@@ -283,6 +289,7 @@ public class DashboardServiceImpl implements DashboardService {
     }
 
     @Override
+    @Cacheable(key = "'errors:' + #classId", sync = true)
     public List<FrequentErrorDTO> getFrequentErrors(Long classId) {
         List<String> evalRawResponses = evaluationMapper.selectRawResponsesByClassId(classId);
         List<String> submissionRawResponses = submissionMapper.selectRawResponsesByClassId(classId);

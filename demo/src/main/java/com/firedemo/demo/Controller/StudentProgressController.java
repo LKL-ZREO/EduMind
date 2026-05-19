@@ -1,6 +1,6 @@
 package com.firedemo.demo.Controller;
 
-import com.firedemo.demo.config.Result;
+import com.firedemo.demo.common.result.Result;
 import com.firedemo.demo.utils.JwtUtil;
 import com.firedemo.demo.mapper.SubmissionMapper;
 import com.firedemo.demo.Entity.Submission;

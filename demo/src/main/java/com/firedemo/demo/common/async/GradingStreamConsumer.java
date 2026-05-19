@@ -8,6 +8,7 @@ import com.firedemo.demo.Entity.Submission;
 import com.firedemo.demo.Service.FileStorageService;
 import com.firedemo.demo.Service.OneBotHttpService;
 import com.firedemo.demo.Service.OpenClawService;
+import com.firedemo.demo.common.cache.CacheConsistencyService;
 import com.firedemo.demo.mapper.ClassStudentMapper;
 import com.firedemo.demo.mapper.HomeworkKnowledgeMapper;
 import com.firedemo.demo.mapper.HomeworkTaskMapper;
@@ -16,27 +17,38 @@ import com.firedemo.demo.mapper.SubmissionMapper;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
-import org.redisson.api.RStream;
 import org.redisson.RedissonShutdownException;
+import org.redisson.api.RLock;
+import org.redisson.api.RStream;
 import org.redisson.api.RedissonClient;
 import org.redisson.api.StreamMessageId;
 import org.redisson.api.stream.StreamCreateGroupArgs;
 import org.redisson.api.stream.StreamReadGroupArgs;
 import org.redisson.client.codec.StringCodec;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 批改任务消费者 — 从 Redis Stream 消费消息，调 OpenClaw 批改，写回数据库
  * <p>
  * 单线程消费，天然保证 AI 调用串行，OpenClaw 不会被打崩。
+ * <p>
+ * 可靠性增强：
+ * <ul>
+ *   <li>分布式锁防重复消费（同一 submissionId 只处理一次）</li>
+ *   <li>Pending 僵尸消息定时认领（消费者宕机后自动接管）</li>
+ *   <li>延迟双删保证缓存一致性</li>
+ * </ul>
  */
 @Slf4j
 @Component
@@ -53,6 +65,7 @@ public class GradingStreamConsumer {
     private final ClassStudentMapper classStudentMapper;
     private final StudentQqBindingMapper studentQqBindingMapper;
     private final ObjectMapper objectMapper;
+    private final CacheConsistencyService cacheConsistencyService;
 
     private final AtomicBoolean running = new AtomicBoolean(false);
     private ExecutorService executor;
@@ -68,7 +81,8 @@ public class GradingStreamConsumer {
                                   HomeworkTaskMapper taskMapper,
                                   ClassStudentMapper classStudentMapper,
                                   StudentQqBindingMapper studentQqBindingMapper,
-                                  ObjectMapper objectMapper) {
+                                  ObjectMapper objectMapper,
+                                  CacheConsistencyService cacheConsistencyService) {
         this.redissonClient = redissonClient;
         this.gradingStreamProducer = gradingStreamProducer;
         this.submissionMapper = submissionMapper;
@@ -80,6 +94,7 @@ public class GradingStreamConsumer {
         this.classStudentMapper = classStudentMapper;
         this.studentQqBindingMapper = studentQqBindingMapper;
         this.objectMapper = objectMapper;
+        this.cacheConsistencyService = cacheConsistencyService;
     }
 
     @PostConstruct
@@ -117,6 +132,8 @@ public class GradingStreamConsumer {
         log.info("批改消费者已关闭: consumerName={}", consumerName);
     }
 
+    // ==================== 消息消费 ====================
+
     private void consumeLoop() {
         RStream<String, String> stream = redissonClient.getStream(
                 AsyncTaskConstants.GRADING_STREAM_KEY, StringCodec.INSTANCE);
@@ -151,6 +168,66 @@ public class GradingStreamConsumer {
         }
     }
 
+    /**
+     * 定时扫描 Pending 队列 — 僵尸消息兜底
+     * <p>
+     * 当消费者宕机时，其未 ACK 的消息会永久停留在 Pending 队列。
+     * 此处作为兜底机制，将超时消息重新分配给当前消费者。
+     * 实际认领通过 Redisson claim API 完成，依赖 Stream 消费者组自动重分配。
+     */
+    @Scheduled(fixedDelay = 30_000)
+    @SuppressWarnings("unchecked")
+    public void claimPendingMessages() {
+        try {
+            RStream<String, String> stream = redissonClient.getStream(
+                    AsyncTaskConstants.GRADING_STREAM_KEY, StringCodec.INSTANCE);
+            java.util.List rawList = (java.util.List) stream.listPending(
+                    AsyncTaskConstants.GRADING_GROUP,
+                    StreamMessageId.MIN,
+                    StreamMessageId.MAX,
+                    100);
+
+            if (rawList == null || rawList.isEmpty()) {
+                return;
+            }
+
+            int claimedCount = 0;
+            for (Object item : rawList) {
+                try {
+                    StreamMessageId msgId = extractMessageId(item);
+                    long idleTime = extractIdleTime(item);
+                    if (idleTime > 60_000) {
+                        stream.claim(AsyncTaskConstants.GRADING_GROUP,
+                                this.consumerName, idleTime, TimeUnit.MILLISECONDS, msgId);
+                        claimedCount++;
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+            if (claimedCount > 0) {
+                log.warn("认领僵尸消息: count={}", claimedCount);
+            }
+        } catch (Exception e) {
+            log.debug("Pending扫描结束: {}", e.getMessage());
+        }
+    }
+
+    private StreamMessageId extractMessageId(Object entry) throws Exception {
+        if (entry instanceof StreamMessageId) {
+            return (StreamMessageId) entry;
+        }
+        return (StreamMessageId) entry.getClass().getMethod("getId").invoke(entry);
+    }
+
+    private long extractIdleTime(Object entry) throws Exception {
+        if (entry instanceof StreamMessageId) {
+            return Long.MAX_VALUE;
+        }
+        return (long) entry.getClass().getMethod("getIdleTime").invoke(entry);
+    }
+
+    // ==================== 消息处理 ====================
+
     private void processOne(StreamMessageId messageId, Map<String, String> data) {
         String submissionIdStr = data.get(AsyncTaskConstants.FIELD_SUBMISSION_ID);
         if (submissionIdStr == null) {
@@ -159,22 +236,36 @@ public class GradingStreamConsumer {
         }
 
         Long submissionId = Long.parseLong(submissionIdStr);
-        String requirement = data.getOrDefault(AsyncTaskConstants.FIELD_REQUIREMENT, "");
-        int retryCount = Integer.parseInt(data.getOrDefault(AsyncTaskConstants.FIELD_RETRY_COUNT, "0"));
 
-        log.info("开始批改: submissionId={}, retryCount={}", submissionId, retryCount);
-
-        Submission submission = submissionMapper.selectById(submissionId);
-        if (submission == null) {
-            log.warn("提交记录不存在: submissionId={}", submissionId);
+        // 分布式锁防重复消费
+        RLock lock = redissonClient.getLock("lock:grading:" + submissionId);
+        try {
+            if (!lock.tryLock(0, 120, TimeUnit.SECONDS)) {
+                log.info("批改任务已在处理中，跳过: submissionId={}", submissionId);
+                ack(messageId);
+                return;
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
             ack(messageId);
             return;
         }
 
-        submission.setStatus("PROCESSING");
-        submissionMapper.updateById(submission);
-
         try {
+            String requirement = data.getOrDefault(AsyncTaskConstants.FIELD_REQUIREMENT, "");
+            int retryCount = Integer.parseInt(data.getOrDefault(AsyncTaskConstants.FIELD_RETRY_COUNT, "0"));
+
+            log.info("开始批改: submissionId={}, retryCount={}", submissionId, retryCount);
+
+            Submission submission = submissionMapper.selectById(submissionId);
+            if (submission == null) {
+                log.warn("提交记录不存在: submissionId={}", submissionId);
+                return;
+            }
+
+            submission.setStatus("PROCESSING");
+            submissionMapper.updateById(submission);
+
             String fileContent = fileStorageService.readFileContent(submission.getFilePath());
             if (fileContent == null || fileContent.isEmpty()) {
                 throw new RuntimeException("无法读取文件内容");
@@ -192,6 +283,15 @@ public class GradingStreamConsumer {
 
             log.info("批改完成: submissionId={}, score={}", submissionId, evaluation.getTotalScore());
 
+            // 延迟双删 — 缓存一致性
+            if (submission.getClassId() != null) {
+                cacheConsistencyService.evictWithDoubleDelete("dashboard",
+                        "metrics:" + submission.getClassId(),
+                        "scoreDist:" + submission.getClassId(),
+                        "knowledge:" + submission.getClassId(),
+                        "errors:" + submission.getClassId());
+            }
+
             if (evaluation.getTotalScore() != null && evaluation.getTotalScore() < 60) {
                 String qq = studentQqBindingMapper.selectQqByStudentId(submission.getStudentId());
                 if (qq != null) {
@@ -202,20 +302,34 @@ public class GradingStreamConsumer {
             }
 
         } catch (Exception e) {
-            log.error("批改失败: submissionId={}, error={}", submissionId, e.getMessage(), e);
+            log.error("批改失败: submissionId={}", submissionId, e);
+            int retryCount = Integer.parseInt(data.getOrDefault(AsyncTaskConstants.FIELD_RETRY_COUNT, "0"));
+            String requirement = data.getOrDefault(AsyncTaskConstants.FIELD_REQUIREMENT, "");
             if (retryCount < AsyncTaskConstants.MAX_RETRY) {
                 gradingStreamProducer.retryTask(submissionId, requirement, retryCount + 1);
-                submission.setStatus("PENDING");
-                submissionMapper.updateById(submission);
+                Submission pending = submissionMapper.selectById(submissionId);
+                if (pending != null) {
+                    pending.setStatus("PENDING");
+                    submissionMapper.updateById(pending);
+                }
             } else {
-                submission.setStatus("FAILED");
-                submission.setErrorMessage(truncate(e.getMessage(), 500));
-                submissionMapper.updateById(submission);
+                Submission failed = submissionMapper.selectById(submissionId);
+                if (failed != null) {
+                    failed.setStatus("FAILED");
+                    failed.setErrorMessage(truncate(e.getMessage(), 500));
+                    submissionMapper.updateById(failed);
+                }
+            }
+        } finally {
+            if (lock.isHeldByCurrentThread()) {
+                lock.unlock();
             }
         }
 
         ack(messageId);
     }
+
+    // ==================== 辅助方法 ====================
 
     private String buildPrompt(Submission sub, String requirement, String fileContent) {
         return String.format("""

@@ -1,7 +1,7 @@
 package com.firedemo.demo.Controller;
 
 import com.firedemo.demo.DTO.TeachingPlanRequestDTO;
-import com.firedemo.demo.config.Result;
+import com.firedemo.demo.common.result.Result;
 import com.firedemo.demo.mapper.HomeworkKnowledgeMapper;
 import com.firedemo.demo.utils.JwtUtil;
 import jakarta.servlet.http.HttpServletRequest;

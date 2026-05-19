@@ -1,79 +1,30 @@
 package com.firedemo.demo.Service.ServiceImpl;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.firedemo.demo.DTO.OpenResponsesResponse;
-
 import com.firedemo.demo.Service.OpenClawService;
 import com.firedemo.demo.config.properties.OpenClawProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.MediaType;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.stereotype.Service;
-
-import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.publisher.Flux;
 
-
 import java.io.IOException;
-import java.util.List;
-import java.util.Map;
 
+/**
+ * OpenClaw 服务实现 — 基于 Spring AI 2.0 ChatClient
+ * <p>
+ * Agent 路由通过 model 字段实现：model = "openclaw/<agentId>"
+ * OpenClaw Gateway 的 /v1/chat/completions 端点需先启用
+ */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class OpenClawServiceImpl implements OpenClawService {
 
-    private final WebClient openClawWebClient;
-    private final OpenClawProperties properties;
-    private final ObjectMapper objectMapper;
-    /**
-     * 构建 OpenResponses 请求体（带会话ID）
-     */
-    private Map<String, Object> buildRequest(String message, boolean stream, String sessionId) {
-        java.util.Map<String, Object> request = new java.util.HashMap<>();
-        request.put("model", "openclaw");
-        request.put("input", message);
-        request.put("stream", stream);
-        if (sessionId != null && !sessionId.isEmpty()) {
-            request.put("user", sessionId);
-        }
-        return request;
-    }
-
-    /**
-     * 从响应中提取文本内容
-     */
-    private String extractContent(OpenResponsesResponse response) {
-        if (response.getError() != null) {
-            throw new RuntimeException("OpenClaw API Error: " + response.getError().getMessage());
-        }
-
-        if (response.getOutput() == null || response.getOutput().isEmpty()) {
-            return "";
-        }
-
-        StringBuilder result = new StringBuilder();
-        for (OpenResponsesResponse.OutputItem item : response.getOutput()) {
-            if ("message".equals(item.getType()) && item.getContent() != null) {
-                // content 可能是 List<ContentPart> 或 String
-                if (item.getContent() instanceof List) {
-                    List<?> contentList = (List<?>) item.getContent();
-                    for (Object part : contentList) {
-                        if (part instanceof Map) {
-                            Map<?, ?> partMap = (Map<?, ?>) part;
-                            if ("output_text".equals(partMap.get("type"))) {
-                                result.append(partMap.get("text"));
-                            }
-                        }
-                    }
-                } else if (item.getContent() instanceof String) {
-                    result.append(item.getContent());
-                }
-            }
-        }
-        return result.toString();
-    }
+    private final ChatClient.Builder chatClientBuilder;
+    private final OpenClawProperties agentRouting;
 
     @Override
     public String chat(String message, String status) {
@@ -82,41 +33,13 @@ public class OpenClawServiceImpl implements OpenClawService {
 
     @Override
     public String chat(String message, String sessionId, String status) {
-        // 根据status解析agentId
-        Integer statusCode = null;
-        if (status != null) {
-            try {
-                statusCode = Integer.parseInt(status);
-            } catch (NumberFormatException e) {
-                // 忽略解析错误
-            }
-        }
-        return chat(message, sessionId, statusCode);
-    }
-
-    public String chat(String message, String sessionId, Integer status) {
-        Map<String, Object> requestBody = buildRequest(message, false, sessionId);
-        String agent = resolveAgent(status);
-
-        // 构建WebClient请求，添加session key头
-        var requestSpec = openClawWebClient.post()
-                .uri("/v1/responses")
-                .contentType(MediaType.APPLICATION_JSON)
-                .header("x-openclaw-agent-id", agent);
-
-        // 如果有sessionId，添加x-openclaw-session-key头
-//        if (sessionId != null && !sessionId.isEmpty()) {
-//            requestSpec = requestSpec.header("x-openclaw-session-key", sessionId);
-//        }
-
-        return requestSpec
-                .bodyValue(requestBody)
-                .retrieve()
-                .bodyToMono(OpenResponsesResponse.class)
-                .map(this::extractContent)
-                .doOnError(e -> log.error("调用 OpenClaw 失败", e))
-                .onErrorMap(e -> new RuntimeException("AI 服务暂时不可用，请稍后重试", e))
-                .block();
+        log.info("OpenClaw chat: sessionId={}, agent={}", sessionId, resolveAgent(status));
+        return chatClientBuilder.build()
+                .prompt()
+                .user(message)
+                .options(buildOptions(null, status))
+                .call()
+                .content();
     }
 
     @Override
@@ -131,42 +54,15 @@ public class OpenClawServiceImpl implements OpenClawService {
 
     @Override
     public Flux<String> streamChat(String message, String sessionId, String status) {
-        Map<String, Object> requestBody = buildRequest(message, true, sessionId);
-        
-        String agent = resolveAgent(Integer.valueOf(status));
-        log.info("OpenClaw请求: user={}, message={}", sessionId, message.substring(0, Math.min(50, message.length())));
-        log.info("请求头: agent={}, session={}, status={}", agent, sessionId, status);
-        
-        // 构建WebClient请求
-        var requestSpec = openClawWebClient.post()
-                .uri("/v1/responses")
-                .contentType(MediaType.APPLICATION_JSON)
-                .accept(MediaType.TEXT_EVENT_STREAM)
-                .header("x-openclaw-agent-id", agent);
-        
-        // 如果有sessionId，添加x-openclaw-session-key头
-//        if (sessionId != null && !sessionId.isEmpty()) {
-//            requestSpec = requestSpec.header("x-openclaw-session-key", sessionId);
-//        }
-//
-        return requestSpec
-                .bodyValue(requestBody)
-                .retrieve()
-                .bodyToFlux(String.class)
-                .doOnNext(line -> log.info("WebClient收到行: {}", line))
-                .flatMap(this::parseSseLine)
-                .doOnError(e -> log.error("流式调用失败", e));
-    }
-
-    /**
-     * 根据 status 解析 agent
-     * status=1 -> main, status=2 -> jarvis, 其他/默认 -> jarvis
-     */
-    private String resolveAgent(Integer status) {
-        if (status == null) {
-            return properties.getAgent(); // 默认
-        }
-        return properties.getStatusAgentMapping().getOrDefault(status, properties.getAgent());
+        String agent = resolveAgent(status);
+        log.info("OpenClaw stream: sessionId={}, agent={}, msg={}", sessionId, agent,
+                message.substring(0, Math.min(50, message.length())));
+        return chatClientBuilder.build()
+                .prompt()
+                .user(message)
+                .options(buildOptions(sessionId, status))
+                .stream()
+                .content();
     }
 
     @Override
@@ -181,63 +77,57 @@ public class OpenClawServiceImpl implements OpenClawService {
 
     @Override
     public SseEmitter streamChatWithSse(String message, String sessionId, Integer status) {
-        SseEmitter emitter = new SseEmitter(120000L);
-
+        SseEmitter emitter = new SseEmitter(120_000L);
         streamChat(message, sessionId, String.valueOf(status))
                 .subscribe(
                         content -> {
                             try {
                                 emitter.send(SseEmitter.event().data(content));
                             } catch (IOException e) {
-                                log.error("发送 SSE 失败", e);
+                                log.error("SSE send failed", e);
                                 emitter.completeWithError(e);
                             }
                         },
-                        error -> {
-                            log.error("SSE 流错误", error);
-                            emitter.completeWithError(error);
-                        },
+                        emitter::completeWithError,
                         emitter::complete
                 );
-
         return emitter;
     }
 
     @Override
     public boolean checkConnection() {
-        return openClawWebClient.get()
-                .uri("/health")
-                .retrieve()
-                .toBodilessEntity()
-                .map(response -> response.getStatusCode().is2xxSuccessful())
-                .onErrorReturn(false)
-                .block();
+        try {
+            chatClientBuilder.build().prompt().user("hi").call().content();
+            return true;
+        } catch (Exception e) {
+            log.warn("OpenClaw connection check failed: {}", e.getMessage());
+            return false;
+        }
     }
 
     /**
-     * 解析 OpenClaw 返回的 JSON 行
+     * 根据 status 构建 ChatOptions，通过 model 字段路由到指定的 OpenClaw Agent
      */
-    private Flux<String> parseSseLine(String line) {
-        log.debug("解析行: {}", line);
-        
-        if (line == null || line.isEmpty() || "[DONE]".equals(line)) {
-            return Flux.empty();
-        }
+    private OpenAiChatOptions buildOptions(String sessionId, String status) {
+        return OpenAiChatOptions.builder()
+                .model(resolveModel(status))
+                .build();
+    }
 
-        try {
-            Map<?, ?> event = objectMapper.readValue(line, Map.class);
-            String eventType = (String) event.get("type");
+    private String resolveModel(String status) {
+        return "openclaw/" + resolveAgent(status);
+    }
 
-            if ("response.output_text.delta".equals(eventType)) {
-                String delta = (String) event.get("delta");
-                if (delta != null) {
-                    log.debug("提取到delta: {}", delta);
-                    return Flux.just(delta);
+    private String resolveAgent(String status) {
+        if (status != null) {
+            try {
+                String agent = agentRouting.getMapping().get(Integer.parseInt(status));
+                if (agent != null) {
+                    return agent;
                 }
+            } catch (NumberFormatException ignored) {
             }
-        } catch (Exception e) {
-            log.warn("解析事件失败: {}", line, e);
         }
-        return Flux.empty();
+        return agentRouting.getDefaultAgent();
     }
 }

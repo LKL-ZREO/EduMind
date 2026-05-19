@@ -113,6 +113,54 @@ public class TaskReminderService {
     }
 
     /**
+     * OpenClaw cron 触发：定期作业完成情况播报（通用，不绑定截止前X小时语义）
+     */
+    public void sendRecurringStatusReminder(Long taskId) {
+        HomeworkTask task = taskMapper.selectById(taskId);
+        if (task == null || "closed".equals(task.getStatus())) {
+            return;
+        }
+
+        String groupId = classInfoMapper.selectQqGroupIdById(task.getClassId());
+        if (groupId == null || groupId.isEmpty()) {
+            log.warn("班级未配置QQ群号: classId={}", task.getClassId());
+            return;
+        }
+
+        List<Map<String, Object>> unsubmitted = classStudentMapper.selectUnsubmittedByTaskId(
+                task.getClassId(), taskId);
+        Integer submittedCount = classStudentMapper.countSubmittedByTaskId(task.getClassId(), taskId);
+        Integer totalCount = classStudentMapper.countByClassId(task.getClassId());
+
+        String deadlineStr = task.getDeadline() != null
+                ? task.getDeadline().format(DateTimeFormatter.ofPattern("MM-dd HH:mm"))
+                : "未设置";
+
+        if (unsubmitted.isEmpty()) {
+            oneBotHttpService.sendGroupMessage(groupId, String.format(
+                    "✅ 作业「%s」全员已提交！(%d/%d)",
+                    task.getTaskName(), totalCount, totalCount));
+        } else {
+            String names = unsubmitted.stream()
+                    .map(s -> s.get("student_name") + "(" + s.get("student_id") + ")")
+                    .collect(Collectors.joining("、"));
+
+            oneBotHttpService.sendGroupMessage(groupId, String.format(
+                    "@全体成员\n📋 作业完成情况：「%s」\n"
+                            + "截止时间：%s\n"
+                            + "已交：%d/%d  未交：%d人\n\n"
+                            + "未交名单：%s\n\n"
+                            + "请尽快完成提交！",
+                    task.getTaskName(), deadlineStr,
+                    submittedCount != null ? submittedCount : 0,
+                    totalCount != null ? totalCount : 0,
+                    unsubmitted.size(), names));
+        }
+
+        log.info("已发送定期播报: taskId={}, 未交={}", taskId, unsubmitted.size());
+    }
+
+    /**
      * 发送作业发布通知
      */
     public void sendTaskPublishedNotification(Long classId, String taskName, LocalDateTime deadline) {

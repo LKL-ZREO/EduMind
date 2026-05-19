@@ -9,6 +9,7 @@ import com.firedemo.demo.Entity.HomeworkTask;
 import com.firedemo.demo.Entity.Submission;
 import com.firedemo.demo.Service.FileStorageService;
 import com.firedemo.demo.Service.OpenClawService;
+import com.firedemo.demo.Service.TaskReminderService;
 import com.firedemo.demo.mapper.ClassInfoMapper;
 import com.firedemo.demo.mapper.HomeworkKnowledgeMapper;
 import com.firedemo.demo.mapper.HomeworkTaskMapper;
@@ -27,6 +28,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import org.springframework.cache.CacheManager;
+import org.springframework.cache.annotation.CacheEvict;
 
 /**
  * 作业提交控制器（学生端公开接口，无需登录）
@@ -47,6 +51,8 @@ public class HomeworkController {
     private final HomeworkTaskMapper taskMapper;
     private final com.firedemo.demo.mapper.StudentQqBindingMapper studentQqBindingMapper;
     private final com.firedemo.demo.mapper.ClassStudentMapper classStudentMapper;
+    private final TaskReminderService taskReminderService;
+    private final CacheManager cacheManager;
     private final ObjectMapper objectMapper;
 
     /** 文件名正则：学号_姓名_班级_作业名称.扩展名 */
@@ -272,7 +278,18 @@ public class HomeworkController {
         log.info("作业提交已入库(PENDING): submissionId={}, studentName={}, className={}, assignmentName={}",
                 submission.getId(), studentName, className, assignmentName);
 
-        // 8. 入队 Redis Stream（异步批改）
+        // 8. 清除该班级 dashboard 缓存
+        if (classInfo.getId() != null) {
+            var cache = cacheManager.getCache("dashboard");
+            if (cache != null) {
+                cache.evict("metrics:" + classInfo.getId());
+                cache.evict("scoreDist:" + classInfo.getId());
+                cache.evict("knowledge:" + classInfo.getId());
+                cache.evict("errors:" + classInfo.getId());
+            }
+        }
+
+        // 9. 入队 Redis Stream（异步批改）
         gradingStreamProducer.sendTask(submission.getId(), requirement);
 
         int remainingAttempts = Math.max(0, 3 - submitCount);
@@ -358,6 +375,35 @@ public class HomeworkController {
         }
         studentQqBindingMapper.insertOrUpdate(req.getStudentId(), req.getQqNumber(), req.getStudentName());
         return ResponseEntity.ok(Map.of("code", 200, "message", "绑定成功"));
+    }
+
+    /**
+     * OpenClaw cron 触发：对所有活跃作业发送完成情况播报
+     */
+    @GetMapping("/tasks/remind-all")
+    public ResponseEntity<?> remindAllTasks() {
+        List<HomeworkTask> activeTasks = taskMapper.selectActiveWithDeadline();
+        if (activeTasks.isEmpty()) {
+            return ResponseEntity.ok(Map.of(
+                    "code", 200,
+                    "message", "无活跃作业，跳过"
+            ));
+        }
+
+        int count = 0;
+        for (HomeworkTask task : activeTasks) {
+            try {
+                taskReminderService.sendRecurringStatusReminder(task.getId());
+                count++;
+            } catch (Exception e) {
+                log.error("播报失败: taskId={}", task.getId(), e);
+            }
+        }
+
+        return ResponseEntity.ok(Map.of(
+                "code", 200,
+                "message", "已处理" + count + "/" + activeTasks.size() + "个作业"
+        ));
     }
 
     @lombok.Data

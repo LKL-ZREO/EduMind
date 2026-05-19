@@ -7,27 +7,18 @@ import org.springframework.stereotype.Component;
 import java.util.Map;
 
 /**
- * OpenClaw 配置属性
+ * OpenClaw Agent 路由映射配置
  */
 @Data
 @Component
-@ConfigurationProperties(prefix = "openclaw.gateway")
+@ConfigurationProperties(prefix = "openclaw.agent")
 public class OpenClawProperties {
     
-    private String url;
-    private String token;
-    private String agent = "jarvis";
-    private int connectTimeout = 5000;
-    private int readTimeout = 120000;
+    /** 默认 agent ID */
+    private String defaultAgent = "jarvis";
     
-    /** API 端点路径 */
-    private String endpoint = "/v1/responses";
-    
-    /** 是否使用流式响应 */
-    private boolean streaming = false;
-    
-    /** status 与 agent 映射：status=1用main，status=2用jarvis */
-    private Map<Integer, String> statusAgentMapping = Map.of(
+    /** status → agentId 映射 */
+    private Map<Integer, String> mapping = Map.of(
         1, "jarvis",
         2, "main"
     );
