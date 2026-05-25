@@ -720,7 +720,7 @@ export default {
         const params = new URLSearchParams({ studentName: student.name, classId: this.selectedClass })
         if (student.studentId) params.append('studentId', student.studentId)
         const response = await fetch(
-          `${this.apiBaseUrl}/student/progress?${params}`,
+          `${this.apiBaseUrl}/dashboard/student-progress?${params}`,
           { headers: { 'Authorization': `Bearer ${this.getToken()}` } }
         )
 
@@ -837,7 +837,7 @@ export default {
 
       // 加载薄弱知识点
       try {
-        const response = await fetch(`${this.apiBaseUrl}/teaching-plan/weak-points?classId=${this.selectedClass}`, {
+        const response = await fetch(`${this.apiBaseUrl}/dashboard/weak-points?classId=${this.selectedClass}`, {
           headers: {
             'Authorization': `Bearer ${this.getToken()}`
           }
@@ -865,7 +865,7 @@ export default {
       this.generatingPlan = true
 
       try {
-        const response = await fetch(`${this.apiBaseUrl}/teaching-plan/generate`, {
+        const response = await fetch(`${this.apiBaseUrl}/dashboard/teaching-plan/generate`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

@@ -58,6 +58,11 @@ public class Document {
     private Integer chunkCount;
 
     /**
+     * 所属共享知识库ID
+     */
+    private Long kbId;
+
+    /**
      * 创建时间
      */
     @TableField(fill = FieldFill.INSERT)

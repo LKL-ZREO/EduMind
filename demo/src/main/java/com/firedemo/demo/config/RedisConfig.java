@@ -35,7 +35,22 @@ public class RedisConfig {
                 .setRetryInterval(1500)
                 .setTimeout(3000)
                 .setConnectTimeout(10000);
-        return Redisson.create(config);
+        RedissonClient client = Redisson.create(config);
+        this.redissonInstance = (Redisson) client;
+        return client;
+    }
+
+    private Redisson redissonInstance;
+
+    /**
+     * Bucket4j 分布式令牌桶所需的 Redisson 命令执行器
+     */
+    @Bean
+    public org.redisson.command.CommandAsyncExecutor commandAsyncExecutor() {
+        if (redissonInstance == null) {
+            redissonClient(); // 触发初始化
+        }
+        return redissonInstance.getCommandExecutor();
     }
 
     /**

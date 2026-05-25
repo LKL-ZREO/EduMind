@@ -1,10 +1,8 @@
 package com.firedemo.demo.Service;
 
 import com.firedemo.demo.Entity.HomeworkTask;
-import com.firedemo.demo.mapper.ClassInfoMapper;
-import com.firedemo.demo.mapper.ClassStudentMapper;
-import com.firedemo.demo.mapper.HomeworkTaskMapper;
-import com.firedemo.demo.mapper.StudentQqBindingMapper;
+import com.firedemo.demo.Service.ClassService;
+import com.firedemo.demo.Service.HomeworkTaskService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -24,10 +22,8 @@ import java.util.stream.Collectors;
 public class TaskReminderService {
 
     private final OneBotHttpService oneBotHttpService;
-    private final HomeworkTaskMapper taskMapper;
-    private final ClassInfoMapper classInfoMapper;
-    private final ClassStudentMapper classStudentMapper;
-    private final StudentQqBindingMapper studentQqBindingMapper;
+    private final HomeworkTaskService taskService;
+    private final ClassService classService;
 
     /**
      * 发送作业截止提醒（24小时前）
@@ -44,7 +40,7 @@ public class TaskReminderService {
     }
 
     private void sendReminder(Long taskId, int hoursBefore) {
-        HomeworkTask task = taskMapper.selectById(taskId);
+        HomeworkTask task = taskService.getById(taskId);
         if (task == null) {
             log.warn("作业不存在: taskId={}", taskId);
             return;
@@ -60,14 +56,14 @@ public class TaskReminderService {
             return;
         }
 
-        String groupId = classInfoMapper.selectQqGroupIdById(task.getClassId());
+        String groupId = classService.getQqGroupId(task.getClassId());
         if (groupId == null || groupId.isEmpty()) {
             log.warn("班级未配置QQ群号: classId={}", task.getClassId());
             return;
         }
 
         // 查询未提交学生
-        List<Map<String, Object>> unsubmitted = classStudentMapper.selectUnsubmittedByTaskId(
+        List<Map<String, Object>> unsubmitted = classService.listUnsubmittedByTaskId(
                 task.getClassId(), taskId);
 
         if (unsubmitted.isEmpty()) {
@@ -116,21 +112,21 @@ public class TaskReminderService {
      * OpenClaw cron 触发：定期作业完成情况播报（通用，不绑定截止前X小时语义）
      */
     public void sendRecurringStatusReminder(Long taskId) {
-        HomeworkTask task = taskMapper.selectById(taskId);
+        HomeworkTask task = taskService.getById(taskId);
         if (task == null || "closed".equals(task.getStatus())) {
             return;
         }
 
-        String groupId = classInfoMapper.selectQqGroupIdById(task.getClassId());
+        String groupId = classService.getQqGroupId(task.getClassId());
         if (groupId == null || groupId.isEmpty()) {
             log.warn("班级未配置QQ群号: classId={}", task.getClassId());
             return;
         }
 
-        List<Map<String, Object>> unsubmitted = classStudentMapper.selectUnsubmittedByTaskId(
+        List<Map<String, Object>> unsubmitted = classService.listUnsubmittedByTaskId(
                 task.getClassId(), taskId);
-        Integer submittedCount = classStudentMapper.countSubmittedByTaskId(task.getClassId(), taskId);
-        Integer totalCount = classStudentMapper.countByClassId(task.getClassId());
+        Integer submittedCount = classService.countSubmittedByTaskId(task.getClassId(), taskId);
+        Integer totalCount = classService.countStudentsByClassId(task.getClassId());
 
         String deadlineStr = task.getDeadline() != null
                 ? task.getDeadline().format(DateTimeFormatter.ofPattern("MM-dd HH:mm"))
@@ -164,7 +160,7 @@ public class TaskReminderService {
      * 发送作业发布通知
      */
     public void sendTaskPublishedNotification(Long classId, String taskName, LocalDateTime deadline) {
-        String groupId = classInfoMapper.selectQqGroupIdById(classId);
+        String groupId = classService.getQqGroupId(classId);
         if (groupId == null || groupId.isEmpty()) {
             return;
         }
@@ -178,5 +174,54 @@ public class TaskReminderService {
                         "截止时间：%s\n" +
                         "请同学们按时完成！",
                 taskName, deadlineStr));
+    }
+
+    // ========== 定时调度 ==========
+
+    /**
+     * 注册作业截止提醒（截止前24小时和1小时各提醒一次）
+     */
+    public void scheduleReminders(Long taskId) {
+        HomeworkTask task = taskService.getById(taskId);
+        if (task == null || task.getDeadline() == null) {
+            log.warn("作业不存在或未设置截止时间，无法注册提醒: taskId={}", taskId);
+            return;
+        }
+
+        LocalDateTime deadline = task.getDeadline();
+        LocalDateTime now = LocalDateTime.now();
+
+        LocalDateTime remind24h = deadline.minusHours(24);
+        if (remind24h.isAfter(now)) {
+            scheduleDelay(taskId, remind24h, 24);
+        }
+
+        LocalDateTime remind1h = deadline.minusHours(1);
+        if (remind1h.isAfter(now)) {
+            scheduleDelay(taskId, remind1h, 1);
+        }
+    }
+
+    private void scheduleDelay(Long taskId, LocalDateTime executeTime, int hoursBefore) {
+        long delayMillis = java.time.Duration.between(LocalDateTime.now(), executeTime).toMillis();
+        if (delayMillis <= 0) return;
+
+        java.util.Timer timer = new java.util.Timer("TaskReminder-" + taskId + "-" + hoursBefore);
+        timer.schedule(new java.util.TimerTask() {
+            @Override
+            public void run() {
+                try {
+                    if (hoursBefore == 24) {
+                        sendDeadlineReminder24h(taskId);
+                    } else if (hoursBefore == 1) {
+                        sendDeadlineReminder1h(taskId);
+                    }
+                } catch (Exception e) {
+                    log.error("提醒任务执行失败: taskId={}, hoursBefore={}", taskId, hoursBefore, e);
+                } finally {
+                    timer.cancel();
+                }
+            }
+        }, delayMillis);
     }
 }

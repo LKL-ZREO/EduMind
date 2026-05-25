@@ -21,6 +21,11 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class UserServiceImpl implements UserService {
 
+    @Override
+    public User getById(Long id) {
+        return userMapper.selectById(id);
+    }
+
     private final UserMapper userMapper;
     private final ChatHistoryMapper chatHistoryMapper;
     private final JwtUtil jwtUtil;

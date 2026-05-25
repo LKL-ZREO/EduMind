@@ -1,12 +1,11 @@
 package com.firedemo.demo.Controller;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.firedemo.demo.Entity.HomeworkTask;
 import com.firedemo.demo.Entity.Submission;
 
+import com.firedemo.demo.Service.ClassService;import com.firedemo.demo.Service.HomeworkTaskService;
+import com.firedemo.demo.Service.SubmissionService;
 import com.firedemo.demo.common.result.Result;
-import com.firedemo.demo.mapper.HomeworkTaskMapper;
-import com.firedemo.demo.mapper.SubmissionMapper;
 import com.firedemo.demo.utils.JwtUtil;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.Data;
@@ -26,12 +25,10 @@ import java.util.*;
 @RequiredArgsConstructor
 public class TaskController {
 
-    private final HomeworkTaskMapper taskMapper;
-    private final SubmissionMapper submissionMapper;
-    private final com.firedemo.demo.mapper.ClassInfoMapper classInfoMapper;
-    private final com.firedemo.demo.Service.TaskReminderService taskReminderService;
-    private final com.firedemo.demo.Service.TaskReminderScheduleService taskReminderScheduleService;
-    private final com.firedemo.demo.mapper.ClassStudentMapper classStudentMapper;
+    private final HomeworkTaskService taskService;
+    private final SubmissionService submissionService;
+    private final ClassService classService;
+private final com.firedemo.demo.Service.TaskReminderService taskReminderService;
     private final JwtUtil jwtUtil;
 
     /**
@@ -53,7 +50,7 @@ public class TaskController {
         task.setCreatedAt(LocalDateTime.now());
         task.setUpdatedAt(LocalDateTime.now());
 
-        taskMapper.insert(task);
+        taskService.create(task);
         log.info("创建作业: taskId={}, taskName={}, classId={}", task.getId(), req.getTaskName(), req.getClassId());
 
         // 发送作业发布通知
@@ -61,7 +58,7 @@ public class TaskController {
                 req.getClassId(), req.getTaskName(), req.getDeadline());
 
         // 注册截止提醒定时任务
-        taskReminderScheduleService.scheduleReminderTasks(task.getId());
+        taskReminderService.scheduleReminders(task.getId());
 
         return Result.success(task);
     }
@@ -71,7 +68,7 @@ public class TaskController {
      */
     @PutMapping("/{id}")
     public Result updateTask(@PathVariable Long id, @RequestBody CreateTaskRequest req) {
-        HomeworkTask task = taskMapper.selectById(id);
+        HomeworkTask task = taskService.getById(id);
         if (task == null) {
             return Result.error(404, "作业不存在");
         }
@@ -83,7 +80,7 @@ public class TaskController {
         task.setLatePenalty(req.getLatePenalty() != null ? req.getLatePenalty() : task.getLatePenalty());
         task.setUpdatedAt(LocalDateTime.now());
 
-        taskMapper.updateById(task);
+        taskService.update(task);
         log.info("编辑作业: taskId={}", id);
 
         return Result.success(task);
@@ -94,12 +91,12 @@ public class TaskController {
      */
     @DeleteMapping("/{id}")
     public Result deleteTask(@PathVariable Long id) {
-        HomeworkTask task = taskMapper.selectById(id);
+        HomeworkTask task = taskService.getById(id);
         if (task == null) {
             return Result.error(404, "作业不存在");
         }
 
-        taskMapper.deleteById(id);
+        taskService.delete(id);
         log.info("删除作业: taskId={}", id);
 
         return Result.success(null);
@@ -110,10 +107,10 @@ public class TaskController {
      */
     @GetMapping
     public Result getTasks(@RequestParam Long classId) {
-        List<HomeworkTask> tasks = taskMapper.selectByClassId(classId);
+        List<HomeworkTask> tasks = taskService.listByClassId(classId);
 
         // 批量查询当前班级所有作业的统计（一条SQL替代N条）
-        List<Map<String, Object>> taskStats = submissionMapper.selectTaskStatsByClassId(classId);
+        List<Map<String, Object>> taskStats = submissionService.listTaskStatsByClassId(classId);
         Map<Long, Map<String, Object>> statsMap = new HashMap<>();
         for (Map<String, Object> row : taskStats) {
             Long taskId = ((Number) row.get("task_id")).longValue();
@@ -160,7 +157,7 @@ public class TaskController {
      */
     @GetMapping("/{id}")
     public Result getTaskDetail(@PathVariable Long id) {
-        HomeworkTask task = taskMapper.selectById(id);
+        HomeworkTask task = taskService.getById(id);
         if (task == null) {
             return Result.error(404, "作业不存在");
         }
@@ -176,11 +173,7 @@ public class TaskController {
         result.put("status", task.getStatus());
 
         // 提交列表（每个学生只取最新）
-        List<Submission> submissions = submissionMapper.selectList(
-                new LambdaQueryWrapper<Submission>()
-                        .eq(Submission::getTaskId, task.getId())
-                        .orderByDesc(Submission::getSubmittedAt)
-        );
+        List<Submission> submissions = submissionService.listByTaskId(task.getId());
 
         // 按学号去重，只保留最新提交
         Map<String, Submission> latestByStudent = new LinkedHashMap<>();
@@ -243,14 +236,14 @@ public class TaskController {
      */
     @PutMapping("/{id}/close")
     public Result closeTask(@PathVariable Long id) {
-        HomeworkTask task = taskMapper.selectById(id);
+        HomeworkTask task = taskService.getById(id);
         if (task == null) {
             return Result.error(404, "作业不存在");
         }
 
         task.setStatus("closed");
         task.setUpdatedAt(LocalDateTime.now());
-        taskMapper.updateById(task);
+        taskService.update(task);
 
         return Result.success(null);
     }
@@ -260,19 +253,19 @@ public class TaskController {
      */
     @PostMapping("/{id}/test-reminder")
     public Result testReminder(@PathVariable Long id) {
-        HomeworkTask task = taskMapper.selectById(id);
+        HomeworkTask task = taskService.getById(id);
         if (task == null) {
             return Result.error(404, "作业不存在");
         }
 
-        String groupId = classInfoMapper.selectQqGroupIdById(task.getClassId());
+        String groupId = classService.getQqGroupId(task.getClassId());
         if (groupId == null || groupId.isEmpty()) {
             return Result.error(400, "班级未配置QQ群号");
         }
 
         // 查询班级学生总数和已提交数
-        Integer totalStudents = classStudentMapper.countByClassId(task.getClassId());
-        Integer submittedCount = classStudentMapper.countSubmittedByTaskId(task.getClassId(), task.getId());
+        Integer totalStudents = classService.countStudentsByClassId(task.getClassId());
+        Integer submittedCount = classService.countSubmittedByTaskId(task.getClassId(), task.getId());
         if (totalStudents == null) totalStudents = 0;
         if (submittedCount == null) submittedCount = 0;
         int unsubmittedCount = totalStudents - submittedCount;

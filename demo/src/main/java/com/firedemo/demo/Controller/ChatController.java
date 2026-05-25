@@ -16,9 +16,9 @@ import com.firedemo.demo.Service.OpenClawService;
 
 import com.firedemo.demo.Entity.HomeworkKnowledge;
 import com.firedemo.demo.Entity.User;
-import com.firedemo.demo.mapper.HomeworkEvaluationMapper;
-import com.firedemo.demo.mapper.HomeworkKnowledgeMapper;
-import com.firedemo.demo.mapper.UserMapper;
+
+import com.firedemo.demo.Service.HomeworkResultService;
+import com.firedemo.demo.Service.UserService;
 
 import com.firedemo.demo.utils.JwtUtil;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -50,9 +50,9 @@ public class ChatController {
     private final FileStorageService fileStorageService;
     private final ChatHistoryService chatHistoryService;
     private final DocumentService documentService;
-    private final HomeworkEvaluationMapper evaluationMapper;
-    private final HomeworkKnowledgeMapper knowledgeMapper;
-    private final UserMapper userMapper;
+    
+    private final HomeworkResultService homeworkResultService;
+private final UserService userService;
     private final JwtUtil jwtUtil;
     private final ObjectMapper objectMapper;
 
@@ -277,12 +277,12 @@ public class ChatController {
             entity.setRawResponse(rawResponse);
             
             // 从用户信息获取班级ID
-            User user = userMapper.selectById(userId);
+            User user = userService.getById(userId);
             if (user != null && user.getClassId() != null) {
                 entity.setClassId(user.getClassId());
             }
             
-            evaluationMapper.insert(entity);
+            homeworkResultService.saveEvaluation(entity);
             
             // 保存知识点掌握情况
             if (evaluation.getKnowledgePoints() != null) {
@@ -292,7 +292,7 @@ public class ChatController {
                     hk.setKnowledgePoint(kp.getName());
                     hk.setMastery(kp.getMastery());
                     hk.setStatus(kp.getStatus());
-                    knowledgeMapper.insert(hk);
+                    homeworkResultService.saveKnowledge(hk);
                 }
             }
             

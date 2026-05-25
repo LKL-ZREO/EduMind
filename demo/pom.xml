@@ -107,6 +107,13 @@
             <version>3.29.0</version>
         </dependency>
 
+        <!-- Bucket4j-Redis 分布式令牌桶限流（网关层，基于 Redisson） -->
+        <dependency>
+            <groupId>com.bucket4j</groupId>
+            <artifactId>bucket4j-redis</artifactId>
+            <version>8.10.1</version>
+        </dependency>
+
         <!-- Spring Boot Cache + Caffeine 本地缓存 -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

@@ -399,7 +399,7 @@ public class DashboardServiceImpl implements DashboardService {
                 // 合并已有学生
                 StudentOverviewDTO dto = studentMap.get(key);
                 dto.setHomeworkCount(dto.getHomeworkCount() + count.intValue());
-                dto.setAvgScore((dto.getAvgScore() + avgScore.intValue()) / 2);
+                dto.setAvgScore(dto.getAvgScore());
             } else {
                 // 仅从学生端提交（没有系统账号）
                 StudentOverviewDTO dto = new StudentOverviewDTO();

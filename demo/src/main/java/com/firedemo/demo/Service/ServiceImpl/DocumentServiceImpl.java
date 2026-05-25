@@ -1,10 +1,12 @@
 package com.firedemo.demo.Service.ServiceImpl;
 
 
+import com.firedemo.demo.Entity.DirectoryNode;
 import com.firedemo.demo.Entity.Document;
 import com.firedemo.demo.Entity.DocumentChunk;
 import com.firedemo.demo.Service.DocumentService;
 import com.firedemo.demo.Service.FileStorageService;
+import com.firedemo.demo.mapper.DirectoryNodeMapper;
 import com.firedemo.demo.mapper.DocumentMapper;
 import com.firedemo.demo.rag.EmbeddingService;
 import com.firedemo.demo.rag.SmartChunkService;
@@ -34,6 +36,7 @@ import java.util.*;
 public class DocumentServiceImpl implements DocumentService {
 
     private final DocumentMapper documentMapper;
+    private final DirectoryNodeMapper directoryNodeMapper;
     private final FileStorageService fileStorageService;
     private final SmartChunkService chunkService;
     private final EmbeddingService embeddingService;
@@ -44,13 +47,14 @@ public class DocumentServiceImpl implements DocumentService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public String uploadDocument(Long userId, MultipartFile file) {
+    public String uploadDocument(Long userId, MultipartFile file, Long kbId) {
         String docId = UUID.randomUUID().toString().replace("-", "");
         String originalFilename = file.getOriginalFilename();
 
         try {
-            // 保存文件
-            Path uploadPath = Paths.get(uploadDir);
+            Path uploadPath = kbId != null
+                    ? Paths.get(uploadDir, "shared", String.valueOf(kbId))
+                    : Paths.get(uploadDir);
             if (!Files.exists(uploadPath)) {
                 Files.createDirectories(uploadPath);
             }
@@ -59,7 +63,6 @@ public class DocumentServiceImpl implements DocumentService {
             Path filePath = uploadPath.resolve(fileName);
             file.transferTo(filePath);
 
-            // 保存记录
             Document document = new Document();
             document.setUserId(userId);
             document.setDocId(docId);
@@ -67,11 +70,12 @@ public class DocumentServiceImpl implements DocumentService {
             document.setFilePath(filePath.toString());
             document.setFileSize(file.getSize());
             document.setContentType(file.getContentType());
-            document.setStatus(0); // 处理中
+            document.setStatus(0);
+            document.setKbId(kbId);
 
             documentMapper.insert(document);
 
-            log.info("Document uploaded: docId={}, userId={}", docId, userId);
+            log.info("Document uploaded: docId={}, userId={}, kbId={}", docId, userId, kbId);
             return docId;
 
         } catch (IOException e) {
@@ -96,6 +100,13 @@ public class DocumentServiceImpl implements DocumentService {
         Document document = documentMapper.selectByDocId(docId);
         if (document == null || !document.getUserId().equals(userId)) {
             return false;
+        }
+
+        // 删除向量库中的 chunk
+        try {
+            vectorStoreService.deleteDocument(docId);
+        } catch (Exception e) {
+            log.warn("Failed to delete chunks for document: {}", docId, e);
         }
 
         // 删除文件
@@ -270,6 +281,187 @@ public class DocumentServiceImpl implements DocumentService {
 
         if (normA == 0 || normB == 0) return 0;
         return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+    }
+
+    // ==================== 目录树管理 ====================
+
+    @Override
+    public List<DirectoryNode> getDirectoryTree(Long userId) {
+        return directoryNodeMapper.selectByUserId(userId);
+    }
+
+    @Override
+    public List<DirectoryNode> getDirectoryTreeByKbId(Long kbId) {
+        return directoryNodeMapper.selectByKbId(kbId);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public Long createFolder(Long userId, Long parentId, String label, Long kbId) {
+        // 校验父节点存在性及归属
+        if (parentId != null) {
+            DirectoryNode parent = directoryNodeMapper.selectById(parentId);
+            if (parent == null) {
+                throw new IllegalArgumentException("父节点不存在");
+            }
+            // 共享知识库下的节点，所有成员可操作
+            if (parent.getKbId() == null && !parent.getUserId().equals(userId)) {
+                throw new IllegalArgumentException("无权访问");
+            }
+            if (!"folder".equals(parent.getNodeType())) {
+                throw new IllegalArgumentException("只能在文件夹下创建子文件夹");
+            }
+        }
+
+        // 同级最大排序号
+        int maxOrder;
+        if (parentId != null) {
+            List<DirectoryNode> siblings = directoryNodeMapper.selectByParentId(parentId);
+            maxOrder = siblings.stream().mapToInt(DirectoryNode::getSortOrder).max().orElse(-1);
+        } else {
+            List<DirectoryNode> roots = directoryNodeMapper.selectByUserId(userId).stream()
+                    .filter(n -> n.getParentId() == null).toList();
+            maxOrder = roots.stream().mapToInt(DirectoryNode::getSortOrder).max().orElse(-1);
+        }
+
+        DirectoryNode node = new DirectoryNode();
+        node.setUserId(userId);
+        node.setParentId(parentId);
+        node.setLabel(label);
+        node.setNodeType("folder");
+        node.setKbId(kbId);
+        node.setSortOrder(maxOrder + 1);
+
+        directoryNodeMapper.insert(node);
+        log.info("Folder created: id={}, label={}, parentId={}, kbId={}", node.getId(), label, parentId, kbId);
+        return node.getId();
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void renameNode(Long userId, Long nodeId, String label) {
+        DirectoryNode node = directoryNodeMapper.selectById(nodeId);
+        if (node == null) {
+            throw new IllegalArgumentException("节点不存在");
+        }
+        if (node.getKbId() == null && !node.getUserId().equals(userId)) {
+            throw new IllegalArgumentException("无权操作");
+        }
+        node.setLabel(label);
+        directoryNodeMapper.updateById(node);
+        log.info("Node renamed: id={}, label={}", nodeId, label);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteDirectoryNode(Long userId, Long nodeId) {
+        DirectoryNode node = directoryNodeMapper.selectById(nodeId);
+        if (node == null) {
+            throw new IllegalArgumentException("节点不存在");
+        }
+        if (node.getKbId() == null && !node.getUserId().equals(userId)) {
+            throw new IllegalArgumentException("无权操作");
+        }
+
+        // 递归删除所有子节点
+        List<DirectoryNode> descendants = directoryNodeMapper.selectDescendants(nodeId);
+        for (DirectoryNode child : descendants) {
+            // 如果是文件节点，同时删除关联的文档
+            if ("file".equals(child.getNodeType()) && child.getDocId() != null) {
+                try {
+                    deleteDocument(child.getDocId(), userId);
+                } catch (Exception e) {
+                    log.warn("Failed to delete document {} while deleting node {}", child.getDocId(), child.getId());
+                }
+            }
+            directoryNodeMapper.deleteById(child.getId());
+        }
+
+        // 删除自身
+        if ("file".equals(node.getNodeType()) && node.getDocId() != null) {
+            try {
+                deleteDocument(node.getDocId(), userId);
+            } catch (Exception e) {
+                log.warn("Failed to delete document {} while deleting node {}", node.getDocId(), node.getId());
+            }
+        }
+        directoryNodeMapper.deleteById(nodeId);
+        log.info("Directory node deleted: id={}", nodeId);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void moveNode(Long userId, Long nodeId, Long targetParentId, Integer sortOrder) {
+        DirectoryNode node = directoryNodeMapper.selectById(nodeId);
+        if (node == null) {
+            throw new IllegalArgumentException("节点不存在");
+        }
+        if (node.getKbId() == null && !node.getUserId().equals(userId)) {
+            throw new IllegalArgumentException("无权操作");
+        }
+
+        // 不能移到自己或自己的子节点下
+        if (targetParentId != null) {
+            if (targetParentId.equals(nodeId)) {
+                throw new IllegalArgumentException("不能将节点移动到自己下面");
+            }
+            List<DirectoryNode> descendants = directoryNodeMapper.selectDescendants(nodeId);
+            boolean isDescendant = descendants.stream().anyMatch(d -> d.getId().equals(targetParentId));
+            if (isDescendant) {
+                throw new IllegalArgumentException("不能将节点移动到其子节点下");
+            }
+
+            DirectoryNode target = directoryNodeMapper.selectById(targetParentId);
+            if (target == null || !target.getUserId().equals(userId)) {
+                throw new IllegalArgumentException("目标节点不存在或无权访问");
+            }
+            if (!"folder".equals(target.getNodeType())) {
+                throw new IllegalArgumentException("目标节点不是文件夹");
+            }
+        }
+
+        node.setParentId(targetParentId);
+        if (sortOrder != null) {
+            node.setSortOrder(sortOrder);
+        }
+        directoryNodeMapper.updateById(node);
+        log.info("Node moved: id={}, targetParentId={}, sortOrder={}", nodeId, targetParentId, sortOrder);
+    }
+
+    // ==================== 共享 ====================
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean toggleShare(Long userId, Long nodeId) {
+        DirectoryNode node = directoryNodeMapper.selectById(nodeId);
+        if (node == null || !node.getUserId().equals(userId)) {
+            throw new IllegalArgumentException("节点不存在或无权操作");
+        }
+        if (!"folder".equals(node.getNodeType())) {
+            throw new IllegalArgumentException("只能共享文件夹");
+        }
+
+        boolean newShared = !Boolean.TRUE.equals(node.getIsShared());
+
+        // 更新自身
+        node.setIsShared(newShared);
+        directoryNodeMapper.updateById(node);
+
+        // 递归更新所有子节点
+        List<DirectoryNode> descendants = directoryNodeMapper.selectDescendants(nodeId);
+        for (DirectoryNode child : descendants) {
+            child.setIsShared(newShared);
+            directoryNodeMapper.updateById(child);
+        }
+
+        log.info("Folder share toggled: id={}, label={}, shared={}, descendants={}",
+                nodeId, node.getLabel(), newShared, descendants.size());
+        return newShared;
+    }
+
+    @Override
+    public List<java.util.Map<String, Object>> getSharedTree(Long userId) {
+        return directoryNodeMapper.selectSharedByOthersWithName(userId);
     }
 
     /**

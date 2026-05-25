@@ -10,11 +10,8 @@ import com.firedemo.demo.Entity.Submission;
 import com.firedemo.demo.Service.FileStorageService;
 import com.firedemo.demo.Service.OpenClawService;
 import com.firedemo.demo.Service.TaskReminderService;
-import com.firedemo.demo.mapper.ClassInfoMapper;
-import com.firedemo.demo.mapper.HomeworkKnowledgeMapper;
-import com.firedemo.demo.mapper.HomeworkTaskMapper;
-import com.firedemo.demo.mapper.SubmissionMapper;
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.firedemo.demo.Service.HomeworkResultService;import com.firedemo.demo.Service.HomeworkTaskService;
+import com.firedemo.demo.Service.ClassService;import com.firedemo.demo.Service.SubmissionService;
 import jakarta.validation.constraints.NotNull;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -45,13 +42,12 @@ public class HomeworkController {
     private final OpenClawService openClawService;
     private final GradingStreamProducer gradingStreamProducer;
     private final com.firedemo.demo.Service.OneBotHttpService oneBotHttpService;
-    private final SubmissionMapper submissionMapper;
-    private final ClassInfoMapper classInfoMapper;
-    private final HomeworkKnowledgeMapper knowledgeMapper;
-    private final HomeworkTaskMapper taskMapper;
-    private final com.firedemo.demo.mapper.StudentQqBindingMapper studentQqBindingMapper;
-    private final com.firedemo.demo.mapper.ClassStudentMapper classStudentMapper;
-    private final TaskReminderService taskReminderService;
+    private final SubmissionService submissionService;
+    
+    private final HomeworkResultService homeworkResultService;
+    private final HomeworkTaskService taskService;
+    private final ClassService classService;
+private final TaskReminderService taskReminderService;
     private final CacheManager cacheManager;
     private final ObjectMapper objectMapper;
 
@@ -64,7 +60,7 @@ public class HomeworkController {
      */
     @GetMapping("/classes")
     public ResponseEntity<?> getPublicClasses() {
-        List<ClassInfo> classes = classInfoMapper.selectList(null);
+        List<ClassInfo> classes = classService.listAll();
         List<Map<String, Object>> result = classes.stream().map(c -> {
             Map<String, Object> m = new java.util.LinkedHashMap<>();
             m.put("id", c.getId());
@@ -79,7 +75,7 @@ public class HomeworkController {
      */
     @GetMapping("/tasks")
     public ResponseEntity<?> getPublicTasks(@RequestParam Long classId) {
-        List<HomeworkTask> tasks = taskMapper.selectByClassId(classId);
+        List<HomeworkTask> tasks = taskService.listByClassId(classId);
         List<Map<String, Object>> result = tasks.stream().filter(t ->
                 !"closed".equals(t.getStatus())
         ).map(t -> {
@@ -101,7 +97,7 @@ public class HomeworkController {
     public ResponseEntity<?> getSubmitStatus(
             @RequestParam String studentId,
             @RequestParam Long taskId) {
-        Integer count = submissionMapper.countByStudentIdAndTaskId(studentId, taskId);
+        Integer count = submissionService.countByStudentIdAndTaskId(studentId, taskId);
         if (count == null) count = 0;
         int remaining = Math.max(0, 3 - count);
         return ResponseEntity.ok(Map.of(
@@ -159,7 +155,7 @@ public class HomeworkController {
         }
 
         // 1.5 检查QQ号绑定
-        String qqNumber = studentQqBindingMapper.selectQqByStudentId(studentId);
+        String qqNumber = classService.getQqByStudentId(studentId);
         if (qqNumber == null) {
             return ResponseEntity.ok(Map.of(
                     "code", 401,
@@ -171,7 +167,7 @@ public class HomeworkController {
 
         // 1.6 检查提交次数限制
         if (expectedTaskId != null) {
-            Integer existingCount = submissionMapper.countByStudentIdAndTaskId(studentId, expectedTaskId);
+            Integer existingCount = submissionService.countByStudentIdAndTaskId(studentId, expectedTaskId);
             if (existingCount == null) existingCount = 0;
             if (existingCount >= 3) {
                 return ResponseEntity.badRequest().body(Map.of(
@@ -182,10 +178,7 @@ public class HomeworkController {
         }
 
         // 2. 校验班级
-        ClassInfo classInfo = classInfoMapper.selectOne(
-                new LambdaQueryWrapper<ClassInfo>()
-                        .eq(ClassInfo::getName, className)
-        );
+        ClassInfo classInfo = classService.getClassByName(className);
         if (classInfo == null) {
             return ResponseEntity.badRequest().body(Map.of(
                     "code", 400,
@@ -197,7 +190,7 @@ public class HomeworkController {
         if (!confirm && (expectedClassId != null || expectedTaskId != null)) {
             Map<String, Object> warnings = new LinkedHashMap<>();
             if (expectedClassId != null) {
-                ClassInfo selectedClass = classInfoMapper.selectById(expectedClassId);
+                ClassInfo selectedClass = classService.getClassById(expectedClassId);
                 if (selectedClass != null && !selectedClass.getName().equals(className)) {
                     warnings.put("classMismatch", Map.of(
                             "fileNameValue", className,
@@ -206,7 +199,7 @@ public class HomeworkController {
                 }
             }
             if (expectedTaskId != null) {
-                HomeworkTask task = taskMapper.selectById(expectedTaskId);
+                HomeworkTask task = taskService.getById(expectedTaskId);
                 if (task != null) {
                     String taskName = task.getTaskName();
                     boolean matches = assignmentName.contains(taskName) || taskName.contains(assignmentName);
@@ -254,7 +247,7 @@ public class HomeworkController {
 
         // 6. 计算提交次数
         Integer existingCount = expectedTaskId != null ?
-                submissionMapper.countByStudentIdAndTaskId(studentId, expectedTaskId) : 0;
+                submissionService.countByStudentIdAndTaskId(studentId, expectedTaskId) : 0;
         if (existingCount == null) existingCount = 0;
         int submitCount = existingCount + 1;
 
@@ -273,7 +266,7 @@ public class HomeworkController {
         submission.setSubmitCount(submitCount);
         submission.setRemainingAttempts(Math.max(0, 3 - submitCount));
         submission.setAssignmentNo(submitCount);
-        submissionMapper.insert(submission);
+        submissionService.create(submission);
 
         log.info("作业提交已入库(PENDING): submissionId={}, studentName={}, className={}, assignmentName={}",
                 submission.getId(), studentName, className, assignmentName);
@@ -316,7 +309,7 @@ public class HomeworkController {
      */
     @GetMapping("/result/{submissionId}")
     public ResponseEntity<?> getGradingResult(@PathVariable Long submissionId) {
-        Submission sub = submissionMapper.selectById(submissionId);
+        Submission sub = submissionService.getById(submissionId);
         if (sub == null) {
             return ResponseEntity.notFound().build();
         }
@@ -352,7 +345,7 @@ public class HomeworkController {
 
     @GetMapping("/check-qq-binding")
     public ResponseEntity<?> checkQqBinding(@RequestParam String studentId) {
-        String qqNumber = studentQqBindingMapper.selectQqByStudentId(studentId);
+        String qqNumber = classService.getQqByStudentId(studentId);
         if (qqNumber == null) {
             return ResponseEntity.ok(Map.of(
                     "code", 401,
@@ -373,7 +366,7 @@ public class HomeworkController {
                     "code", 400, "message", "QQ号格式不正确，应为5-11位数字"
             ));
         }
-        studentQqBindingMapper.insertOrUpdate(req.getStudentId(), req.getQqNumber(), req.getStudentName());
+        classService.bindQq(req.getStudentId(), req.getQqNumber(), req.getStudentName());
         return ResponseEntity.ok(Map.of("code", 200, "message", "绑定成功"));
     }
 
@@ -382,7 +375,7 @@ public class HomeworkController {
      */
     @GetMapping("/tasks/remind-all")
     public ResponseEntity<?> remindAllTasks() {
-        List<HomeworkTask> activeTasks = taskMapper.selectActiveWithDeadline();
+        List<HomeworkTask> activeTasks = taskService.listActiveWithDeadline();
         if (activeTasks.isEmpty()) {
             return ResponseEntity.ok(Map.of(
                     "code", 200,

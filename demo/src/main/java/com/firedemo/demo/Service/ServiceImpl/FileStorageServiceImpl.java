@@ -73,10 +73,18 @@ public class FileStorageServiceImpl implements FileStorageService {
                 return parsedContent;
             }
 
-            // Tika 解析失败，回退到文本读取
+            // Tika 解析失败，回退到文本读取（尝试多编码）
             String contentType = Files.probeContentType(path);
             if (contentType != null && contentType.startsWith("text")) {
-                return Files.readString(path);
+                byte[] bytes = Files.readAllBytes(path);
+                String[] charsets = {"UTF-8", "GBK", "GB18030", "ISO-8859-1"};
+                for (String cs : charsets) {
+                    try {
+                        return new String(bytes, java.nio.charset.Charset.forName(cs));
+                    } catch (Exception ignored) {
+                    }
+                }
+                return new String(bytes);
             } else {
                 return "[文件类型: " + contentType + ", 路径: " + filePath + "]";
             }
