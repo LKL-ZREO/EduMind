@@ -13,4 +13,6 @@ public class FrequentErrorDTO {
     private String difficultyLabel;
     private Integer errorRate;
     private Integer errorCount;
+    /** 归属知识点 */
+    private String knowledgePoint;
 }

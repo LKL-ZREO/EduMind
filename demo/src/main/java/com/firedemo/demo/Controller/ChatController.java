@@ -1,5 +1,6 @@
 package com.firedemo.demo.Controller;
 
+import com.firedemo.demo.Service.*;
 import com.firedemo.demo.common.annotation.RateLimit;
 import com.firedemo.demo.common.annotation.RateLimit.Dimension;
 import com.firedemo.demo.common.annotation.RateLimit.TimeUnit;
@@ -9,16 +10,8 @@ import com.firedemo.demo.DTO.EvaluationResultDTO;
 import com.firedemo.demo.DTO.GradeRequest;
 import com.firedemo.demo.Entity.ChatHistory;
 import com.firedemo.demo.Entity.HomeworkEvaluation;
-import com.firedemo.demo.Service.ChatHistoryService;
-import com.firedemo.demo.Service.DocumentService;
-import com.firedemo.demo.Service.FileStorageService;
-import com.firedemo.demo.Service.OpenClawService;
 
-import com.firedemo.demo.Entity.HomeworkKnowledge;
 import com.firedemo.demo.Entity.User;
-
-import com.firedemo.demo.Service.HomeworkResultService;
-import com.firedemo.demo.Service.UserService;
 
 import com.firedemo.demo.utils.JwtUtil;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -50,6 +43,7 @@ public class ChatController {
     private final FileStorageService fileStorageService;
     private final ChatHistoryService chatHistoryService;
     private final DocumentService documentService;
+    private final ActiveTeacherService activeTeacherService;
     
     private final HomeworkResultService homeworkResultService;
 private final UserService userService;
@@ -88,6 +82,7 @@ private final UserService userService;
         if (userId == null) {
             return ResponseEntity.status(401).build();
         }
+        activeTeacherService.touch(userId);
 
         List<ChatHistory> history = chatHistoryService.getUserHistory(userId);
         return ResponseEntity.ok(history);
@@ -102,6 +97,7 @@ private final UserService userService;
         if (userId == null) {
             return ResponseEntity.status(401).build();
         }
+        activeTeacherService.touch(userId);
 
         // 删除该用户的所有历史记录
         chatHistoryService.deleteByUserId(userId);
@@ -132,14 +128,15 @@ private final UserService userService;
         httpResponse.setHeader("Connection", "close");
 
         Long userId = getCurrentUserId(httpRequest);
+        activeTeacherService.touch(userId);
 
         // 生成 sessionId（如果没有）
         if (sessionId == null || sessionId.isEmpty()) {
             sessionId = UUID.randomUUID().toString();
         }
 
-        // RAG增强
-        String enhancedMessage = enhanceMessageWithRag(message);
+        // RAG增强（带用户隔离）
+        String enhancedMessage = enhanceMessageWithRag(message, userId);
 
         // 保存用户消息（保存原始消息）
         saveChatHistory(userId, sessionId, "user", message, null);
@@ -206,6 +203,7 @@ private final UserService userService;
 
         // 获取当前用户ID
         Long userId = getCurrentUserId(httpRequest);
+        activeTeacherService.touch(userId);
 
         // 1. 读取文件内容
         String fileContent = fileStorageService.readFileContent(request.getFilePath());
@@ -283,18 +281,6 @@ private final UserService userService;
             }
             
             homeworkResultService.saveEvaluation(entity);
-            
-            // 保存知识点掌握情况
-            if (evaluation.getKnowledgePoints() != null) {
-                for (EvaluationResultDTO.KnowledgePointItem kp : evaluation.getKnowledgePoints()) {
-                    HomeworkKnowledge hk = new HomeworkKnowledge();
-                    hk.setEvaluationId(entity.getId());
-                    hk.setKnowledgePoint(kp.getName());
-                    hk.setMastery(kp.getMastery());
-                    hk.setStatus(kp.getStatus());
-                    homeworkResultService.saveKnowledge(hk);
-                }
-            }
             
             log.info("评价结果已保存: userId={}, totalScore={}", userId, evaluation.getTotalScore());
         } catch (Exception e) {
@@ -419,16 +405,17 @@ private final UserService userService;
     }
 
     /**
-     * RAG增强：检索相关文档内容并组装到消息中（全库共享）
+     * RAG增强：检索相关文档内容并组装到消息中（按用户权限隔离）
      */
-    private String enhanceMessageWithRag(String message) {
+    private String enhanceMessageWithRag(String message, Long userId) {
         if (!RAG_ENABLED) {
             return message;
         }
 
         try {
-            // 检索相关文档内容（全库共享）
-            List<String> relevantContents = documentService.searchRelevantContent(message, RAG_TOP_K);
+            // 检索相关文档内容（按用户权限隔离：私人 + 已加入的共享知识库）
+            List<String> relevantContents = documentService.searchRelevantContent(
+                    message, RAG_TOP_K, userId);
 
             if (relevantContents.isEmpty()) {
                 return message;

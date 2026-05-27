@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.firedemo.demo.common.async.GradingStreamProducer;
 import com.firedemo.demo.DTO.EvaluationResultDTO;
 import com.firedemo.demo.Entity.ClassInfo;
-import com.firedemo.demo.Entity.HomeworkKnowledge;
 import com.firedemo.demo.Entity.HomeworkTask;
 import com.firedemo.demo.Entity.Submission;
 import com.firedemo.demo.Service.FileStorageService;
@@ -266,7 +265,7 @@ private final TaskReminderService taskReminderService;
         submission.setSubmitCount(submitCount);
         submission.setRemainingAttempts(Math.max(0, 3 - submitCount));
         submission.setAssignmentNo(submitCount);
-        submissionService.create(submission);
+        submissionService.save(submission);
 
         log.info("作业提交已入库(PENDING): submissionId={}, studentName={}, className={}, assignmentName={}",
                 submission.getId(), studentName, className, assignmentName);

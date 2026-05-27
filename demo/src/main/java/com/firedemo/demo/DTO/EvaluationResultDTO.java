@@ -57,6 +57,8 @@ public class EvaluationResultDTO {
         private String priority;
         private String issue;
         private String suggestion;
+        /** 归属知识点（SKILL 返回字段） */
+        private String knowledgePoint;
     }
 
     /**
@@ -69,6 +71,8 @@ public class EvaluationResultDTO {
         private String type;
         private String issue;
         private String severity;
+        /** 归属知识点（SKILL 返回字段） */
+        private String knowledgePoint;
     }
 
     /**

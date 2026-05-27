@@ -19,9 +19,9 @@ public interface ClassService {
 
     String getQqGroupId(Long classId);
 
-    List<Long> listAllClassIds();
-
-    List<ClassInfo> listByTeacherId(Long teacherId);
+//    List<Long> listAllClassIds();
+//
+//    List<ClassInfo> listByTeacherId(Long teacherId);
 
     // ========== 班级学生 ==========
     Integer countStudentsByClassId(Long classId);

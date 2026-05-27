@@ -42,16 +42,16 @@ public class ClassServiceImpl implements ClassService {
     public String getQqGroupId(Long classId) {
         return classInfoMapper.selectQqGroupIdById(classId);
     }
-
-    @Override
-    public List<Long> listAllClassIds() {
-        return classInfoMapper.selectAllIds();
-    }
-
-    @Override
-    public List<ClassInfo> listByTeacherId(Long teacherId) {
-        return classInfoMapper.selectByTeacherId(teacherId);
-    }
+//
+//    @Override
+//    public List<Long> listAllClassIds() {
+//        return classInfoMapper.selectAllIds();
+//    }
+//
+//    @Override
+//    public List<ClassInfo> listByTeacherId(Long teacherId) {
+//        return classInfoMapper.selectByTeacherId(teacherId);
+//    }
 
     // ========== 班级学生 ==========
 

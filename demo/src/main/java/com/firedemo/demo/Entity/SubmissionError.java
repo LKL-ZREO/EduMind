@@ -8,24 +8,28 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 /**
- * 作业知识点掌握情况实体
+ * 作业错误分类明细（知识点归属）
  */
 @Data
-@TableName("homework_knowledge")
-public class HomeworkKnowledge {
+@TableName("submission_errors")
+public class SubmissionError {
 
     @TableId(type = IdType.AUTO)
     private Long id;
 
-    private Long evaluationId;
-
     private Long submissionId;
+
+    private Long classId;
+
+    private String errorText;
+
+    private String errorType;
+
+    private String severity;
 
     private String knowledgePoint;
 
-    private Integer mastery;
-
-    private String status;
-
     private LocalDateTime createdAt;
+
+    private LocalDateTime updatedAt;
 }

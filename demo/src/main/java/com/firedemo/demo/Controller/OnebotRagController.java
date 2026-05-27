@@ -1,5 +1,6 @@
 package com.firedemo.demo.Controller;
 
+import com.firedemo.demo.Service.ActiveTeacherService;
 import com.firedemo.demo.Service.DocumentService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -22,6 +23,7 @@ import java.util.Map;
 public class OnebotRagController {
 
     private final DocumentService documentService;
+    private final ActiveTeacherService activeTeacherService;
 
     private static final int RAG_TOP_K = 6;
 
@@ -34,14 +36,17 @@ public class OnebotRagController {
         log.debug("RAG request from QQ: {}, message: {}", request.getQq(), request.getMessage());
 
         try {
-            // 1. RAG 检索
-            List<String> relevantContents = documentService.searchRelevantContent(
-                    request.getMessage(), RAG_TOP_K);
+            // 1. 从 Redis 获取当前活跃教师的 userId
+            Long userId = activeTeacherService.getActiveUserId();
+            log.debug("RAG 活跃教师: userId={}, qq={}", userId, request.getQq());
 
-            // 2. 组装增强 prompt
+            // 2. RAG 检索（以活跃教师身份）
+            List<String> relevantContents = documentService.searchRelevantContent(
+                    request.getMessage(), RAG_TOP_K, userId);
+
+            // 3. 组装增强 prompt
             String enhancedMessage;
             if (relevantContents.isEmpty()) {
-                // 无相关知识，原样返回
                 enhancedMessage = request.getMessage();
             } else {
                 String context = String.join("\n\n---\n\n", relevantContents);
@@ -59,7 +64,6 @@ public class OnebotRagController {
 
         } catch (Exception e) {
             log.error("RAG 处理失败", e);
-            // 失败时原样返回
             return ResponseEntity.ok(new RagResponse(request.getMessage(), false));
         }
     }
@@ -78,15 +82,15 @@ public class OnebotRagController {
     @lombok.NoArgsConstructor
     @lombok.AllArgsConstructor
     public static class RagRequest {
-        private String qq;          // QQ号（用于日志追踪）
-        private String message;     // 原始消息
+        private String qq;
+        private String message;
     }
 
     @lombok.Data
     @lombok.NoArgsConstructor
     @lombok.AllArgsConstructor
     public static class RagResponse {
-        private String enhancedMessage;  // 增强后的消息
-        private boolean hasContext;      // 是否有检索到上下文
+        private String enhancedMessage;
+        private boolean hasContext;
     }
 }

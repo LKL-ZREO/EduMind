@@ -1,25 +1,15 @@
 package com.firedemo.demo.Service;
 
 import com.firedemo.demo.Entity.HomeworkEvaluation;
-import com.firedemo.demo.Entity.HomeworkKnowledge;
-
-import java.util.List;
-import java.util.Map;
 
 /**
- * 作业批改结果 Service（评价 + 知识点）
+ * 作业批改结果 Service（评价）
  */
 public interface HomeworkResultService {
 
-    // ========== 评价 ==========
+    /** 保存评价 */
     void saveEvaluation(HomeworkEvaluation evaluation);
 
-    // ========== 知识点 ==========
-    void saveKnowledge(HomeworkKnowledge knowledge);
-
-    List<HomeworkKnowledge> listKnowledgeByEvaluationId(Long evaluationId);
-
-    List<Map<String, Object>> listKnowledgeStatsByClassId(Long classId);
-
-    List<String> listWeakKnowledgePoints(Long classId);
+    /** 查询班级薄弱知识点列表（从 submission_errors 统计） */
+    java.util.List<String> listWeakKnowledgePoints(Long classId);
 }

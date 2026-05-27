@@ -70,16 +70,7 @@ public interface SubmissionMapper extends BaseMapper<Submission> {
             "WHERE s.total_score IS NOT NULL")
     List<Integer> selectScoresByClassId(@Param("classId") Long classId);
 
-    @Select("SELECT hk.knowledge_point, AVG(hk.mastery) as avg_mastery, COUNT(*) as count " +
-            "FROM homework_knowledge hk " +
-            "WHERE hk.submission_id IN (SELECT id FROM submission WHERE class_id = #{classId}) " +
-            "GROUP BY hk.knowledge_point ORDER BY avg_mastery ASC")
-    List<Map<String, Object>> selectKnowledgeStatsByClassId(@Param("classId") Long classId);
 
-    @Select("SELECT DISTINCT hk.knowledge_point " +
-            "FROM homework_knowledge hk " +
-            "WHERE hk.submission_id IN (SELECT id FROM submission WHERE class_id = #{classId}) AND hk.mastery < 70")
-    List<String> selectWeakKnowledgePoints(@Param("classId") Long classId);
 
     /**
      * 查询学生概览（每个作业只取最新，按学号分组）

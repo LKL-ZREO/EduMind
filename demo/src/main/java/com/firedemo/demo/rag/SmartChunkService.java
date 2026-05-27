@@ -21,11 +21,11 @@ public class SmartChunkService {
     private EmbeddingService embeddingService;
 
     // 语义相似度阈值
-    private static final double SEMANTIC_THRESHOLD = 0.7;
+    private static final double SEMANTIC_THRESHOLD = 0.6;
     // 默认最大token数
-    private static final int DEFAULT_MAX_TOKENS = 512;
+    private static final int DEFAULT_MAX_TOKENS = 10000;
     // 默认重叠token数
-    private static final int DEFAULT_OVERLAP_TOKENS = 50;
+    private static final int DEFAULT_OVERLAP_TOKENS = 500;
 
     /**
      * 智能切割入口

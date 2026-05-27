@@ -110,7 +110,15 @@
       <div class="chart-card">
         <div class="chart-header">
           <h3>🎯 知识点掌握度热力图</h3>
-          <button class="action-btn" @click="generateTeachingPlan">生成针对性教案</button>
+          <div class="chart-actions">
+            <button v-if="!isEditing" class="action-btn" @click="showAddKpDialog = true">✚ 添加知识点</button>
+            <button v-if="!isEditing" class="action-btn edit-btn" @click="toggleEdit">✏️ 编辑</button>
+            <button v-if="isEditing" class="action-btn save-btn" @click="saveKnowledge" :disabled="savingKnowledge">
+              {{ savingKnowledge ? '保存中...' : '💾 保存' }}
+            </button>
+            <button v-if="isEditing" class="action-btn cancel-edit-btn" @click="cancelEdit">取消</button>
+            <button class="action-btn teaching-btn" @click="generateTeachingPlan">生成针对性教案</button>
+          </div>
         </div>
         <div class="chart-body">
           <div class="knowledge-heatmap">
@@ -118,47 +126,41 @@
               v-for="(item, index) in knowledgeMastery"
               :key="index"
               class="heatmap-item"
-              :style="{ background: getHeatmapColor(item.mastery) }"
-              :title="`${item.name}: ${item.mastery}% 掌握度`"
+              :class="{ editing: isEditing, active: selectedKp === item.name && !isEditing }"
+              :style="{ background: isEditing ? '#e8e8e8' : getHeatmapColor(item.mastery) }"
+              :title="isEditing ? '' : `${item.name}: ${item.errorCount} 个错误`"
+              @click="isEditing ? null : showKpErrors(item)"
             >
-              <span class="heatmap-name">{{ item.name }}</span>
-              <span class="heatmap-value">{{ item.mastery }}%</span>
+              <!-- 编辑模式 -->
+              <template v-if="isEditing">
+                <button v-if="item.name !== '其他'" class="heatmap-remove" @click.stop="removeKnowledge(index)">×</button>
+                <span v-else class="heatmap-remove-placeholder"></span>
+                <div class="heatmap-edit-content">
+                  <input v-model="item.name" class="heatmap-name-input" placeholder="知识点名称" />
+                  <div class="heatmap-color-row">
+                    <input type="color" v-model="item.color" class="heatmap-color-picker" />
+                    <span class="color-preview" :style="{ background: item.color }">{{ item.color }}</span>
+                  </div>
+                </div>
+              </template>
+              <!-- 展示模式 -->
+              <template v-else>
+                <span class="heatmap-name">{{ item.name }}</span>
+                <span class="heatmap-value">{{ item.errorCount || 0 }}</span>
+                <span class="heatmap-sub">个错误</span>
+              </template>
             </div>
+          </div>
+          <!-- 空状态 -->
+          <div v-if="knowledgeMastery.length === 0" class="empty-hint heatmap-empty">
+            暂无知识点，请点击「添加知识点」创建
           </div>
         </div>
       </div>
     </section>
 
-    <!-- 高频错题 & 学生列表 -->
+    <!-- 学生学情列表 -->
     <section class="details-section">
-      <!-- 高频错题 TOP10 -->
-      <div class="detail-card">
-        <div class="card-header">
-          <h3>🔥 高频错题 TOP10</h3>
-          <span class="tag">基于 {{ metrics.totalHomework }} 份作业分析</span>
-        </div>
-        <div class="error-list">
-          <div
-            v-for="(error, index) in frequentErrors"
-            :key="index"
-            class="error-item"
-            :class="{ 'high-frequency': index < 3 }"
-          >
-            <div class="error-rank">{{ index + 1 }}</div>
-            <div class="error-content">
-              <div class="error-title">{{ error.question }}</div>
-              <div class="error-meta">
-                <span class="error-tag" :class="error.difficulty">{{ error.difficultyLabel }}</span>
-                <span class="error-rate">错误率 {{ error.errorRate }}%</span>
-                <span class="error-count">{{ error.errorCount }} 人错</span>
-              </div>
-            </div>
-            <button class="error-action" @click="viewErrorDetail(error)">查看</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- 学生学情列表 -->
       <div class="detail-card">
         <div class="card-header">
           <h3>👥 学生学情概览</h3>
@@ -272,6 +274,66 @@
       </div>
     </div>
 
+    <!-- 添加知识点弹窗 -->
+    <div v-if="showAddKpDialog" class="modal-overlay" @click.self="showAddKpDialog = false">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>✚ 添加知识点</h3>
+          <button class="close-btn" @click="showAddKpDialog = false">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="config-item">
+            <label>知识点名称</label>
+            <input v-model="newKpItem.name" class="config-input" placeholder="例如：指针、数组、循环结构" />
+          </div>
+          <div class="config-item">
+            <label>热力图颜色</label>
+            <div class="color-picker-row">
+              <input type="color" v-model="newKpItem.color" class="color-picker" />
+              <span class="color-preview" :style="{ background: newKpItem.color }">{{ newKpItem.color }}</span>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" @click="showAddKpDialog = false">取消</button>
+          <button class="btn-primary" @click="addKnowledge" :disabled="!newKpItem.name.trim()">确认添加</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 知识点错误详情弹窗 -->
+    <div v-if="showKpErrorModal" class="modal-overlay" @click.self="showKpErrorModal = false">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>🔥 {{ kpErrorTitle }} — 高频错误</h3>
+          <button class="close-btn" @click="showKpErrorModal = false">×</button>
+        </div>
+        <div class="modal-body">
+          <div v-if="kpErrorList.length === 0" class="empty-hint">暂无错误数据</div>
+          <div v-else class="error-list">
+            <div
+              v-for="(error, index) in kpErrorList"
+              :key="index"
+              class="error-item"
+              :class="{ 'high-frequency': index < 3 }"
+            >
+              <div class="error-rank">{{ index + 1 }}</div>
+              <div class="error-content">
+                <div class="error-title">{{ error.question }}</div>
+                <div class="error-meta">
+                  <span class="error-tag" :class="error.difficulty">{{ error.difficultyLabel }}</span>
+                  <span class="error-count">{{ error.errorCount }} 次出现</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" @click="showKpErrorModal = false">关闭</button>
+        </div>
+      </div>
+    </div>
+
     <!-- AI 教案生成弹窗 -->
     <div v-if="showTeachingPlanModal" class="modal-overlay" @click.self="closeModal">
       <div class="modal-content">
@@ -369,6 +431,20 @@ export default {
         { label: '举一反三', value: 'extend' },
         { label: '查漏补缺', value: 'review' }
       ],
+
+      // 热力图编辑
+      isEditing: false,
+      savingKnowledge: false,
+      selectedKp: '',
+      showAddKpDialog: false,
+      showKpErrorModal: false,
+      kpErrorList: [],
+      kpErrorTitle: '',
+      backupKnowledge: [],
+      newKpItem: {
+        name: '',
+        color: '#1890ff'
+      },
 
       // 核心指标
       metrics: {
@@ -551,11 +627,15 @@ export default {
       }
     },
 
-    // 加载高频错题
+    // 加载高频错题（支持按知识点筛选）
     async loadFrequentErrors() {
       if (!this.selectedClass || this.selectedClass === 'null') return
       try {
-        const response = await fetch(`${this.apiBaseUrl}/dashboard/frequent-errors?classId=${this.selectedClass}`, {
+        let url = `${this.apiBaseUrl}/dashboard/frequent-errors?classId=${this.selectedClass}`
+        if (this.selectedKp) {
+          url += `&knowledgePoint=${encodeURIComponent(this.selectedKp)}`
+        }
+        const response = await fetch(url, {
           headers: {
             'Authorization': `Bearer ${this.getToken()}`
           }
@@ -680,7 +760,182 @@ export default {
       }
     },
 
-    // 获取热力图颜色
+    // ========== 热力图编辑 ==========
+
+    // 进入编辑模式
+    toggleEdit() {
+      this.isEditing = true
+      this.backupKnowledge = JSON.parse(JSON.stringify(this.knowledgeMastery))
+    },
+
+    // 取消编辑
+    cancelEdit() {
+      this.knowledgeMastery = this.backupKnowledge
+      this.isEditing = false
+    },
+
+    // 添加知识点 → POST 单条到后端
+    async addKnowledge() {
+      if (!this.newKpItem.name.trim()) return
+      if (!this.selectedClass || this.selectedClass === 'null') {
+        this.$message?.error('请先选择班级')
+        return
+      }
+
+      try {
+        this.savingKnowledge = true
+        const response = await fetch(`${this.apiBaseUrl}/dashboard/teacher-knowledge/add`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${this.getToken()}`
+          },
+          body: JSON.stringify({
+            classId: this.selectedClass,
+            name: this.newKpItem.name.trim(),
+            color: this.newKpItem.color
+          })
+        })
+        const result = await response.json()
+        if (response.ok && result.code === 200) {
+          this.$message?.success('添加成功，正在后台重归类历史错误...')
+          this.newKpItem = { name: '', color: '#1890ff' }
+          this.showAddKpDialog = false
+          await this.loadKnowledgeMastery()
+          this.pollReclassifyResult()
+        } else {
+          throw new Error(result.message || '添加失败')
+        }
+      } catch (error) {
+        console.error('添加知识点失败:', error)
+        this.$message?.error('添加失败: ' + error.message)
+      } finally {
+        this.savingKnowledge = false
+      }
+    },
+
+    // 移除知识点 → DELETE 从后端删除
+    async removeKnowledge(index) {
+      const item = this.knowledgeMastery[index]
+      if (!item || !item.id) {
+        this.knowledgeMastery.splice(index, 1)
+        return
+      }
+
+      try {
+        const response = await fetch(`${this.apiBaseUrl}/dashboard/teacher-knowledge/${item.id}`, {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${this.getToken()}`
+          }
+        })
+        const result = await response.json()
+        if (response.ok && result.code === 200) {
+          this.knowledgeMastery.splice(index, 1)
+          this.$message?.success('删除成功')
+        } else {
+          throw new Error(result.message || '删除失败')
+        }
+      } catch (error) {
+        console.error('删除知识点失败:', error)
+        this.$message?.error('删除失败: ' + error.message)
+      }
+    },
+
+    // 编辑模式保存 → 批量覆盖后端
+    async saveKnowledge() {
+      if (!this.selectedClass || this.selectedClass === 'null') {
+        this.$message?.error('请先选择班级')
+        return
+      }
+
+      this.savingKnowledge = true
+      try {
+        const items = this.knowledgeMastery.map((k, i) => ({
+            name: k.name,
+            color: k.color || '#1890ff',
+            sortOrder: i
+          }))
+
+        const response = await fetch(`${this.apiBaseUrl}/dashboard/teacher-knowledge/batch`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${this.getToken()}`
+          },
+          body: JSON.stringify({
+            classId: this.selectedClass,
+            items: items
+          })
+        })
+
+        const result = await response.json()
+        if (response.ok && result.code === 200) {
+          this.$message?.success('保存成功，正在后台重归类历史错误...')
+          this.isEditing = false
+          await this.loadKnowledgeMastery()
+          this.pollReclassifyResult()
+        } else {
+          throw new Error(result.message || '保存失败')
+        }
+      } catch (error) {
+        console.error('保存知识点失败:', error)
+        this.$message?.error('保存失败: ' + error.message)
+      } finally {
+        this.savingKnowledge = false
+      }
+    },
+
+    // ========== 重归类轮询 ==========
+
+    pollReclassifyResult() {
+      // 记录当前「其他」的错误数
+      const otherItem = this.knowledgeMastery.find(k => k.name === '其他')
+      const beforeCount = otherItem ? otherItem.errorCount : 0
+
+      const check = (attempt) => {
+        if (attempt > 5) return
+        setTimeout(async () => {
+          await this.loadKnowledgeMastery()
+          const current = this.knowledgeMastery.find(k => k.name === '其他')
+          const afterCount = current ? current.errorCount : 0
+          if (afterCount < beforeCount) {
+            this.$message?.success(`重归类完成，${beforeCount - afterCount}条错误已重新分配`)
+            await this.loadFrequentErrors()
+          } else if (attempt < 5) {
+            check(attempt + 1)
+          }
+        }, 3000)
+      }
+      check(1)
+    },
+
+    // ========== 知识点错误弹窗 ==========
+
+    // 点击热力图格子 → 弹窗展示该知识点的高频错误
+    async showKpErrors(item) {
+      this.selectedKp = item.name
+      this.kpErrorTitle = item.name
+      this.showKpErrorModal = true
+
+      try {
+        const url = `${this.apiBaseUrl}/dashboard/frequent-errors?classId=${this.selectedClass}&knowledgePoint=${encodeURIComponent(item.name)}`
+        const response = await fetch(url, {
+          headers: { 'Authorization': `Bearer ${this.getToken()}` }
+        })
+        const result = await response.json()
+        if (result.code === 200) {
+          this.kpErrorList = result.data
+        }
+      } catch (error) {
+        console.error('加载知识点错误详情失败:', error)
+        this.kpErrorList = []
+      }
+    },
+
+    // ========== 原有方法 ==========
+
+    // 获取热力图颜色（仅展示模式用）
     getHeatmapColor(mastery) {
       if (mastery >= 80) return '#52c41a'
       if (mastery >= 60) return '#faad14'
@@ -1115,9 +1370,44 @@ export default {
   transition: all 0.2s;
 }
 
-.action-btn:hover {
+.action-btn:hover:not(:disabled) {
   background: #45a049;
 }
+
+.action-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.action-btn.edit-btn {
+  background: #1890ff;
+}
+
+.action-btn.edit-btn:hover {
+  background: #096dd9;
+}
+
+.action-btn.save-btn {
+  background: #52c41a;
+}
+
+.action-btn.cancel-edit-btn {
+  background: #ff4d4f;
+}
+
+.action-btn.cancel-edit-btn:hover {
+  background: #cf1322;
+}
+
+.action-btn.teaching-btn {
+  background: #722ed1;
+}
+
+.action-btn.teaching-btn:hover {
+  background: #531dab;
+}
+
+
 
 .chart-body {
   padding: 1.25rem;
@@ -1171,16 +1461,28 @@ export default {
 }
 
 .heatmap-item {
+  position: relative;
   padding: 0.75rem;
   border-radius: 8px;
   text-align: center;
   color: white;
   cursor: pointer;
-  transition: transform 0.2s;
+  transition: transform 0.2s, box-shadow 0.2s;
 }
 
-.heatmap-item:hover {
+.heatmap-item:hover:not(.editing) {
   transform: scale(1.05);
+}
+
+.heatmap-item.active {
+  box-shadow: 0 0 0 3px white, 0 0 0 5px currentColor;
+}
+
+.heatmap-item.editing {
+  background: #e8e8e8 !important;
+  color: #333;
+  cursor: default;
+  border: 2px dashed #d9d9d9;
 }
 
 .heatmap-name {
@@ -1193,6 +1495,139 @@ export default {
   display: block;
   font-size: 1.1rem;
   font-weight: 600;
+}
+
+.heatmap-sub {
+  display: block;
+  font-size: 0.7rem;
+  margin-top: 0.25rem;
+  opacity: 0.8;
+}
+
+.heatmap-remove {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: none;
+  background: #f5222d;
+  color: white;
+  font-size: 12px;
+  line-height: 20px;
+  text-align: center;
+  cursor: pointer;
+  padding: 0;
+  z-index: 1;
+}
+
+.heatmap-remove:hover {
+  background: #cf1322;
+}
+
+.heatmap-remove-placeholder {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+}
+
+.heatmap-edit-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.heatmap-name-input {
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  padding: 0.3rem 0.4rem;
+  font-size: 0.75rem;
+  text-align: center;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.heatmap-name-input:focus {
+  outline: none;
+  border-color: #1890ff;
+}
+
+.heatmap-color-row {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.heatmap-color-picker {
+  width: 24px;
+  height: 24px;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.heatmap-color-preview {
+  font-size: 0.75rem;
+  font-family: monospace;
+  color: #666;
+}
+
+.heatmap-empty {
+  grid-column: 1 / -1;
+  padding: 2rem;
+}
+
+/* 弹窗表单 */
+.config-input {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  box-sizing: border-box;
+}
+
+.config-input:focus {
+  outline: none;
+  border-color: #1890ff;
+}
+
+.mastery-input-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.mastery-value {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #1890ff;
+  min-width: 3rem;
+}
+
+.color-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.color-picker {
+  width: 40px;
+  height: 40px;
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  padding: 2px;
+  cursor: pointer;
+}
+
+.color-preview {
+  padding: 0.25rem 0.75rem;
+  border-radius: 4px;
+  color: white;
+  font-size: 0.8rem;
+  font-family: monospace;
 }
 
 /* 详情区域 */

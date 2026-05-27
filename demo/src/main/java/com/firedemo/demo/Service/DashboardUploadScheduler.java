@@ -98,7 +98,7 @@ public class DashboardUploadScheduler {
         }
 
         try {
-            data.setFrequentErrors(dashboardService.getFrequentErrors(classId));
+            data.setFrequentErrors(dashboardService.getFrequentErrors(classId, null));
         } catch (Exception e) {
             log.warn("获取高频错题失败: classId={}", classId, e);
         }

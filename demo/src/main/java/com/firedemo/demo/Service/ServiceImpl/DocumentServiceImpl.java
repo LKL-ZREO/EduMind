@@ -8,6 +8,7 @@ import com.firedemo.demo.Service.DocumentService;
 import com.firedemo.demo.Service.FileStorageService;
 import com.firedemo.demo.mapper.DirectoryNodeMapper;
 import com.firedemo.demo.mapper.DocumentMapper;
+import com.firedemo.demo.mapper.SharedKbMemberMapper;
 import com.firedemo.demo.rag.EmbeddingService;
 import com.firedemo.demo.rag.SmartChunkService;
 import com.firedemo.demo.rag.VectorStoreService;
@@ -37,6 +38,7 @@ public class DocumentServiceImpl implements DocumentService {
 
     private final DocumentMapper documentMapper;
     private final DirectoryNodeMapper directoryNodeMapper;
+    private final SharedKbMemberMapper sharedKbMemberMapper;
     private final FileStorageService fileStorageService;
     private final SmartChunkService chunkService;
     private final EmbeddingService embeddingService;
@@ -162,8 +164,8 @@ public class DocumentServiceImpl implements DocumentService {
             // 3. 设置文档信息
             chunks.forEach(c -> c.setDocumentName(document.getDocName()));
 
-            // 4. 保存到向量存储
-            vectorStoreService.saveChunks(docId, chunks);
+            // 4. 保存到向量存储（带用户隔离信息）
+            vectorStoreService.saveChunks(docId, chunks, document.getUserId(), document.getKbId());
 
             // 5. 更新状态
             updateStatus(docId, 1, chunks.size()); // 完成
@@ -183,15 +185,36 @@ public class DocumentServiceImpl implements DocumentService {
 
     @Override
     public List<String> searchRelevantContent(String query, int topK) {
-        // ===== 1. 语义向量检索（第一路）=====
+        return searchRelevantContent(query, topK, null);
+    }
+
+    /**
+     * RRF 混合检索 —— 按用户权限隔离
+     * <p>userId == null → 全库检索（兼容模式）
+     * <p>userId != null → 私人文档(user_id=?) + 已加入的共享知识库(kb_id IN)
+     *
+     * @param query  查询文本
+     * @param topK   返回条数
+     * @param userId 当前用户ID，NULL=不过滤
+     * @return 相关文档内容列表
+     */
+    @Override
+    public List<String> searchRelevantContent(String query, int topK, Long userId) {
+        // 获取用户可访问的共享知识库
+        Set<Long> accessibleKbIds = null;
+        if (userId != null) {
+            accessibleKbIds = sharedKbMemberMapper.selectKbIdsByUserId(userId);
+        }
+
+        // ===== 1. 语义向量检索（第一路，带权限过滤）=====
         float[] queryEmbedding = embeddingService.embedQuery(query);
         List<DocumentChunk> vectorResults = vectorStoreService.similaritySearch(
-                queryEmbedding, topK * CANDIDATE_MULTIPLIER);
+                queryEmbedding, topK * CANDIDATE_MULTIPLIER, userId, accessibleKbIds);
         Map<String, Double> semanticRanks = rankByCosine(queryEmbedding, vectorResults);
 
-        // ===== 2. 关键词检索（第二路）=====
+        // ===== 2. 关键词检索（第二路，带权限过滤）=====
         List<VectorStoreService.ScoredChunk> keywordResults = vectorStoreService.keywordSearch(
-                query, topK * CANDIDATE_MULTIPLIER);
+                query, topK * CANDIDATE_MULTIPLIER, userId, accessibleKbIds);
         Map<String, Double> keywordRanks = rankKeyword(keywordResults);
 
         // ===== 3. RRF 融合 =====

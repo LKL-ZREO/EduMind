@@ -67,13 +67,23 @@ public interface DocumentService {
     void processDocument(String docId);
 
     /**
-     * 根据查询检索相关文档内容（全库共享）
+     * 根据查询检索相关文档内容（全库共享，兼容旧调用）
      *
      * @param query  查询文本
      * @param topK   返回条数
      * @return 相关文档内容列表
      */
     List<String> searchRelevantContent(String query, int topK);
+
+    /**
+     * 根据查询检索相关文档内容（按用户权限隔离）
+     *
+     * @param query  查询文本
+     * @param topK   返回条数
+     * @param userId 当前用户ID，NULL=全库检索
+     * @return 相关文档内容列表
+     */
+    List<String> searchRelevantContent(String query, int topK, Long userId);
 
     // ==================== 目录树管理 ====================
 

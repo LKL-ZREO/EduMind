@@ -78,6 +78,16 @@ public class DocumentChunkEntity {
     private String nextSummary;
     
     /**
+     * 上传者ID（私人知识库隔离用）
+     */
+    private Long userId;
+
+    /**
+     * 所属共享知识库ID，NULL=私人文档
+     */
+    private Long kbId;
+
+    /**
      * 创建时间
      */
     private LocalDateTime createdAt;

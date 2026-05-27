@@ -11,6 +11,7 @@ import reactor.core.publisher.Flux;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -68,9 +69,10 @@ public class RAGController {
         // 1. 获取查询向量
         float[] queryEmbedding = embeddingService.embed(request.getQuery());
         
-        // 2. 相似度搜索
+        // 2. 相似度搜索（带用户隔离）
         List<DocumentChunk> relevantChunks = vectorStoreService.similaritySearch(queryEmbedding, 
-            request.getTopK() != null ? request.getTopK() : 3);
+            request.getTopK() != null ? request.getTopK() : 3,
+            request.getUserId(), request.getAccessibleKbIds());
         
         if (relevantChunks.isEmpty()) {
             return "未找到相关文档内容";
@@ -259,6 +261,14 @@ public class RAGController {
         private String query;
         private String sessionId;
         private Integer topK;
+        /**
+         * 当前用户ID，NULL=全库检索（兼容模式）
+         */
+        private Long userId;
+        /**
+         * 用户可访问的共享知识库ID集合，NULL/空=不查共享库
+         */
+        private Set<Long> accessibleKbIds;
     }
     
     /**

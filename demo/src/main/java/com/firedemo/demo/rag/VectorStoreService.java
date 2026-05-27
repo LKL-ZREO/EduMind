@@ -46,21 +46,37 @@ public class VectorStoreService {
     }
 
     /**
-     * 保存文档块
+     * 保存文档块（兼容旧调用，不传用户信息）
      */
     public void saveChunks(String documentId, List<DocumentChunk> chunks) {
+        saveChunks(documentId, chunks, null, null);
+    }
+
+    /**
+     * 保存文档块（带用户隔离信息）
+     *
+     * @param documentId 文档ID
+     * @param chunks     文档块列表
+     * @param userId     上传者ID
+     * @param kbId       共享知识库ID，NULL=私人文档
+     */
+    public void saveChunks(String documentId, List<DocumentChunk> chunks, Long userId, Long kbId) {
         for (DocumentChunk chunk : chunks) {
             chunk.setDocumentId(documentId);
-            
+            chunk.setUserId(userId);
+            chunk.setKbId(kbId);
+
             if (pgvectorEnabled) {
-                // 使用原生 SQL 插入，支持 vector 类型
                 insertWithVector(chunk);
             } else {
-                // 回退到普通插入
-                documentChunkMapper.insert(toEntity(chunk));
+                // 回退到普通插入（需同步更新 entity）
+                DocumentChunkEntity entity = toEntity(chunk);
+                entity.setUserId(userId);
+                entity.setKbId(kbId);
+                documentChunkMapper.insert(entity);
             }
         }
-        log.info("Saved {} chunks for document {}", chunks.size(), documentId);
+        log.info("Saved {} chunks for document {} (userId={}, kbId={})", chunks.size(), documentId, userId, kbId);
     }
 
     /**
@@ -70,8 +86,8 @@ public class VectorStoreService {
         String sql = """
             INSERT INTO document_chunk 
             (id, doc_id, doc_name, chunk_index, sub_index, content, token_count, char_count, 
-             embedding, embedding_vec, prev_summary, next_summary, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::vector, ?, ?, NOW())
+             embedding, embedding_vec, prev_summary, next_summary, user_id, kb_id, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::vector, ?, ?, ?, ?, NOW())
             """;
         
         String embeddingStr = encodeEmbedding(chunk.getEmbedding());
@@ -89,40 +105,73 @@ public class VectorStoreService {
             embeddingStr,
             vectorStr,
             chunk.getPrevSummary(),
-            chunk.getNextSummary()
+            chunk.getNextSummary(),
+            chunk.getUserId(),
+            chunk.getKbId()
         );
     }
 
     /**
-     * 相似度搜索 - 使用 pgvector 索引
+     * 相似度搜索 - 全库（兼容旧调用）
      */
     public List<DocumentChunk> similaritySearch(float[] queryEmbedding, int topK) {
+        return similaritySearch(queryEmbedding, topK, null, null);
+    }
+
+    /**
+     * 相似度搜索 - 按用户权限过滤
+     *
+     * @param queryEmbedding   查询向量
+     * @param topK             返回条数
+     * @param userId           当前用户ID，NULL=不过滤（兼容模式）
+     * @param accessibleKbIds  用户可访问的共享知识库ID集合，NULL/空=不查共享库
+     */
+    public List<DocumentChunk> similaritySearch(float[] queryEmbedding, int topK,
+                                                 Long userId, Set<Long> accessibleKbIds) {
         if (!pgvectorEnabled) {
-            // 回退到全表扫描
-            return similaritySearchFallback(queryEmbedding, topK);
+            return similaritySearchFallback(queryEmbedding, topK, userId, accessibleKbIds);
         }
 
         String vectorStr = vectorToString(queryEmbedding);
-        String sql = """
-            SELECT id, doc_id, doc_name, chunk_index, sub_index, content, 
-                   token_count, char_count, embedding, prev_summary, next_summary, created_at
-            FROM document_chunk
-            ORDER BY embedding_vec <=> ?::vector
-            LIMIT ?
-            """;
+        
+        StringBuilder sql = new StringBuilder();
+        sql.append("SELECT id, doc_id, doc_name, chunk_index, sub_index, content, ")
+           .append("token_count, char_count, embedding, prev_summary, next_summary, created_at, ")
+           .append("user_id, kb_id ")
+           .append("FROM document_chunk ");
+        
+        List<Object> params = new ArrayList<>();
+        
+        // 构建权限过滤
+        String whereClause = buildAccessWhereClause(userId, accessibleKbIds, params);
+        if (!whereClause.isEmpty()) {
+            sql.append("WHERE ").append(whereClause).append(" ");
+        }
+        
+        sql.append("ORDER BY embedding_vec <=> ?::vector LIMIT ?");
+        params.add(vectorStr);
+        params.add(topK);
         
         try {
-            return jdbcTemplate.query(sql, new DocumentChunkRowMapper(), vectorStr, topK);
+            return jdbcTemplate.query(sql.toString(), new DocumentChunkRowMapper(), params.toArray());
         } catch (Exception e) {
             log.error("pgvector search failed, falling back", e);
-            return similaritySearchFallback(queryEmbedding, topK);
+            return similaritySearchFallback(queryEmbedding, topK, userId, accessibleKbIds);
         }
     }
 
     /**
-     * 回退方案：全表扫描（兼容模式）
+     * 回退方案：全表扫描（兼容模式，无过滤）
      */
     private List<DocumentChunk> similaritySearchFallback(float[] queryEmbedding, int topK) {
+        return similaritySearchFallback(queryEmbedding, topK, null, null);
+    }
+
+    /**
+     * 回退方案：全表扫描（带权限过滤）
+     */
+    private List<DocumentChunk> similaritySearchFallback(float[] queryEmbedding, int topK,
+                                                          Long userId, Set<Long> accessibleKbIds) {
         log.warn("Using fallback similarity search (full scan)");
         
         List<DocumentChunkEntity> allEntities = documentChunkMapper.selectList(null);
@@ -134,7 +183,7 @@ public class VectorStoreService {
         return allEntities.stream()
             .map(entity -> {
                 DocumentChunk chunk = fromEntity(entity);
-                if (chunk.getEmbedding() != null) {
+                if (chunk.getEmbedding() != null && hasAccess(chunk, userId, accessibleKbIds)) {
                     double score = cosineSimilarity(queryEmbedding, chunk.getEmbedding());
                     return new ScoredChunk(chunk, score);
                 }
@@ -298,6 +347,57 @@ public class VectorStoreService {
     }
 
     /**
+     * 构建 WHERE 子句实现知识库权限隔离
+     * <p>规则：
+     * <ul>
+     *   <li>userId == null → 不过滤（兼容模式）</li>
+     *   <li>userId != null && accessibleKbIds 为空 → 仅查私人文档 (user_id = ? AND kb_id IS NULL)</li>
+     *   <li>userId != null && accessibleKbIds 非空 → 私人文档 + 指定共享库</li>
+     * </ul>
+     *
+     * @return WHERE 子句字符串（不含 WHERE 关键字），无过滤时返回空串
+     */
+    private String buildAccessWhereClause(Long userId, Set<Long> accessibleKbIds, List<Object> params) {
+        if (userId == null) {
+            return "";
+        }
+
+        // 私人文档：user_id = ? AND kb_id IS NULL
+        StringBuilder clause = new StringBuilder();
+        clause.append("(user_id = ? AND kb_id IS NULL)");
+        params.add(userId);
+
+        // 共享知识库：kb_id IN (...)
+        if (accessibleKbIds != null && !accessibleKbIds.isEmpty()) {
+            clause.append(" OR kb_id IN (");
+            int idx = 0;
+            for (Long kbId : accessibleKbIds) {
+                if (idx++ > 0) clause.append(", ");
+                clause.append("?");
+                params.add(kbId);
+            }
+            clause.append(")");
+        }
+
+        return clause.toString();
+    }
+
+    /**
+     * 检查 chunk 是否对当前用户可见（回退模式用）
+     */
+    private boolean hasAccess(DocumentChunk chunk, Long userId, Set<Long> accessibleKbIds) {
+        if (userId == null) {
+            return true;
+        }
+        // 私人文档：上传者本人
+        if (chunk.getKbId() == null) {
+            return userId.equals(chunk.getUserId());
+        }
+        // 共享知识库：用户在成员列表中
+        return accessibleKbIds != null && accessibleKbIds.contains(chunk.getKbId());
+    }
+
+    /**
      * JDBC RowMapper
      */
     private static class DocumentChunkRowMapper implements RowMapper<DocumentChunk> {
@@ -315,6 +415,12 @@ public class VectorStoreService {
             chunk.setPrevSummary(rs.getString("prev_summary"));
             chunk.setNextSummary(rs.getString("next_summary"));
             
+            // userId, kbId 可能为 NULL
+            Long userId = rs.getLong("user_id");
+            chunk.setUserId(rs.wasNull() ? null : userId);
+            Long kbId = rs.getLong("kb_id");
+            chunk.setKbId(rs.wasNull() ? null : kbId);
+
             String embeddingStr = rs.getString("embedding");
             if (embeddingStr != null) {
                 chunk.setEmbedding(decodeEmbeddingStatic(embeddingStr));
@@ -335,11 +441,19 @@ public class VectorStoreService {
     }
 
     /**
-     * 关键词检索 —— RRF 混合检索的第二路
+     * 关键词检索 —— 全库（兼容旧调用）
+     */
+    public List<ScoredChunk> keywordSearch(String query, int topK) {
+        return keywordSearch(query, topK, null, null);
+    }
+
+    /**
+     * 关键词检索 —— 按用户权限过滤
      * <p>从查询中提取关键词，通过 ILIKE 匹配 chunk 内容，按命中数排序。
      * 中文场景下 pg_trgm/tsvector 分词效果不佳，ILIKE 是最务实的选择。
      */
-    public List<ScoredChunk> keywordSearch(String query, int topK) {
+    public List<ScoredChunk> keywordSearch(String query, int topK,
+                                            Long userId, Set<Long> accessibleKbIds) {
         Set<String> keywords = extractKeywords(query);
         if (keywords.isEmpty()) {
             return Collections.emptyList();
@@ -350,6 +464,7 @@ public class VectorStoreService {
         sql.append("""
             SELECT id, doc_id, doc_name, chunk_index, sub_index, content,
                    token_count, char_count, embedding, prev_summary, next_summary, created_at,
+                   user_id, kb_id,
                    (""");
 
         List<String> kwList = new ArrayList<>(keywords);
@@ -363,12 +478,20 @@ public class VectorStoreService {
         sql.append("""
             ) AS keyword_score
             FROM document_chunk
-            WHERE\s""");
+            WHERE (""");
 
         for (int i = 0; i < kwList.size(); i++) {
             if (i > 0) sql.append(" OR ");
             sql.append("content ILIKE ?");
             params.add("%" + kwList.get(i) + "%");
+        }
+
+        sql.append(")");
+
+        // 权限过滤
+        String accessClause = buildAccessWhereClause(userId, accessibleKbIds, params);
+        if (!accessClause.isEmpty()) {
+            sql.append(" AND (").append(accessClause).append(")");
         }
 
         sql.append("""
@@ -436,6 +559,12 @@ public class VectorStoreService {
             chunk.setCharCount(rs.getInt("char_count"));
             chunk.setPrevSummary(rs.getString("prev_summary"));
             chunk.setNextSummary(rs.getString("next_summary"));
+
+            // userId, kbId 可能为 NULL
+            Long userId = rs.getLong("user_id");
+            chunk.setUserId(rs.wasNull() ? null : userId);
+            Long kbId = rs.getLong("kb_id");
+            chunk.setKbId(rs.wasNull() ? null : kbId);
 
             String embeddingStr = rs.getString("embedding");
             if (embeddingStr != null) {

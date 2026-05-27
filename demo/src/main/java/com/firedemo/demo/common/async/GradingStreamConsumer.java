@@ -2,18 +2,20 @@ package com.firedemo.demo.common.async;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.firedemo.demo.DTO.EvaluationResultDTO;
-import com.firedemo.demo.Entity.HomeworkKnowledge;
 import com.firedemo.demo.Entity.HomeworkTask;
 import com.firedemo.demo.Entity.Submission;
+import com.firedemo.demo.Entity.SubmissionError;
+import com.firedemo.demo.Entity.TeacherKnowledge;
 import com.firedemo.demo.Service.FileStorageService;
 import com.firedemo.demo.Service.OneBotHttpService;
 import com.firedemo.demo.Service.OpenClawService;
 import com.firedemo.demo.common.cache.CacheConsistencyService;
 import com.firedemo.demo.mapper.ClassStudentMapper;
-import com.firedemo.demo.mapper.HomeworkKnowledgeMapper;
 import com.firedemo.demo.mapper.HomeworkTaskMapper;
 import com.firedemo.demo.mapper.StudentQqBindingMapper;
+import com.firedemo.demo.mapper.SubmissionErrorMapper;
 import com.firedemo.demo.mapper.SubmissionMapper;
+import com.firedemo.demo.mapper.TeacherKnowledgeMapper;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
@@ -60,7 +62,8 @@ public class GradingStreamConsumer {
     private final FileStorageService fileStorageService;
     private final OpenClawService openClawService;
     private final OneBotHttpService oneBotHttpService;
-    private final HomeworkKnowledgeMapper knowledgeMapper;
+    private final TeacherKnowledgeMapper teacherKnowledgeMapper;
+    private final SubmissionErrorMapper submissionErrorMapper;
     private final HomeworkTaskMapper taskMapper;
     private final ClassStudentMapper classStudentMapper;
     private final StudentQqBindingMapper studentQqBindingMapper;
@@ -77,7 +80,8 @@ public class GradingStreamConsumer {
                                   FileStorageService fileStorageService,
                                   OpenClawService openClawService,
                                   OneBotHttpService oneBotHttpService,
-                                  HomeworkKnowledgeMapper knowledgeMapper,
+                                  TeacherKnowledgeMapper teacherKnowledgeMapper,
+                                  SubmissionErrorMapper submissionErrorMapper,
                                   HomeworkTaskMapper taskMapper,
                                   ClassStudentMapper classStudentMapper,
                                   StudentQqBindingMapper studentQqBindingMapper,
@@ -89,7 +93,8 @@ public class GradingStreamConsumer {
         this.fileStorageService = fileStorageService;
         this.openClawService = openClawService;
         this.oneBotHttpService = oneBotHttpService;
-        this.knowledgeMapper = knowledgeMapper;
+        this.teacherKnowledgeMapper = teacherKnowledgeMapper;
+        this.submissionErrorMapper = submissionErrorMapper;
         this.taskMapper = taskMapper;
         this.classStudentMapper = classStudentMapper;
         this.studentQqBindingMapper = studentQqBindingMapper;
@@ -172,8 +177,7 @@ public class GradingStreamConsumer {
      * 定时扫描 Pending 队列 — 僵尸消息兜底
      * <p>
      * 当消费者宕机时，其未 ACK 的消息会永久停留在 Pending 队列。
-     * 此处作为兜底机制，将超时消息重新分配给当前消费者。
-     * 实际认领通过 Redisson claim API 完成，依赖 Stream 消费者组自动重分配。
+     * claim() 改变消息 owner 并返回消息数据，提交到消费线程处理后 ACK。
      */
     @Scheduled(fixedDelay = 30_000)
     @SuppressWarnings("unchecked")
@@ -197,15 +201,23 @@ public class GradingStreamConsumer {
                     StreamMessageId msgId = extractMessageId(item);
                     long idleTime = extractIdleTime(item);
                     if (idleTime > 60_000) {
-                        stream.claim(AsyncTaskConstants.GRADING_GROUP,
+                        // claim 返回被认领的消息数据，直接处理
+                        Map<StreamMessageId, Map<String, String>> claimed = stream.claim(
+                                AsyncTaskConstants.GRADING_GROUP,
                                 this.consumerName, idleTime, TimeUnit.MILLISECONDS, msgId);
-                        claimedCount++;
+
+                        if (claimed != null && !claimed.isEmpty()) {
+                            for (Map.Entry<StreamMessageId, Map<String, String>> entry : claimed.entrySet()) {
+                                executor.submit(() -> processOne(entry.getKey(), entry.getValue()));
+                                claimedCount++;
+                            }
+                        }
                     }
                 } catch (Exception ignored) {
                 }
             }
             if (claimedCount > 0) {
-                log.warn("认领僵尸消息: count={}", claimedCount);
+                log.info("认领并处理僵尸消息: count={}", claimedCount);
             }
         } catch (Exception e) {
             log.debug("Pending扫描结束: {}", e.getMessage());
@@ -332,6 +344,23 @@ public class GradingStreamConsumer {
     // ==================== 辅助方法 ====================
 
     private String buildPrompt(Submission sub, String requirement, String fileContent) {
+        // 查询该班级教师定义的知识点列表
+        String kpContext = "";
+        List<TeacherKnowledge> kps = teacherKnowledgeMapper.selectByClassId(sub.getClassId());
+        if (kps != null && !kps.isEmpty()) {
+            List<String> kpNames = kps.stream()
+                    .map(TeacherKnowledge::getName)
+                    .collect(java.util.stream.Collectors.toList());
+            kpContext = String.format("""
+
+                        该班级教师定义的知识点列表：
+                        %s
+
+                        请根据以上知识点列表，将每条 errors[] 和 suggestions[] 归类到对应的知识点。
+                        如果某个错误/建议不属于列表中的任何一个知识点，则 knowledgePoint 填 "其他"。
+                        """, kpNames);
+        }
+
         return String.format("""
                         请批改以下作业，并以JSON格式返回结果：
 
@@ -341,7 +370,7 @@ public class GradingStreamConsumer {
                         要求：%s
 
                         文件内容：
-                        %s
+                        %s%s
 
                         请使用批改作业助手的标准格式输出结果，必须是合法JSON格式。
                         """,
@@ -349,7 +378,8 @@ public class GradingStreamConsumer {
                 sub.getClassName(),
                 sub.getAssignmentName(),
                 requirement != null && !requirement.isEmpty() ? requirement : "无特殊要求",
-                fileContent);
+                fileContent,
+                kpContext);
     }
 
     private void saveEvaluation(Submission sub, EvaluationResultDTO eval, String rawResponse) {
@@ -390,21 +420,54 @@ public class GradingStreamConsumer {
             }
         }
 
-        if (eval.getKnowledgePoints() != null) {
-            for (EvaluationResultDTO.KnowledgePointItem kp : eval.getKnowledgePoints()) {
-                HomeworkKnowledge hk = new HomeworkKnowledge();
-                hk.setSubmissionId(sub.getId());
-                hk.setKnowledgePoint(kp.getName());
-                hk.setMastery(kp.getMastery());
-                hk.setStatus(kp.getStatus());
-                knowledgeMapper.insert(hk);
-            }
-        }
+        // 保存 errors/suggestions 到 submission_errors（按知识点归类）
+        saveSubmissionErrors(sub, eval);
 
         if (sub.getClassId() != null && sub.getStudentId() != null
                 && sub.getStudentName() != null) {
             classStudentMapper.insertIgnore(sub.getClassId(),
                     sub.getStudentId(), sub.getStudentName(), "auto");
+        }
+    }
+
+    private void saveSubmissionErrors(Submission sub, EvaluationResultDTO eval) {
+        Long classId = sub.getClassId();
+        if (classId == null) return;
+
+        LocalDateTime now = LocalDateTime.now();
+
+        // 写入 errors[]
+        if (eval.getErrors() != null) {
+            for (EvaluationResultDTO.ErrorItem err : eval.getErrors()) {
+                if (err.getIssue() == null || err.getIssue().isEmpty()) continue;
+                SubmissionError se = new SubmissionError();
+                se.setSubmissionId(sub.getId());
+                se.setClassId(classId);
+                se.setErrorText(err.getIssue());
+                se.setErrorType(err.getType() != null ? err.getType() : "");
+                se.setSeverity(err.getSeverity() != null ? err.getSeverity() : "minor");
+                se.setKnowledgePoint(err.getKnowledgePoint() != null ? err.getKnowledgePoint() : "其他");
+                se.setCreatedAt(now);
+                se.setUpdatedAt(now);
+                submissionErrorMapper.insert(se);
+            }
+        }
+
+        // 写入 suggestions[]
+        if (eval.getSuggestions() != null) {
+            for (EvaluationResultDTO.SuggestionItem sug : eval.getSuggestions()) {
+                if (sug.getIssue() == null || sug.getIssue().isEmpty()) continue;
+                SubmissionError se = new SubmissionError();
+                se.setSubmissionId(sub.getId());
+                se.setClassId(classId);
+                se.setErrorText(sug.getIssue() + " -> " + (sug.getSuggestion() != null ? sug.getSuggestion() : ""));
+                se.setErrorType("");
+                se.setSeverity(sug.getPriority() != null ? sug.getPriority() : "low");
+                se.setKnowledgePoint(sug.getKnowledgePoint() != null ? sug.getKnowledgePoint() : "其他");
+                se.setCreatedAt(now);
+                se.setUpdatedAt(now);
+                submissionErrorMapper.insert(se);
+            }
         }
     }
 
