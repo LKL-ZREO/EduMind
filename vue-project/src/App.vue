@@ -107,13 +107,31 @@ watch(isLoggedIn, (loggedIn) => {
   box-sizing: border-box;
 }
 
+:root {
+  --bg-body: #f0f4f8;
+  --bg-card: #ffffff;
+  --bg-sidebar: #ffffff;
+  --text-primary: #303133;
+  --text-secondary: #606266;
+  --text-muted: #909399;
+  --border-base: #e4e7ed;
+  --border-light: #ebeef5;
+  --color-primary: #409EFF;
+  --color-primary-hover: #337ecc;
+  --color-success: #67C23A;
+  --color-warning: #E6A23C;
+  --color-danger: #F56C6C;
+  --shadow-card: 0 2px 12px rgba(0,0,0,.06);
+  --shadow-hover: 0 4px 20px rgba(0,0,0,.1);
+}
+
 .app-container {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  background-color: #1a1a1a;
-  color: #fff;
-  font-family: "Microsoft Yahei", sans-serif;
+  background-color: var(--bg-body);
+  color: var(--text-primary);
+  font-family: "Microsoft Yahei", -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
 /* 学生端/登录注册页全屏 */
@@ -123,14 +141,14 @@ watch(isLoggedIn, (loggedIn) => {
   justify-content: center;
   align-items: center;
   min-height: 100vh;
-  background-color: #f5f7ff;
-  color: #333;
+  background-color: #f0f4f8;
+  color: var(--text-primary);
 }
 
 /* 顶部导航（老师端） */
 .app-header {
-  background-color: #2a2a2a;
-  border-bottom: 1px solid #444;
+  background-color: #fff;
+  border-bottom: 1px solid var(--border-base);
   flex-shrink: 0;
   position: sticky;
   top: 0;
@@ -138,39 +156,50 @@ watch(isLoggedIn, (loggedIn) => {
   height: 56px;
   display: flex;
   align-items: center;
+  box-shadow: 0 1px 4px rgba(0,0,0,.04);
 }
 
 .wrapper {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0 16px;
+  padding: 0 24px;
   width: 100%;
 }
 
 .brand h2 {
   margin: 0;
-  color: #ff7d00;
+  color: var(--color-primary);
   font-size: 18px;
+  font-weight: 600;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
 }
 
 .header-actions .user {
-  margin-right: 12px;
-  color: #eee;
+  margin-right: 16px;
+  color: var(--text-secondary);
+  font-size: 14px;
 }
 
 .header-actions .logout {
-  color: #ff7d00;
+  color: var(--text-muted);
   background: none;
   border: none;
   cursor: pointer;
-  padding: 4px 8px;
+  padding: 4px 12px;
   border-radius: 4px;
   text-decoration: none;
+  font-size: 14px;
+  transition: all .2s;
 }
 
 .header-actions .logout:hover {
-  background-color: #333;
+  background-color: #f5f7fa;
+  color: var(--color-danger);
 }
 
 /* 主布局（老师端） */
@@ -183,8 +212,8 @@ watch(isLoggedIn, (loggedIn) => {
 /* 侧边栏 */
 .sidebar {
   width: 200px;
-  background-color: #2a2a2a;
-  border-right: 1px solid #444;
+  background-color: var(--bg-sidebar);
+  border-right: 1px solid var(--border-light);
   flex-shrink: 0;
   height: calc(100vh - 56px);
   overflow-y: auto;
@@ -193,28 +222,30 @@ watch(isLoggedIn, (loggedIn) => {
 }
 
 .sidebar nav {
-  padding: 12px 0;
+  padding: 8px 0;
 }
 
 .nav-item {
   display: flex;
   align-items: center;
-  padding: 12px 16px;
-  color: #ddd;
+  padding: 12px 20px;
+  margin: 2px 8px;
+  color: var(--text-secondary);
   text-decoration: none;
   transition: all 0.2s;
-  border-left: 3px solid transparent;
+  border-radius: 8px;
+  font-size: 14px;
 }
 
 .nav-item:hover {
-  background-color: #333;
-  color: #ff7d00;
+  background-color: #ecf5ff;
+  color: var(--color-primary);
 }
 
 .nav-item.router-link-exact-active {
-  background-color: #333;
-  color: #ff7d00;
-  border-left-color: #ff7d00;
+  background-color: #ecf5ff;
+  color: var(--color-primary);
+  font-weight: 500;
 }
 
 .nav-item .icon {
@@ -226,9 +257,9 @@ watch(isLoggedIn, (loggedIn) => {
 /* 内容区域 */
 .content {
   flex: 1;
-  padding: 16px;
+  padding: 24px;
   overflow-y: auto;
-  background-color: #1a1a1a;
+  background-color: var(--bg-body);
 }
 
 /* 移动端 */

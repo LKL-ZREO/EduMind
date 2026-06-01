@@ -80,14 +80,14 @@ export default {
   max-width: 960px;
   margin: 0 auto;
   padding: 20px;
-  color: #e0e0e0;
+  color: #303133;
   font-size: 14px;
 }
 
 .loading-state {
   text-align: center;
   padding: 60px;
-  color: #999;
+  color: #606266;
 }
 
 /* 头部 */
@@ -100,10 +100,10 @@ export default {
 
 .back-btn {
   padding: 6px 14px;
-  border: 1px solid #555;
+  border: 1px solid #dcdfe6;
   border-radius: 6px;
   background: transparent;
-  color: #ccc;
+  color: #303133;
   cursor: pointer;
   flex-shrink: 0;
   margin-top: 4px;
@@ -111,7 +111,7 @@ export default {
 }
 
 .back-btn:hover {
-  background: #333;
+  background: #ebeef5;
 }
 
 .header-info h2 {
@@ -121,14 +121,14 @@ export default {
 }
 
 .header-meta {
-  color: #999;
+  color: #606266;
   font-size: 13px;
 }
 
 /* 代码块 */
 .content-section {
-  background: #1a1a1a;
-  border: 1px solid #333;
+  background: #ffffff;
+  border: 1px solid #ebeef5;
   border-radius: 8px;
   overflow: hidden;
 }

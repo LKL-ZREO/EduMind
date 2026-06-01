@@ -197,7 +197,7 @@ export default {
               type: 'linear',
               x: 0, y: 0, x2: 0, y2: 1,
               colorStops: [
-                { offset: 0, color: '#ff7d00' },
+                { offset: 0, color: '#409EFF' },
                 { offset: 1, color: '#cc6400' }
               ]
             }
@@ -250,14 +250,14 @@ export default {
   max-width: 900px;
   margin: 0 auto;
   padding: 20px;
-  color: #e0e0e0;
+  color: #303133;
   font-size: 14px;
 }
 
 .loading-state {
   text-align: center;
   padding: 60px;
-  color: #999;
+  color: #606266;
 }
 
 /* 头部 */
@@ -270,17 +270,17 @@ export default {
 
 .back-btn {
   padding: 8px 16px;
-  border: 1px solid #555;
+  border: 1px solid #dcdfe6;
   border-radius: 6px;
   background: transparent;
-  color: #ccc;
+  color: #303133;
   cursor: pointer;
   flex-shrink: 0;
   margin-top: 4px;
 }
 
 .back-btn:hover {
-  background: #333;
+  background: #ebeef5;
 }
 
 .header-info h2 {
@@ -292,7 +292,7 @@ export default {
   display: flex;
   flex-wrap: wrap;
   gap: 16px;
-  color: #999;
+  color: #606266;
   font-size: 13px;
 }
 
@@ -305,7 +305,7 @@ export default {
 
 .card {
   flex: 1;
-  background: #2a2a2a;
+  background: #ffffff;
   border-radius: 10px;
   padding: 18px;
   text-align: center;
@@ -314,18 +314,18 @@ export default {
 .card-num {
   font-size: 28px;
   font-weight: bold;
-  color: #ff7d00;
+  color: #409EFF;
 }
 
 .card-label {
   font-size: 13px;
-  color: #999;
+  color: #606266;
   margin-top: 4px;
 }
 
 /* 图表 */
 .chart-section {
-  background: #2a2a2a;
+  background: #ffffff;
   border-radius: 10px;
   padding: 20px;
   margin-bottom: 20px;
@@ -343,7 +343,7 @@ export default {
 
 /* 提交列表 */
 .submissions-section {
-  background: #2a2a2a;
+  background: #ffffff;
   border-radius: 10px;
   padding: 20px;
 }
@@ -364,23 +364,23 @@ export default {
 }
 
 .data-table th {
-  background: #333;
+  background: #ebeef5;
   padding: 10px 14px;
   text-align: left;
-  color: #aaa;
+  color: #606266;
   font-weight: 500;
-  border-bottom: 2px solid #444;
+  border-bottom: 2px solid #e4e7ed;
   white-space: nowrap;
 }
 
 .data-table td {
   padding: 10px 14px;
-  border-bottom: 1px solid #3a3a3a;
+  border-bottom: 1px solid #e4e7ed;
   color: #d0d0d0;
 }
 
 .data-table tr:hover td {
-  background: #333;
+  background: #ebeef5;
 }
 
 .no-score {
@@ -406,7 +406,7 @@ export default {
 
 .tag-miss {
   background: rgba(153, 153, 153, 0.15);
-  color: #999;
+  color: #606266;
 }
 
 .score-excellent { color: #52c41a; font-weight: 600; }
@@ -416,8 +416,8 @@ export default {
 
 .btn-link {
   background: none;
-  border: 1px solid #555;
-  color: #ff7d00;
+  border: 1px solid #dcdfe6;
+  color: #409EFF;
   cursor: pointer;
   padding: 4px 12px;
   border-radius: 4px;
@@ -425,6 +425,6 @@ export default {
 }
 
 .btn-link:hover {
-  background: rgba(255, 125, 0, 0.1);
+  background: rgba(64,158,255,.12);
 }
 </style>
