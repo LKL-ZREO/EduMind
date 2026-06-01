@@ -43,6 +43,18 @@ const router = createRouter({
       meta: { requiresAuth: true }
     },
     {
+      path: '/teacher/classes',
+      name: 'classes',
+      component: () => import('../views/teacher/ClassList.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
+      path: '/teacher/classes/:id',
+      name: 'classManage',
+      component: () => import('../views/teacher/ClassManage.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
       path: '/teacher/tasks',
       name: 'tasks',
       component: () => import('../views/PageFive.vue'),
@@ -52,6 +64,12 @@ const router = createRouter({
       path: '/teacher/tasks/:id',
       name: 'taskDetail',
       component: () => import('../views/TaskDetail.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
+      path: '/view/submission/:id',
+      name: 'submissionView',
+      component: () => import('../views/SubmissionView.vue'),
       meta: { requiresAuth: true }
     },
     {

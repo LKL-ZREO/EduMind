@@ -205,6 +205,7 @@ private final com.firedemo.demo.Service.TaskReminderService taskReminderService;
             }
 
             Map<String, Object> si = new LinkedHashMap<>();
+            si.put("submissionId", s.getId());
             si.put("studentName", s.getStudentName());
             si.put("studentId", s.getStudentId());
             si.put("score", s.getTotalScore());

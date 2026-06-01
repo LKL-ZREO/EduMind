@@ -144,7 +144,6 @@ export default {
           } catch (e) {
             this.className = '未知'
           }
-          this.$nextTick(() => this.renderChart())
         } else {
           this.task = null
         }
@@ -153,10 +152,12 @@ export default {
         this.task = null
       } finally {
         this.loading = false
+        this.$nextTick(() => this.renderChart())
       }
     },
 
     renderChart() {
+
       if (!this.task?.distribution) return
       const container = this.$refs.chartRef
       if (!container) return
@@ -177,6 +178,8 @@ export default {
         },
         yAxis: {
           type: 'value',
+          min: 0,
+          minInterval: 1,
           axisLabel: { color: '#bbb' }
         },
         series: [{
@@ -232,7 +235,11 @@ export default {
     },
 
     viewDetail(s) {
-      alert(`学生：${s.studentName}\n得分：${s.finalScore != null ? s.finalScore : s.score}\n${s.isLate ? '⚠️ 晚交提交' : '✅ 正常提交'}\n时间：${s.submittedAt || '-'}`)
+      if (!s.submissionId) {
+        alert('数据未加载完成，请刷新页面后重试')
+        return
+      }
+      window.open(`/view/submission/${s.submissionId}`, '_blank')
     }
   }
 }

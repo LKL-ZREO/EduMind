@@ -1,8 +1,6 @@
 package com.firedemo.demo.Entity;
 
-import com.baomidou.mybatisplus.annotation.IdType;
-import com.baomidou.mybatisplus.annotation.TableId;
-import com.baomidou.mybatisplus.annotation.TableName;
+import com.baomidou.mybatisplus.annotation.*;
 import lombok.Data;
 
 import java.time.LocalDateTime;
@@ -25,5 +23,17 @@ public class ClassInfo {
 
     private String qqGroupId;
 
+    /** 所属课程（多个班级归入同一课程） */
+    private String courseGroup;
+
+    /** 6位邀请码 */
+    private String inviteCode;
+
+    /** ACTIVE / ARCHIVED */
+    private String status;
+
     private LocalDateTime createdAt;
+
+    @TableField(fill = FieldFill.INSERT_UPDATE)
+    private LocalDateTime updatedAt;
 }

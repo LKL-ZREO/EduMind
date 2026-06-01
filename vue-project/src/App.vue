@@ -66,6 +66,10 @@ watch(isLoggedIn, (loggedIn) => {
               <span class="icon">🎲</span>
               AI对话
             </RouterLink>
+            <RouterLink to="/teacher/classes" class="nav-item">
+              <span class="icon">📚</span>
+              班级管理
+            </RouterLink>
             <RouterLink to="/teacher/docs" class="nav-item">
               <span class="icon">📝</span>
               知识库管理

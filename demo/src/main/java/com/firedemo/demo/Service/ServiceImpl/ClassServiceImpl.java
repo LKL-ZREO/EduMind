@@ -1,17 +1,29 @@
 package com.firedemo.demo.Service.ServiceImpl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.firedemo.demo.DTO.*;
 import com.firedemo.demo.Entity.ClassInfo;
+import com.firedemo.demo.Entity.ClassStudent;
 import com.firedemo.demo.Service.ClassService;
+import com.firedemo.demo.common.exception.BusinessException;
+import com.firedemo.demo.common.exception.ErrorCode;
 import com.firedemo.demo.mapper.ClassInfoMapper;
 import com.firedemo.demo.mapper.ClassStudentMapper;
 import com.firedemo.demo.mapper.StudentQqBindingMapper;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
-import java.util.List;
-import java.util.Map;
+import java.security.SecureRandom;
+import java.util.*;
+import java.util.stream.Collectors;
 
+/**
+ * 班级 service 实现
+ */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class ClassServiceImpl implements ClassService {
@@ -19,6 +31,11 @@ public class ClassServiceImpl implements ClassService {
     private final ClassInfoMapper classInfoMapper;
     private final ClassStudentMapper classStudentMapper;
     private final StudentQqBindingMapper studentQqBindingMapper;
+
+    private static final String CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    private static final int CODE_LEN = 6;
+    private static final int MAX_RETRY = 10;
+    private static final SecureRandom RAND = new SecureRandom();
 
     // ========== 班级信息 ==========
 
@@ -29,7 +46,11 @@ public class ClassServiceImpl implements ClassService {
 
     @Override
     public ClassInfo getClassById(Long id) {
-        return classInfoMapper.selectById(id);
+        ClassInfo ci = classInfoMapper.selectById(id);
+        if (ci == null) {
+            throw new BusinessException(ErrorCode.DATA_NOT_FOUND);
+        }
+        return ci;
     }
 
     @Override
@@ -42,16 +63,110 @@ public class ClassServiceImpl implements ClassService {
     public String getQqGroupId(Long classId) {
         return classInfoMapper.selectQqGroupIdById(classId);
     }
-//
-//    @Override
-//    public List<Long> listAllClassIds() {
-//        return classInfoMapper.selectAllIds();
-//    }
-//
-//    @Override
-//    public List<ClassInfo> listByTeacherId(Long teacherId) {
-//        return classInfoMapper.selectByTeacherId(teacherId);
-//    }
+
+    @Override
+    public List<ClassGroupDTO> listGroupedByCourse(Long teacherId) {
+        List<ClassInfo> classes = classInfoMapper.selectByTeacherId(teacherId);
+        Map<String, List<ClassInfo>> grouped = classes.stream()
+                .collect(Collectors.groupingBy(
+                        c -> c.getCourseGroup() == null || c.getCourseGroup().isEmpty()
+                                ? "__ungrouped__" : c.getCourseGroup(),
+                        LinkedHashMap::new,
+                        Collectors.toList()));
+
+        // 按课程名排序，未分组放最后
+        return grouped.entrySet().stream()
+                .sorted((a, b) -> {
+                    if ("__ungrouped__".equals(a.getKey())) return 1;
+                    if ("__ungrouped__".equals(b.getKey())) return -1;
+                    return a.getKey().compareTo(b.getKey());
+                })
+                .map(entry -> {
+                    ClassGroupDTO dto = new ClassGroupDTO();
+                    dto.setCourseGroup("__ungrouped__".equals(entry.getKey()) ? null : entry.getKey());
+                    dto.setClasses(entry.getValue().stream()
+                            .sorted((a, b) -> {
+                                if (!a.getStatus().equals(b.getStatus())) {
+                                    return "ACTIVE".equals(a.getStatus()) ? -1 : 1;
+                                }
+                                return b.getCreatedAt().compareTo(a.getCreatedAt());
+                            })
+                            .map(ci -> {
+                                ClassGroupDTO.ClassItem item = new ClassGroupDTO.ClassItem();
+                                item.setId(ci.getId());
+                                item.setName(ci.getName());
+                                item.setDescription(ci.getDescription());
+                                item.setStudentCount(classStudentMapper.countByClassId(ci.getId()));
+                                item.setInviteCode(ci.getInviteCode());
+                                item.setStatus(ci.getStatus());
+                                item.setCreatedAt(ci.getCreatedAt());
+                                return item;
+                            })
+                            .collect(Collectors.toList()));
+                    return dto;
+                })
+                .collect(Collectors.toList());
+    }
+
+    @Override
+    @Transactional
+    public ClassInfo createClass(Long teacherId, CreateClassDTO dto) {
+        ClassInfo ci = new ClassInfo();
+        ci.setName(dto.getName());
+        ci.setTeacherId(teacherId);
+        ci.setDescription(dto.getDescription() != null ? dto.getDescription() : "");
+        ci.setCourseGroup(dto.getCourseGroup() != null ? dto.getCourseGroup() : "");
+        ci.setInviteCode(generateInviteCode());
+        ci.setStatus("ACTIVE");
+        classInfoMapper.insert(ci);
+        log.info("教师 {} 创建班级: {} (id={})", teacherId, ci.getName(), ci.getId());
+        return ci;
+    }
+
+    @Override
+    @Transactional
+    public void updateClass(Long classId, Long teacherId, UpdateClassDTO dto) {
+        ClassInfo ci = getClassById(classId);
+        if (!ci.getTeacherId().equals(teacherId)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN);
+        }
+        LambdaUpdateWrapper<ClassInfo> wrapper = new LambdaUpdateWrapper<>();
+        wrapper.eq(ClassInfo::getId, classId);
+        if (dto.getName() != null) wrapper.set(ClassInfo::getName, dto.getName());
+        if (dto.getCourseGroup() != null) wrapper.set(ClassInfo::getCourseGroup, dto.getCourseGroup());
+        if (dto.getDescription() != null) wrapper.set(ClassInfo::getDescription, dto.getDescription());
+        classInfoMapper.update(null, wrapper);
+    }
+
+    @Override
+    @Transactional
+    public void deleteClass(Long classId, Long teacherId) {
+        ClassInfo ci = getClassById(classId);
+        if (!ci.getTeacherId().equals(teacherId)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN);
+        }
+        int studentCount = classStudentMapper.countByClassId(classId);
+        if (studentCount > 0) {
+            throw new BusinessException(400, "班级下还有 " + studentCount + " 名学生，请先移除所有学生后再删除");
+        }
+        classInfoMapper.deleteById(classId);
+        log.info("教师 {} 删除班级: {} (id={})", teacherId, ci.getName(), classId);
+    }
+
+    @Override
+    @Transactional
+    public void toggleArchive(Long classId, Long teacherId) {
+        ClassInfo ci = getClassById(classId);
+        if (!ci.getTeacherId().equals(teacherId)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN);
+        }
+        String newStatus = "ACTIVE".equals(ci.getStatus()) ? "ARCHIVED" : "ACTIVE";
+        LambdaUpdateWrapper<ClassInfo> wrapper = new LambdaUpdateWrapper<>();
+        wrapper.eq(ClassInfo::getId, classId).set(ClassInfo::getStatus, newStatus);
+        classInfoMapper.update(null, wrapper);
+        log.info("教师 {} {}班级: {} (id={})",
+                teacherId, "ACTIVE".equals(newStatus) ? "取消归档" : "归档", ci.getName(), classId);
+    }
 
     // ========== 班级学生 ==========
 
@@ -70,6 +185,69 @@ public class ClassServiceImpl implements ClassService {
         return classStudentMapper.selectUnsubmittedByTaskId(classId, taskId);
     }
 
+    @Override
+    public List<ClassStudent> listStudentsByClassId(Long classId) {
+        return classStudentMapper.selectByClassId(classId);
+    }
+
+    @Override
+    @Transactional
+    public void removeStudent(Long classId, String studentId, Long teacherId) {
+        ClassInfo ci = getClassById(classId);
+        if (!ci.getTeacherId().equals(teacherId)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN);
+        }
+        LambdaQueryWrapper<ClassStudent> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(ClassStudent::getClassId, classId).eq(ClassStudent::getStudentId, studentId);
+        int deleted = classStudentMapper.delete(wrapper);
+        if (deleted == 0) {
+            throw new BusinessException(ErrorCode.DATA_NOT_FOUND);
+        }
+        log.info("教师 {} 从班级 {} 移除学生 {}", teacherId, classId, studentId);
+    }
+
+    @Override
+    @Transactional
+    public Map<String, Integer> importStudents(Long classId, Long teacherId, List<ImportStudentsDTO.StudentItem> items) {
+        ClassInfo ci = getClassById(classId);
+        if (!ci.getTeacherId().equals(teacherId)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN);
+        }
+        int imported = 0;
+        int skipped = 0;
+        for (var item : items) {
+            try {
+                classStudentMapper.insertIgnore(classId, item.getStudentId(),
+                        item.getStudentName(), "manual");
+                imported++;
+            } catch (Exception e) {
+                skipped++;
+                log.debug("跳过重复学生: classId={} studentId={}", classId, item.getStudentId());
+            }
+        }
+        log.info("教师 {} 批量导入班级 {}: 成功 {} 跳过 {}", teacherId, classId, imported, skipped);
+        Map<String, Integer> result = new HashMap<>();
+        result.put("imported", imported);
+        result.put("skipped", skipped);
+        return result;
+    }
+
+    @Override
+    @Transactional
+    public String joinByInviteCode(String inviteCode, String studentId, String studentName) {
+        ClassInfo ci = classInfoMapper.selectOne(
+                new LambdaQueryWrapper<ClassInfo>()
+                        .eq(ClassInfo::getInviteCode, inviteCode.toUpperCase().trim()));
+        if (ci == null) {
+            throw new BusinessException(ErrorCode.DATA_NOT_FOUND.getCode(), "邀请码无效");
+        }
+        if ("ARCHIVED".equals(ci.getStatus())) {
+            throw new BusinessException(400, "班级已归档，无法加入");
+        }
+        classStudentMapper.insertIgnore(ci.getId(), studentId, studentName, "manual");
+        return ci.getName();
+    }
+
     // ========== QQ绑定 ==========
 
     @Override
@@ -80,5 +258,23 @@ public class ClassServiceImpl implements ClassService {
     @Override
     public void bindQq(String studentId, String qqNumber, String studentName) {
         studentQqBindingMapper.insertOrUpdate(studentId, qqNumber, studentName);
+    }
+
+    // ========== 内部工具 ==========
+
+    private String generateInviteCode() {
+        for (int retry = 0; retry < MAX_RETRY; retry++) {
+            StringBuilder sb = new StringBuilder(CODE_LEN);
+            for (int i = 0; i < CODE_LEN; i++) {
+                sb.append(CHARS.charAt(RAND.nextInt(CHARS.length())));
+            }
+            String code = sb.toString();
+            Long exists = classInfoMapper.selectCount(
+                    new LambdaQueryWrapper<ClassInfo>().eq(ClassInfo::getInviteCode, code));
+            if (exists == 0) {
+                return code;
+            }
+        }
+        throw new BusinessException(500, "生成邀请码失败，请重试");
     }
 }
