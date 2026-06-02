@@ -200,7 +200,7 @@ public class GradingStreamConsumer {
                 try {
                     StreamMessageId msgId = extractMessageId(item);
                     long idleTime = extractIdleTime(item);
-                    if (idleTime > 60_000) {
+                    if (idleTime > 300_000) {
                         // claim 返回被认领的消息数据，直接处理
                         Map<StreamMessageId, Map<String, String>> claimed = stream.claim(
                                 AsyncTaskConstants.GRADING_GROUP,
@@ -252,7 +252,7 @@ public class GradingStreamConsumer {
         // 分布式锁防重复消费
         RLock lock = redissonClient.getLock("lock:grading:" + submissionId);
         try {
-            if (!lock.tryLock(0, 120, TimeUnit.SECONDS)) {
+            if (!lock.tryLock(0, 180, TimeUnit.SECONDS)) {
                 log.info("批改任务已在处理中，跳过: submissionId={}", submissionId);
                 ack(messageId);
                 return;
@@ -264,7 +264,7 @@ public class GradingStreamConsumer {
         }
 
         try {
-            String requirement = data.getOrDefault(AsyncTaskConstants.FIELD_REQUIREMENT, "");
+            String studentRequirement = data.getOrDefault(AsyncTaskConstants.FIELD_REQUIREMENT, "");
             int retryCount = Integer.parseInt(data.getOrDefault(AsyncTaskConstants.FIELD_RETRY_COUNT, "0"));
 
             log.info("开始批改: submissionId={}, retryCount={}", submissionId, retryCount);
@@ -272,6 +272,28 @@ public class GradingStreamConsumer {
             Submission submission = submissionMapper.selectById(submissionId);
             if (submission == null) {
                 log.warn("提交记录不存在: submissionId={}", submissionId);
+                return;
+            }
+
+            // 从任务表获取老师布置的作业描述作为权威要求
+            String taskDescription = "";
+            if (submission.getTaskId() != null) {
+                HomeworkTask task = taskMapper.selectById(submission.getTaskId());
+                if (task != null && task.getDescription() != null && !task.getDescription().isEmpty()) {
+                    taskDescription = task.getDescription();
+                    log.info("已获取任务描述: taskId={}, descLen={}", submission.getTaskId(), taskDescription.length());
+                }
+            }
+            if (taskDescription.isEmpty()) {
+                log.warn("未找到任务描述: taskId={}, 回退到无特殊要求", submission.getTaskId());
+            }
+
+            // 防重复处理：已完成/已失败的跳过
+            if ("COMPLETED".equals(submission.getStatus())
+                    || "FAILED".equals(submission.getStatus())) {
+                log.info("提交已终态，跳过: submissionId={}, status={}",
+                        submissionId, submission.getStatus());
+                ack(messageId);
                 return;
             }
 
@@ -283,7 +305,7 @@ public class GradingStreamConsumer {
                 throw new RuntimeException("无法读取文件内容");
             }
 
-            String prompt = buildPrompt(submission, requirement, fileContent);
+            String prompt = buildPrompt(submission, taskDescription, studentRequirement, fileContent);
             String response = openClawService.chat(prompt, "grading_" + submissionId);
             String jsonStr = extractJson(response);
             EvaluationResultDTO evaluation = objectMapper.readValue(jsonStr, EvaluationResultDTO.class);
@@ -316,9 +338,9 @@ public class GradingStreamConsumer {
         } catch (Exception e) {
             log.error("批改失败: submissionId={}", submissionId, e);
             int retryCount = Integer.parseInt(data.getOrDefault(AsyncTaskConstants.FIELD_RETRY_COUNT, "0"));
-            String requirement = data.getOrDefault(AsyncTaskConstants.FIELD_REQUIREMENT, "");
+            String studentRequirement = data.getOrDefault(AsyncTaskConstants.FIELD_REQUIREMENT, "");
             if (retryCount < AsyncTaskConstants.MAX_RETRY) {
-                gradingStreamProducer.retryTask(submissionId, requirement, retryCount + 1);
+                gradingStreamProducer.retryTask(submissionId, studentRequirement, retryCount + 1);
                 Submission pending = submissionMapper.selectById(submissionId);
                 if (pending != null) {
                     pending.setStatus("PENDING");
@@ -343,7 +365,7 @@ public class GradingStreamConsumer {
 
     // ==================== 辅助方法 ====================
 
-    private String buildPrompt(Submission sub, String requirement, String fileContent) {
+    private String buildPrompt(Submission sub, String taskDescription, String studentRequirement, String fileContent) {
         // 查询该班级教师定义的知识点列表
         String kpContext = "";
         List<TeacherKnowledge> kps = teacherKnowledgeMapper.selectByClassId(sub.getClassId());
@@ -361,23 +383,41 @@ public class GradingStreamConsumer {
                         """, kpNames);
         }
 
+        // 学生额外说明（可选）
+        String studentNote = "";
+        if (studentRequirement != null && !studentRequirement.isEmpty()) {
+            studentNote = String.format("\n\n【学生提交说明】\n%s\n", studentRequirement);
+        }
+
         return String.format("""
-                        请批改以下作业，并以JSON格式返回结果：
+                        请作为严格的作业批改助手，评阅以下学生提交的作业：
+
+                        ━━━━━━━━━━━━━━━━━━━━━━
+                        【老师布置的作业要求】（这是权威标准，请严格对照检查）
+                        %s
+                        ━━━━━━━━━━━━━━━━━━━━━━
 
                         学生姓名：%s
                         班级：%s
-                        作业名称：%s
-                        要求：%s
+                        作业名称：%s%s
 
                         文件内容：
                         %s%s
 
-                        请使用批改作业助手的标准格式输出结果，必须是合法JSON格式。
+                        ━━━━━━━━━━━━━━━━━━━━━━
+                        【批改指引】
+                        1. 首先判断学生提交的内容是否与上述【老师布置的作业要求】相匹配
+                           - 如果完全不匹配（学生提交了错误题目/无关内容），请在 overallComment 中明确指出"学生提交的内容与作业要求不匹配"
+                           - 如果不匹配，totalScore 不得超过 30 分，contentScore 不得超过 15 分
+                           - 在 errors[] 中增加一条 type="requirement_mismatch" 的错误记录，severity="critical"
+                        2. 如果匹配，按照标准批改流程评阅：代码正确性、代码规范、逻辑清晰度、注释完整度
+                        3. 请使用批改作业助手的标准格式输出结果，必须是合法JSON格式
                         """,
+                taskDescription != null && !taskDescription.isEmpty() ? taskDescription : "无特殊要求",
                 sub.getStudentName(),
                 sub.getClassName(),
                 sub.getAssignmentName(),
-                requirement != null && !requirement.isEmpty() ? requirement : "无特殊要求",
+                studentNote,
                 fileContent,
                 kpContext);
     }

@@ -409,13 +409,13 @@ export default {
   max-width: 900px;
   margin: 0 auto;
   padding: 20px;
-  color: #e0e0e0;
+  color: #303133;
   font-size: 14px;
 }
 
 /* 创建区 */
 .create-section {
-  background: #2a2a2a;
+  background: #ffffff;
   border-radius: 10px;
   margin-bottom: 20px;
   overflow: hidden;
@@ -427,7 +427,7 @@ export default {
   align-items: center;
   padding: 14px 20px;
   cursor: pointer;
-  background: #333;
+  background: #ebeef5;
   user-select: none;
 }
 
@@ -437,7 +437,7 @@ export default {
 }
 
 .toggle-icon {
-  color: #999;
+  color: #606266;
   font-size: 12px;
 }
 
@@ -462,7 +462,7 @@ export default {
 .form-group label {
   display: block;
   margin-bottom: 6px;
-  color: #aaa;
+  color: #606266;
   font-size: 13px;
 }
 
@@ -472,10 +472,10 @@ export default {
 .filter-select {
   width: 100%;
   padding: 9px 12px;
-  border: 1px solid #444;
+  border: 1px solid #e4e7ed;
   border-radius: 6px;
-  background: #1a1a1a;
-  color: #e0e0e0;
+  background: #ffffff;
+  color: #303133;
   font-size: 14px;
   outline: none;
   transition: border-color 0.2s;
@@ -483,7 +483,7 @@ export default {
 
 .form-input:focus,
 .form-textarea:focus {
-  border-color: #ff7d00;
+  border-color: #409EFF;
 }
 
 .form-textarea {
@@ -502,13 +502,13 @@ export default {
   align-items: center;
   gap: 8px;
   cursor: pointer;
-  color: #e0e0e0 !important;
+  color: #303133 !important;
 }
 
 .checkbox-label input[type="checkbox"] {
   width: 16px;
   height: 16px;
-  accent-color: #ff7d00;
+  accent-color: #409EFF;
 }
 
 .input-suffix {
@@ -522,7 +522,7 @@ export default {
 }
 
 .suffix {
-  color: #999;
+  color: #606266;
 }
 
 .form-actions {
@@ -534,7 +534,7 @@ export default {
 
 .btn-primary {
   padding: 10px 24px;
-  background: #ff7d00;
+  background: #409EFF;
   color: #fff;
   border: none;
   border-radius: 6px;
@@ -554,8 +554,8 @@ export default {
 
 .btn-cancel {
   padding: 10px 24px;
-  background: #444;
-  color: #ccc;
+  background: #e4e7ed;
+  color: #303133;
   border: none;
   border-radius: 6px;
   cursor: pointer;
@@ -563,12 +563,12 @@ export default {
 }
 
 .btn-cancel:hover {
-  background: #555;
+  background: #dcdfe6;
 }
 
 /* 列表区 */
 .list-section {
-  background: #2a2a2a;
+  background: #ffffff;
   border-radius: 10px;
   padding: 20px;
 }
@@ -608,7 +608,7 @@ export default {
 .empty-state {
   text-align: center;
   padding: 40px;
-  color: #666;
+  color: #909399;
 }
 
 /* 分组 */
@@ -618,21 +618,21 @@ export default {
 
 .group-label {
   font-size: 13px;
-  color: #999;
+  color: #606266;
   margin-bottom: 8px;
   padding: 0 4px;
 }
 
 /* 卡片 */
 .task-card {
-  background: #333;
+  background: #ebeef5;
   border-radius: 8px;
   margin-bottom: 8px;
   transition: background 0.2s;
 }
 
 .task-card:hover {
-  background: #3a3a3a;
+  background: #e4e7ed;
 }
 
 .task-main {
@@ -677,7 +677,7 @@ export default {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
-  color: #999;
+  color: #606266;
   font-size: 13px;
   margin-bottom: 6px;
 }
@@ -685,12 +685,12 @@ export default {
 .task-stats {
   display: flex;
   gap: 16px;
-  color: #ccc;
+  color: #303133;
   font-size: 13px;
 }
 
 .task-stats b {
-  color: #ff7d00;
+  color: #409EFF;
 }
 
 .task-actions {
@@ -701,10 +701,10 @@ export default {
 
 .btn-sm {
   padding: 6px 12px;
-  border: 1px solid #555;
+  border: 1px solid #dcdfe6;
   border-radius: 5px;
   background: transparent;
-  color: #ccc;
+  color: #303133;
   cursor: pointer;
   font-size: 13px;
   transition: all 0.2s;
@@ -712,9 +712,9 @@ export default {
 }
 
 .btn-sm:hover {
-  background: #444;
-  border-color: #ff7d00;
-  color: #fff;
+  background: #e4e7ed;
+  border-color: #409EFF;
+  color: #303133;
 }
 
 .btn-danger:hover {
@@ -736,7 +736,7 @@ export default {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(0,0,0,.4);
   display: flex;
   justify-content: center;
   align-items: center;
@@ -744,7 +744,7 @@ export default {
 }
 
 .modal-content {
-  background: #2a2a2a;
+  background: #ffffff;
   border-radius: 12px;
   width: 90%;
   max-width: 600px;
@@ -757,7 +757,7 @@ export default {
   justify-content: space-between;
   align-items: center;
   padding: 16px 20px;
-  border-bottom: 1px solid #444;
+  border-bottom: 1px solid #e4e7ed;
 }
 
 .modal-header h3 {
@@ -768,7 +768,7 @@ export default {
 .close-btn {
   background: none;
   border: none;
-  color: #999;
+  color: #606266;
   font-size: 24px;
   cursor: pointer;
   padding: 0;
@@ -776,7 +776,7 @@ export default {
 }
 
 .close-btn:hover {
-  color: #fff;
+  color: #303133;
 }
 
 .modal-body {

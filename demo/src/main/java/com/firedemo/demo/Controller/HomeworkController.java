@@ -81,6 +81,7 @@ private final TaskReminderService taskReminderService;
             Map<String, Object> m = new java.util.LinkedHashMap<>();
             m.put("id", t.getId());
             m.put("taskName", t.getTaskName());
+            m.put("description", t.getDescription() != null ? t.getDescription() : "");
             m.put("deadline", t.getDeadline());
             m.put("allowLate", t.getAllowLate());
             m.put("latePenalty", t.getLatePenalty());

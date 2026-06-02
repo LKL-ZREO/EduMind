@@ -5,7 +5,7 @@ import request from '@/api/request'
 
 // ===== 班级 & 作业选择 =====
 const classes = ref<Array<{id: number, name: string}>>([])
-const tasks = ref<Array<{id: number, taskName: string, deadline: string, allowLate: boolean, latePenalty: number}>>([])
+const tasks = ref<Array<{id: number, taskName: string, description: string, deadline: string, allowLate: boolean, latePenalty: number}>>([])
 const selectedClassId = ref<number | null>(null)
 const selectedTaskId = ref<number | null>(null)
 
@@ -493,6 +493,12 @@ function joinArray(arr: string[]): string {
         </div>
       </div>
 
+      <!-- 作业描述 -->
+      <div v-if="selectedTask?.description" class="task-desc-card">
+        <div class="task-desc-header">📋 作业要求</div>
+        <div class="task-desc-body">{{ selectedTask.description }}</div>
+      </div>
+
       <!-- 倒计时 -->
       <div v-if="countdown" class="countdown-bar" :class="{ expired: countdown.includes('已截止') }">
         {{ countdown }}
@@ -774,6 +780,34 @@ function joinArray(arr: string[]): string {
   background: #fff5f5;
   border-color: #feb2b2;
   color: #c53030;
+}
+
+/* 作业描述卡片 */
+.task-desc-card {
+  margin-top: 12px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-left: 4px solid #667eea;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.task-desc-header {
+  padding: 8px 14px;
+  background: #f7fafc;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #4a5568;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.task-desc-body {
+  padding: 12px 14px;
+  font-size: 0.9rem;
+  color: #2d3748;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .attempts-bar {

@@ -28,21 +28,11 @@
     </scm>
     <properties>
         <java.version>21</java.version>
-        <spring-ai.version>2.0.0-M1</spring-ai.version>
+        <langchain4j.version>1.13.0</langchain4j.version>
         <spring-boot.version>4.0.4</spring-boot.version>
     </properties>
 
-    <dependencyManagement>
-        <dependencies>
-            <dependency>
-                <groupId>org.springframework.ai</groupId>
-                <artifactId>spring-ai-bom</artifactId>
-                <version>${spring-ai.version}</version>
-                <type>pom</type>
-                <scope>import</scope>
-            </dependency>
-        </dependencies>
-    </dependencyManagement>
+
 
     <dependencies>
         <!-- 已移除 Redis，改用 PostgreSQL -->
@@ -63,10 +53,7 @@
             <artifactId>mybatis-spring-boot-starter</artifactId>
             <version>4.0.1</version>
         </dependency>
-        <dependency>
-            <groupId>com.fasterxml.jackson.core</groupId>
-            <artifactId>jackson-databind</artifactId>
-        </dependency>
+        <!-- Jackson: Spring Boot 4 用 tools.jackson:3.x，第三方依赖用 com.fasterxml.jackson:2.x，BOM 统一管理 -->
         <!-- Spring AOP + AspectJ（限流切面） -->
         <dependency>
             <groupId>org.springframework</groupId>
@@ -212,10 +199,11 @@
             <version>3.0.0</version>
         </dependency>
 
-        <!-- Spring AI 2.0 - OpenAI 兼容模式 (OpenClaw Gateway) -->
+        <!-- LangChain4j OpenAI 模块（OpenClaw Gateway 兼容） -->
         <dependency>
-            <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-starter-model-openai</artifactId>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-open-ai</artifactId>
+            <version>${langchain4j.version}</version>
         </dependency>
 
         <!-- Apache Tika - 文档解析 -->

@@ -45,7 +45,7 @@ public interface SubmissionMapper extends BaseMapper<Submission> {
      */
     @Select("SELECT COUNT(*) FROM (" +
             "  SELECT DISTINCT student_id, task_id FROM submission " +
-            "  WHERE class_id = #{classId} AND student_id IS NOT NULL" +
+            "  WHERE class_id = #{classId} AND student_id IS NOT NULL AND status = 'COMPLETED'" +
             ") t")
     Integer countByClassId(@Param("classId") Long classId);
 
@@ -54,7 +54,7 @@ public interface SubmissionMapper extends BaseMapper<Submission> {
      */
     @Select("SELECT COUNT(*) FROM (" +
             "  SELECT DISTINCT student_id, task_id FROM submission " +
-            "  WHERE class_id = #{classId} AND submitted_at >= #{since} AND student_id IS NOT NULL" +
+            "  WHERE class_id = #{classId} AND submitted_at >= #{since} AND student_id IS NOT NULL AND status = 'COMPLETED'" +
             ") t")
     Integer countNewByClassId(@Param("classId") Long classId, @Param("since") LocalDateTime since);
 
@@ -80,16 +80,17 @@ public interface SubmissionMapper extends BaseMapper<Submission> {
             "FROM submission s " +
             "INNER JOIN (" +
             "  SELECT student_id, task_id, MAX(submitted_at) as max_time " +
-            "  FROM submission WHERE class_id = #{classId} AND student_id IS NOT NULL " +
+            "  FROM submission WHERE class_id = #{classId} AND student_id IS NOT NULL AND status = 'COMPLETED'" +
             "  GROUP BY student_id, task_id" +
             ") latest ON s.student_id = latest.student_id AND s.task_id = latest.task_id AND s.submitted_at = latest.max_time " +
+            "WHERE s.status = 'COMPLETED' " +
             "GROUP BY s.student_id, s.student_name ORDER BY avg_score DESC NULLS LAST")
     List<Map<String, Object>> selectStudentOverviewByClassId(@Param("classId") Long classId);
 
     /**
      * 统计班级学生数（按学号去重）
      */
-    @Select("SELECT COUNT(DISTINCT student_id) FROM submission WHERE class_id = #{classId} AND student_id IS NOT NULL")
+    @Select("SELECT COUNT(DISTINCT student_id) FROM submission WHERE class_id = #{classId} AND student_id IS NOT NULL AND status = 'COMPLETED'")
     Integer countDistinctStudentsByClassId(@Param("classId") Long classId);
 
     /**

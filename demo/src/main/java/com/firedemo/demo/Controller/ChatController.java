@@ -1,6 +1,7 @@
 package com.firedemo.demo.Controller;
 
 import com.firedemo.demo.Service.*;
+import com.firedemo.demo.agent.tool.EduAITools;
 import com.firedemo.demo.common.annotation.RateLimit;
 import com.firedemo.demo.common.annotation.RateLimit.Dimension;
 import com.firedemo.demo.common.annotation.RateLimit.TimeUnit;
@@ -29,6 +30,7 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
 
 import java.io.IOException;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -42,18 +44,12 @@ public class ChatController {
     private final OpenClawService openClawService;
     private final FileStorageService fileStorageService;
     private final ChatHistoryService chatHistoryService;
-    private final DocumentService documentService;
     private final ActiveTeacherService activeTeacherService;
-    
     private final HomeworkResultService homeworkResultService;
-private final UserService userService;
+    private final UserService userService;
     private final JwtUtil jwtUtil;
     private final ObjectMapper objectMapper;
-
-    // RAG 开关：是否启用文档检索
-    private static final boolean RAG_ENABLED = true;
-    // 检索文档条数
-    private static final int RAG_TOP_K = 3;
+    private final EduAITools eduAITools;
 
     private static final String TOKEN_PREFIX = "Bearer ";
 
@@ -114,7 +110,7 @@ private final UserService userService;
     }
 
     /**
-     * 流式聊天（SSE）— 全局限流 + IP限流
+     * 流式聊天（SSE）— 带 Tool Calling，LLM 自主决定是否检索知识库
      */
     @RateLimit(dimensions = {Dimension.GLOBAL, Dimension.IP}, count = 10, interval = 60, timeUnit = TimeUnit.SECONDS)
     @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -135,20 +131,25 @@ private final UserService userService;
             sessionId = UUID.randomUUID().toString();
         }
 
-        // RAG增强（带用户隔离）
-        String enhancedMessage = enhanceMessageWithRag(message, userId);
-
-        // 保存用户消息（保存原始消息）
+        // 保存用户消息（原始消息）
         saveChatHistory(userId, sessionId, "user", message, null);
 
-        // 流式响应
+        // 加载历史上下文（最近 10 条）
+        List<Map<String, Object>> history = new ArrayList<>();
+        if (sessionId != null) {
+            List<ChatHistory> recent = chatHistoryService.getHistory(sessionId, 10);
+            for (ChatHistory h : recent) {
+                history.add(Map.of("role", h.getRole(), "content", h.getContent()));
+            }
+        }
+
+        // 流式响应 — 使用 Tool Calling，LLM 自主决定是否检索知识库
         String finalSessionId = sessionId;
         StreamingResponseBody responseBody = outputStream -> {
             StringBuilder responseBuilder = new StringBuilder();
 
             try {
-                Integer status = getCurrentUserStatus(httpRequest);
-                openClawService.streamChat(enhancedMessage, finalSessionId, String.valueOf(status))
+                openClawService.streamChatWithTools(message, history, eduAITools)
                         .doOnNext(chunk -> {
                             log.debug("发送SSE chunk: {}", chunk);
                             try {
@@ -180,6 +181,11 @@ private final UserService userService;
                         .blockLast(java.time.Duration.ofMinutes(5)); // 5分钟超时
             } catch (Exception e) {
                 log.error("流式响应异常", e);
+                // 即使前端断开，已生成的内容仍在 responseBuilder 中，保存到历史
+                if (userId != null && !responseBuilder.isEmpty()) {
+                    saveChatHistory(userId, finalSessionId, "assistant",
+                            responseBuilder.toString(), "OpenClaw");
+                }
                 try {
                     outputStream.write("data: {\"error\":\"服务暂时不可用\"}\n\n".getBytes());
                     outputStream.flush();
@@ -402,76 +408,5 @@ private final UserService userService;
             log.warn("保存对话记录失败", e);
             // 不影响主流程
         }
-    }
-
-    /**
-     * RAG增强：检索相关文档内容并组装到消息中（按用户权限隔离）
-     */
-    private String enhanceMessageWithRag(String message, Long userId) {
-        if (!RAG_ENABLED) {
-            return message;
-        }
-
-        try {
-            // 检索相关文档内容（按用户权限隔离：私人 + 已加入的共享知识库）
-            List<String> relevantContents = documentService.searchRelevantContent(
-                    message, RAG_TOP_K, userId);
-
-            if (relevantContents.isEmpty()) {
-                return message;
-            }
-
-            // 组装上下文
-            String context = String.join("\n\n---\n\n", relevantContents);
-
-            // 构建增强后的消息
-            return String.format("""
-                基于以下参考文档内容回答问题。如果文档中没有相关信息，请基于你的知识回答。
-
-                参考文档内容：
-                %s
-
-                用户问题：%s
-                """, context, message);
-
-        } catch (Exception e) {
-            log.warn("RAG enhancement failed, using original message", e);
-            return message;
-        }
-    }
-
-    /**
-     * 流式响应并保存
-     */
-    private SseEmitter streamWithSave(Long userId, String sessionId, String message) {
-        SseEmitter emitter = new SseEmitter(120000L);
-        StringBuilder responseBuilder = new StringBuilder();
-
-        openClawService.streamChat(message, sessionId)
-                .subscribe(
-                        chunk -> {
-                            try {
-                                responseBuilder.append(chunk);
-                                emitter.send(SseEmitter.event().data(chunk));
-                            } catch (Exception e) {
-                                log.error("发送 SSE 失败", e);
-                                emitter.completeWithError(e);
-                            }
-                        },
-                        error -> {
-                            log.error("流式调用失败", error);
-                            emitter.completeWithError(error);
-                        },
-                        () -> {
-                            // 流结束，保存完整回复
-                            if (userId != null) {
-                                saveChatHistory(userId, sessionId, "assistant",
-                                        responseBuilder.toString(), "OpenClaw");
-                            }
-                            emitter.complete();
-                        }
-                );
-
-        return emitter;
     }
 }
