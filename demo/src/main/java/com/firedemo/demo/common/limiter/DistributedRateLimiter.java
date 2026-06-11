@@ -4,7 +4,6 @@ import com.github.benmanes.caffeine.cache.Cache;
 import io.github.bucket4j.Bandwidth;
 import io.github.bucket4j.Bucket;
 import io.github.bucket4j.BucketConfiguration;
-import io.github.bucket4j.Refill;
 import io.github.bucket4j.distributed.proxy.ProxyManager;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -76,9 +75,10 @@ public class DistributedRateLimiter {
      * 其 tryConsume 操作通过 Redis Lua 脚本原子执行。
      */
     private Bucket buildDistributedBucket(String key, int capacity, long refillPerMinute) {
-        // greedy: 令牌连续平滑补充（非梯级补充，更符合真实流量模型）
-        Refill refill = Refill.greedy(refillPerMinute, Duration.ofMinutes(1));
-        Bandwidth limit = Bandwidth.classic(capacity, refill);
+        Bandwidth limit = Bandwidth.builder()
+                .capacity(capacity)
+                .refillGreedy(refillPerMinute, Duration.ofMinutes(1))
+                .build();
         BucketConfiguration configuration = BucketConfiguration.builder()
                 .addLimit(limit)
                 .build();

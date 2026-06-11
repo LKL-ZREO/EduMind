@@ -1,0 +1,26 @@
+<h4>《{{knowledgePoints}}》专项教案</h4>
+
+<p><strong>教学目标：</strong></p>
+<ul>
+{{goals}}
+</ul>
+
+<p><strong>教学重点：</strong>{{mainPoint}}核心概念与原理</p>
+
+<p><strong>教学难点：</strong>{{difficultPoint}}的实际应用与问题解决</p>
+
+<p><strong>教学方法：</strong></p>
+<ul>
+  <li>案例驱动：通过实际项目案例引入知识点</li>
+  <li>对比分析：对比易混淆概念的异同</li>
+  <li>实践练习：针对性编程练习巩固理解</li>
+</ul>
+
+<p><strong>建议课时：</strong>2课时（90分钟）</p>
+
+<p><strong>课后作业：</strong></p>
+<ul>
+  <li>完成课后练习题 5-10题</li>
+  <li>编写相关代码示例并提交</li>
+  <li>总结本节课知识点思维导图</li>
+</ul>

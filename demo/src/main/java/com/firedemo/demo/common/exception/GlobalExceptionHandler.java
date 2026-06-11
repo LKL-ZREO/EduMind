@@ -45,11 +45,11 @@ public class GlobalExceptionHandler {
     }
     
     /**
-     * 其他所有异常
+     * 未预期异常兜底（含 NPE、DB 异常等）
      */
     @ExceptionHandler(Exception.class)
     public Result<Void> handleException(Exception e) {
-        log.error("系统异常", e);
-        return Result.error(ErrorCode.SYSTEM_ERROR.getCode(), "系统繁忙，请稍后重试");
+        log.error("未预期异常: type={}, message={}", e.getClass().getSimpleName(), e.getMessage(), e);
+        return Result.error(ErrorCode.SYSTEM_ERROR);
     }
 }

@@ -26,11 +26,12 @@
 </template>
 
 <script>
+import request from '@/api/request'
+
 export default {
   name: 'SubmissionView',
   data() {
     return {
-      apiBaseUrl: 'http://localhost:8080/api',
       submissionId: null,
       data: null,
       loading: true
@@ -47,23 +48,11 @@ export default {
       window.close()
     },
 
-    getToken() {
-      return localStorage.getItem('token') || ''
-    },
-
     async loadContent() {
       this.loading = true
       try {
-        const response = await fetch(
-          `${this.apiBaseUrl}/submissions/${this.submissionId}/content`,
-          { headers: { 'Authorization': `Bearer ${this.getToken()}` } }
-        )
-        const result = await response.json()
-        if (result.code === 200) {
-          this.data = result.data
-        } else {
-          this.data = null
-        }
+        const res = await request.get(`/submissions/${this.submissionId}/content`)
+        this.data = res.data.code === 200 ? res.data.data : null
       } catch (e) {
         console.error('加载提交内容失败', e)
         this.data = null

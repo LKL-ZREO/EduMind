@@ -1,9 +1,9 @@
 package com.firedemo.demo.Controller;
 
 import com.firedemo.demo.Service.*;
-import com.firedemo.demo.agent.tool.EduAITools;
 import com.firedemo.demo.common.annotation.RateLimit;
 import com.firedemo.demo.common.annotation.RateLimit.Dimension;
+import com.firedemo.demo.common.util.JsonUtil;
 import com.firedemo.demo.common.annotation.RateLimit.TimeUnit;
 
 import com.firedemo.demo.DTO.ChatResponse;
@@ -49,7 +49,6 @@ public class ChatController {
     private final UserService userService;
     private final JwtUtil jwtUtil;
     private final ObjectMapper objectMapper;
-    private final EduAITools eduAITools;
 
     private static final String TOKEN_PREFIX = "Bearer ";
 
@@ -149,7 +148,7 @@ public class ChatController {
             StringBuilder responseBuilder = new StringBuilder();
 
             try {
-                openClawService.streamChatWithTools(message, history, eduAITools)
+                openClawService.streamChat(message, history, finalSessionId)
                         .doOnNext(chunk -> {
                             log.debug("发送SSE chunk: {}", chunk);
                             try {
@@ -233,7 +232,7 @@ public class ChatController {
         String displayContent = response;
         try {
             // 去掉可能的markdown代码块标记
-            String jsonStr = extractJsonFromMarkdown(response);
+            String jsonStr = JsonUtil.extractJson(response);
             EvaluationResultDTO evaluation = objectMapper.readValue(jsonStr, EvaluationResultDTO.class);
             saveEvaluation(userId, request.getSessionId(), request, evaluation, response);
             // 将JSON转换为友好文本格式
@@ -292,41 +291,6 @@ public class ChatController {
         } catch (Exception e) {
             log.error("保存评价结果失败", e);
         }
-    }
-
-    /**
-     * 从markdown代码块中提取JSON字符串
-     */
-    private String extractJsonFromMarkdown(String response) {
-        if (response == null || response.isEmpty()) {
-            return response;
-        }
-        String trimmed = response.trim();
-        // 查找第一个 ```json 或 ```
-        int start = trimmed.indexOf("```json");
-        if (start == -1) {
-            start = trimmed.indexOf("```");
-        }
-        if (start != -1) {
-            trimmed = trimmed.substring(start);
-            int firstNewline = trimmed.indexOf('\n');
-            if (firstNewline != -1) {
-                trimmed = trimmed.substring(firstNewline + 1).trim();
-            } else {
-                trimmed = trimmed.substring(3).trim();
-            }
-        }
-        // 去掉结尾的 ```
-        if (trimmed.endsWith("```")) {
-            trimmed = trimmed.substring(0, trimmed.length() - 3).trim();
-        }
-        // 尝试找到 JSON 的完整范围
-        int jsonStart = trimmed.indexOf('{');
-        int jsonEnd = trimmed.lastIndexOf('}');
-        if (jsonStart != -1 && jsonEnd != -1 && jsonEnd > jsonStart) {
-            trimmed = trimmed.substring(jsonStart, jsonEnd + 1);
-        }
-        return trimmed;
     }
 
     /**

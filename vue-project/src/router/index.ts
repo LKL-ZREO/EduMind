@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteLocationNormalized } from 'vue-router'
+import { useChatStore } from '../stores/chat'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -8,7 +9,7 @@ const router = createRouter({
     {
       path: '/',
       name: 'home',
-      component: () => import('../views/PageOne.vue'),
+      component: () => import('../views/StudentSubmit.vue'),
     },
 
     // ============= 老师端（需要登录）=============
@@ -33,13 +34,13 @@ const router = createRouter({
     {
       path: '/teacher/chat',
       name: 'chat',
-      component: () => import('../views/PageTwo.vue'),
+      component: () => import('../views/AIChat.vue'),
       meta: { requiresAuth: true }
     },
     {
       path: '/teacher/docs',
       name: 'docs',
-      component: () => import('../views/PageThree.vue'),
+      component: () => import('../views/KnowledgeBase.vue'),
       meta: { requiresAuth: true }
     },
     {
@@ -57,7 +58,7 @@ const router = createRouter({
     {
       path: '/teacher/tasks',
       name: 'tasks',
-      component: () => import('../views/PageFive.vue'),
+      component: () => import('../views/TaskManage.vue'),
       meta: { requiresAuth: true }
     },
     {
@@ -75,7 +76,7 @@ const router = createRouter({
     {
       path: '/teacher/data',
       name: 'data',
-      component: () => import('../views/PageFour.vue'),
+      component: () => import('../views/Dashboard.vue'),
       meta: { requiresAuth: true }
     },
     {
@@ -105,6 +106,21 @@ router.beforeEach((to: RouteLocationNormalized) => {
   }
 
   // 学生端页面（/）→ 直接放行，无需 token
+  return true
+})
+
+// AI 回复中切换页面 → 确认弹窗
+router.beforeEach((to) => {
+  // 在 Pinia store 可用时才检查（确保组件已初始化）
+  try {
+    const chatStore = useChatStore()
+    if (chatStore.aiResponding) {
+      const leave = confirm('AI 正在回复中，切换页面将中断回复。确定离开吗？')
+      if (!leave) return false
+    }
+  } catch {
+    // Pinia 还没初始化，跳过
+  }
   return true
 })
 

@@ -1,15 +1,18 @@
 package com.firedemo.demo.Service;
 
+import com.firedemo.demo.DTO.UserLoginDTO;
+import com.firedemo.demo.DTO.UserRegisterDTO;
 import com.firedemo.demo.Entity.User;
+import com.firedemo.demo.VO.UserLoginVO;
 
 /**
  * 用户 Service
  */
 public interface UserService {
 
-    void register(com.firedemo.demo.DTO.UserRegisterDTO dto);
+    void register(UserRegisterDTO dto);
 
-    com.firedemo.demo.VO.UserLoginVO login(com.firedemo.demo.DTO.UserLoginDTO dto);
+    UserLoginVO login(UserLoginDTO dto);
 
     User getById(Long id);
 }

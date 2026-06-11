@@ -9,6 +9,8 @@ import com.firedemo.demo.VO.UserLoginVO;
 import com.firedemo.demo.mapper.UserMapper;
 import com.firedemo.demo.mapper.ChatHistoryMapper;
 import com.firedemo.demo.utils.JwtUtil;
+import com.firedemo.demo.common.exception.BusinessException;
+import com.firedemo.demo.common.exception.ErrorCode;
 import com.firedemo.demo.utils.PasswordUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -21,24 +23,24 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class UserServiceImpl implements UserService {
 
-    @Override
-    public User getById(Long id) {
-        return userMapper.selectById(id);
-    }
-
     private final UserMapper userMapper;
     private final ChatHistoryMapper chatHistoryMapper;
     private final JwtUtil jwtUtil;
     private final PasswordUtil passwordUtil;
 
     @Override
+    public User getById(Long id) {
+        return userMapper.selectById(id);
+    }
+
+    @Override
     public void register(UserRegisterDTO dto) {
         // 1. 校验用户名是否存在
         LambdaQueryWrapper<User> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(User::getUsername, dto.getUsername());
-        Long count = Long.valueOf(userMapper.selectCount(wrapper));
+        Long count = userMapper.selectCount(wrapper);
         if (count > 0) {
-            throw new RuntimeException("用户名已存在");
+            throw new BusinessException(ErrorCode.USER_ALREADY_EXISTS);
         }
 
         // 2. DTO 转 Entity
@@ -64,17 +66,17 @@ public class UserServiceImpl implements UserService {
         User user = userMapper.selectOne(wrapper);
 
         if (user == null) {
-            throw new RuntimeException("用户不存在");
+throw new BusinessException(ErrorCode.USER_NOT_FOUND);
         }
 
         // 2. 校验密码
         if (!PasswordUtil.matches(dto.getPassword(), user.getPassword())) {
-            throw new RuntimeException("密码错误");
+throw new BusinessException(ErrorCode.PASSWORD_ERROR);
         }
 
         // 3. 检查状态
         if (user.getStatus() == 0) {
-            throw new RuntimeException("账号已被禁用");
+throw new BusinessException(ErrorCode.ACCOUNT_DISABLED);
         }
 
         // 4. 生成 JWT（带上 status，用于选择 agent：1=main, 2=jarvis）

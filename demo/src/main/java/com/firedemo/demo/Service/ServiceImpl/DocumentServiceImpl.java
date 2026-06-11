@@ -4,6 +4,8 @@ package com.firedemo.demo.Service.ServiceImpl;
 import com.firedemo.demo.Entity.DirectoryNode;
 import com.firedemo.demo.Entity.Document;
 import com.firedemo.demo.Entity.DocumentChunk;
+import com.firedemo.demo.common.exception.BusinessException;
+import com.firedemo.demo.common.exception.ErrorCode;
 import com.firedemo.demo.Service.DocumentService;
 import com.firedemo.demo.Service.FileStorageService;
 import com.firedemo.demo.mapper.DirectoryNodeMapper;
@@ -82,7 +84,7 @@ public class DocumentServiceImpl implements DocumentService {
 
         } catch (IOException e) {
             log.error("Failed to upload document", e);
-            throw new RuntimeException("文件上传失败", e);
+            throw new BusinessException(ErrorCode.FILE_UPLOAD_ERROR);
         }
     }
 

@@ -10,6 +10,7 @@ import com.firedemo.demo.Entity.TeacherKnowledge;
 import com.firedemo.demo.Entity.User;
 import com.firedemo.demo.Service.DashboardService;
 import com.firedemo.demo.Service.OpenClawService;
+import com.firedemo.demo.common.util.JsonUtil;
 import com.firedemo.demo.mapper.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -21,14 +22,22 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.stream.Collectors;
+
+import jakarta.annotation.PostConstruct;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 @CacheConfig(cacheNames = "dashboard")
 public class DashboardServiceImpl implements DashboardService {
+
+    /** 从 concept-keywords.properties 加载的概念关键词映射 */
+    private final Map<String, String> conceptKeywords = new HashMap<>();
 
     private final HomeworkEvaluationMapper evaluationMapper;
     private final UserMapper userMapper;
@@ -38,6 +47,23 @@ public class DashboardServiceImpl implements DashboardService {
     private final SubmissionErrorMapper submissionErrorMapper;
     private final OpenClawService openClawService;
     private final ObjectMapper objectMapper;
+
+    @PostConstruct
+    void loadConceptKeywords() {
+        Properties props = new Properties();
+        try (InputStream in = getClass().getClassLoader()
+                .getResourceAsStream("prompts/concept-keywords.properties")) {
+            if (in != null) {
+                props.load(new InputStreamReader(in, StandardCharsets.UTF_8));
+                props.forEach((k, v) -> conceptKeywords.put((String) k, (String) v));
+                log.info("Loaded {} concept keywords", conceptKeywords.size());
+            } else {
+                log.warn("concept-keywords.properties not found");
+            }
+        } catch (Exception e) {
+            log.error("Failed to load concept-keywords.properties", e);
+        }
+    }
 
     // ======================== Core Metrics ========================
 
@@ -66,7 +92,7 @@ public class DashboardServiceImpl implements DashboardService {
         if (!allScores.isEmpty()) {
             double avgScore = allScores.stream().mapToInt(Integer::intValue).average().orElse(0.0);
             metrics.setAvgScore(Math.round(avgScore * 10) / 10.0);
-            metrics.setScoreTrend(3.2);
+            metrics.setScoreTrend(0.0);
             long warningCount = allScores.stream().filter(score -> score < 60).count();
             metrics.setWarningStudents((int) warningCount);
         } else {
@@ -218,7 +244,6 @@ public class DashboardServiceImpl implements DashboardService {
         List<User> students = userMapper.selectStudentsByClassId(classId);
         List<Map<String, Object>> submissionStudents = submissionMapper.selectStudentOverviewByClassId(classId);
         Map<String, StudentOverviewDTO> studentMap = new LinkedHashMap<>();
-        Random random = new Random();
 
         List<Map<String, Object>> teacherStats = evaluationMapper.selectStudentStatsByClassId(classId);
         Map<Long, Map<String, Object>> statsMap = new HashMap<>();
@@ -237,7 +262,7 @@ public class DashboardServiceImpl implements DashboardService {
                 Number avgScore = (Number) stats.get("avg_score");
                 dto.setAvgScore(avgScore != null ? (int) Math.round(avgScore.doubleValue()) : 0);
                 dto.setErrorCount(0);
-                dto.setTrend(random.nextInt(10) - 5);
+                dto.setTrend(0);
             } else {
                 dto.setHomeworkCount(0);
                 dto.setAvgScore(0);
@@ -282,14 +307,14 @@ public class DashboardServiceImpl implements DashboardService {
 
     @Override
     public List<ClassInfoDTO> getClassList(Long teacherId) {
-        List<ClassInfo> classes = classInfoMapper.selectByTeacherId(teacherId);
+        List<Map<String, Object>> rows = classInfoMapper.selectByTeacherIdWithStudentCount(teacherId);
         List<ClassInfoDTO> result = new ArrayList<>();
-        for (ClassInfo cls : classes) {
+        for (Map<String, Object> row : rows) {
             ClassInfoDTO dto = new ClassInfoDTO();
-            dto.setId(cls.getId());
-            dto.setName(cls.getName());
-            Integer count = userMapper.countStudentsByClassId(cls.getId());
-            dto.setStudentCount(count != null ? count : 0);
+            dto.setId(((Number) row.get("id")).longValue());
+            dto.setName((String) row.get("name"));
+            Number studentCount = (Number) row.get("student_count");
+            dto.setStudentCount(studentCount != null ? studentCount.intValue() : 0);
             result.add(dto);
         }
         return result;
@@ -309,16 +334,19 @@ public class DashboardServiceImpl implements DashboardService {
         teacherKnowledgeMapper.delete(
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<TeacherKnowledge>()
                         .eq(TeacherKnowledge::getClassId, classId));
-        if (items == null || items.isEmpty()) return;
-        for (int i = 0; i < items.size(); i++) {
-            TeacherKnowledgeDTO dto = items.get(i);
-            TeacherKnowledge tk = new TeacherKnowledge();
-            tk.setClassId(classId);
-            tk.setName(dto.getName());
-            tk.setColor(dto.getColor() != null ? dto.getColor() : "#1890ff");
-            tk.setSortOrder(dto.getSortOrder() != null ? dto.getSortOrder() : i);
-            tk.setCreatedBy(userId);
-            teacherKnowledgeMapper.insert(tk);
+        if (items != null && !items.isEmpty()) {
+            List<TeacherKnowledge> batch = new ArrayList<>(items.size());
+            for (int i = 0; i < items.size(); i++) {
+                TeacherKnowledgeDTO dto = items.get(i);
+                TeacherKnowledge tk = new TeacherKnowledge();
+                tk.setClassId(classId);
+                tk.setName(dto.getName());
+                tk.setColor(dto.getColor() != null ? dto.getColor() : "#1890ff");
+                tk.setSortOrder(dto.getSortOrder() != null ? dto.getSortOrder() : i);
+                tk.setCreatedBy(userId);
+                batch.add(tk);
+            }
+            teacherKnowledgeMapper.insertBatch(batch);
         }
         ensureOtherExists(classId, userId);
         reclassifyUnclassified(classId);
@@ -371,18 +399,21 @@ public class DashboardServiceImpl implements DashboardService {
         if (kps.isEmpty()) return;
 
         Map<String, String> keywordMap = buildKeywordMap(kps);
-        int reclassified = 0;
+        LocalDateTime now = LocalDateTime.now();
+        List<SubmissionError> toUpdate = new ArrayList<>();
         for (SubmissionError se : unclassified) {
             String match = matchKeyword(se.getErrorText(), keywordMap);
             if (match != null && !"其他".equals(match)) {
                 se.setKnowledgePoint(match);
-                se.setUpdatedAt(LocalDateTime.now());
-                submissionErrorMapper.updateById(se);
-                reclassified++;
+                se.setUpdatedAt(now);
+                toUpdate.add(se);
             }
         }
-        if (reclassified > 0) {
-            log.info("Keyword reclassify done: classId={}, reclassified={}", classId, reclassified);
+        if (!toUpdate.isEmpty()) {
+            for (SubmissionError se : toUpdate) {
+                submissionErrorMapper.updateById(se);
+            }
+            log.info("Keyword reclassify done: classId={}, reclassified={}", classId, toUpdate.size());
         }
     }
 
@@ -399,7 +430,7 @@ public class DashboardServiceImpl implements DashboardService {
         String prompt = buildReclassifyPrompt(unclassified, kpNames);
         try {
             String response = openClawService.chat(prompt, "reclassify_" + classId);
-            String jsonStr = extractFirstJson(response);
+            String jsonStr = JsonUtil.extractJson(response);
             JsonNode root = objectMapper.readTree(jsonStr);
             JsonNode results = root.get("results");
             if (results == null || !results.isArray()) return;
@@ -439,59 +470,9 @@ public class DashboardServiceImpl implements DashboardService {
     }
 
     private Map<String, String> buildKeywordMap(List<TeacherKnowledge> kps) {
-        Map<String, String> conceptMap = new HashMap<>();
-        conceptMap.put("指针", "指针");
-        conceptMap.put("malloc", "指针");
-        conceptMap.put("free", "指针");
-        conceptMap.put("calloc", "指针");
-        conceptMap.put("内存", "指针");
-        conceptMap.put("地址", "指针");
-        conceptMap.put("数组", "数组");
-        conceptMap.put("下标", "数组");
-        conceptMap.put("越界", "数组");
-        conceptMap.put("一维", "数组");
-        conceptMap.put("二维", "数组");
-        conceptMap.put("字符串", "字符数组与字符串");
-        conceptMap.put("strlen", "字符数组与字符串");
-        conceptMap.put("strcpy", "字符数组与字符串");
-        conceptMap.put("strcmp", "字符数组与字符串");
-        conceptMap.put("循环", "循环结构");
-        conceptMap.put("for", "循环结构");
-        conceptMap.put("while", "循环结构");
-        conceptMap.put("break", "循环结构");
-        conceptMap.put("continue", "循环结构");
-        conceptMap.put("嵌套", "循环结构");
-        conceptMap.put("函数", "函数");
-        conceptMap.put("递归", "函数");
-        conceptMap.put("返回值", "函数");
-        conceptMap.put("参数", "函数");
-        conceptMap.put("变量", "变量与数据类型");
-        conceptMap.put("int", "变量与数据类型");
-        conceptMap.put("float", "变量与数据类型");
-        conceptMap.put("char", "变量与数据类型");
-        conceptMap.put("double", "变量与数据类型");
-        conceptMap.put("类型", "变量与数据类型");
-        conceptMap.put("常量", "变量与数据类型");
-        conceptMap.put("scanf", "输入输出");
-        conceptMap.put("printf", "输入输出");
-        conceptMap.put("输入", "输入输出");
-        conceptMap.put("输出", "输入输出");
-        conceptMap.put("if", "条件分支");
-        conceptMap.put("switch", "条件分支");
-        conceptMap.put("else", "条件分支");
-        conceptMap.put("条件", "条件分支");
-        conceptMap.put("结构体", "结构体");
-        conceptMap.put("struct", "结构体");
-        conceptMap.put("typedef", "结构体");
-        conceptMap.put("文件", "文件操作");
-        conceptMap.put("fopen", "文件操作");
-        conceptMap.put("fclose", "文件操作");
-        conceptMap.put("fprintf", "文件操作");
-        conceptMap.put("fscanf", "文件操作");
-
         Map<String, String> result = new LinkedHashMap<>();
         Set<String> kpNames = kps.stream().map(TeacherKnowledge::getName).collect(Collectors.toSet());
-        for (Map.Entry<String, String> e : conceptMap.entrySet()) {
+        for (Map.Entry<String, String> e : conceptKeywords.entrySet()) {
             if (kpNames.contains(e.getValue())) {
                 result.put(e.getKey(), e.getValue());
             }
@@ -511,17 +492,6 @@ public class DashboardServiceImpl implements DashboardService {
             }
         }
         return null;
-    }
-
-    private String extractFirstJson(String response) {
-        if (response == null || response.isEmpty()) return "{}";
-        String trimmed = response.trim();
-        int start = trimmed.indexOf('{');
-        int end = trimmed.lastIndexOf('}');
-        if (start != -1 && end > start) {
-            return trimmed.substring(start, end + 1);
-        }
-        return response;
     }
 
     // ======================== Utils ========================

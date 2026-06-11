@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref, reactive } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { useAuthStore } from '@/stores/auth'
+import { ElMessage } from 'element-plus'
 
 interface FormData {
   username: string
@@ -18,17 +20,12 @@ const showPassword = ref(false)
 
 const router = useRouter()
 const route = useRoute()
+const authStore = useAuthStore()
 
 const validateForm = (): string | null => {
-  if (!form.username.trim()) {
-    return '请输入用户名'
-  }
-  if (!form.password) {
-    return '请输入密码'
-  }
-  if (form.password.length < 6) {
-    return '密码至少6位'
-  }
+  if (!form.username.trim()) return '请输入用户名'
+  if (!form.password) return '请输入密码'
+  if (form.password.length < 6) return '密码至少6位'
   return null
 }
 
@@ -43,40 +40,10 @@ async function submit() {
   loading.value = true
 
   try {
-    const response = await fetch('/api/auth/login', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        username: form.username,
-        password: form.password
-      })
-    })
-
-    const result = await response.json()
-
-    if (!response.ok || result.code !== 200) {
-      throw new Error(result.message || result.msg || '登录失败，用户名或密码错误')
-    }
-
-    // 存 token、user 和 sessionId
-    const { id, username, email, token, sessionId } = result.data
-
-    localStorage.setItem('token', token)
-    localStorage.setItem('sessionId', sessionId || '')
-    localStorage.setItem('user', JSON.stringify({
-      id: String(id),
-      username,
-      email
-    }))
-
-    alert('登录成功')
-
-    // 跳转
+    await authStore.login({ username: form.username, password: form.password })
+    ElMessage.success('登录成功')
     const redirect = route.query.redirect as string
     router.push(redirect || '/teacher/chat')
-
   } catch (err) {
     error.value = err instanceof Error ? err.message : '登录失败'
   } finally {

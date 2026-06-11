@@ -8,55 +8,37 @@ import com.firedemo.demo.Entity.SubmissionError;
 import com.firedemo.demo.Entity.TeacherKnowledge;
 import com.firedemo.demo.Service.FileStorageService;
 import com.firedemo.demo.Service.OneBotHttpService;
+import com.firedemo.demo.common.enums.SubmissionStatus;
 import com.firedemo.demo.Service.OpenClawService;
+import com.firedemo.demo.common.ai.StructuredOutputInvoker;
 import com.firedemo.demo.common.cache.CacheConsistencyService;
+import com.firedemo.demo.common.cache.RedisCacheReader;
+import com.firedemo.demo.common.prompt.PromptLoader;
 import com.firedemo.demo.mapper.ClassStudentMapper;
 import com.firedemo.demo.mapper.HomeworkTaskMapper;
 import com.firedemo.demo.mapper.StudentQqBindingMapper;
 import com.firedemo.demo.mapper.SubmissionErrorMapper;
 import com.firedemo.demo.mapper.SubmissionMapper;
 import com.firedemo.demo.mapper.TeacherKnowledgeMapper;
-import jakarta.annotation.PostConstruct;
-import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
-import org.redisson.RedissonShutdownException;
 import org.redisson.api.RLock;
-import org.redisson.api.RStream;
 import org.redisson.api.RedissonClient;
 import org.redisson.api.StreamMessageId;
-import org.redisson.api.stream.StreamCreateGroupArgs;
-import org.redisson.api.stream.StreamReadGroupArgs;
-import org.redisson.client.codec.StringCodec;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
 
 /**
- * 批改任务消费者 — 从 Redis Stream 消费消息，调 OpenClaw 批改，写回数据库
- * <p>
- * 单线程消费，天然保证 AI 调用串行，OpenClaw 不会被打崩。
- * <p>
- * 可靠性增强：
- * <ul>
- *   <li>分布式锁防重复消费（同一 submissionId 只处理一次）</li>
- *   <li>Pending 僵尸消息定时认领（消费者宕机后自动接管）</li>
- *   <li>延迟双删保证缓存一致性</li>
- * </ul>
+ * 批改任务消费者 — 关注业务逻辑，框架代码由 {@link AbstractStreamConsumer} 提供
  */
 @Slf4j
 @Component
-public class GradingStreamConsumer {
+public class GradingStreamConsumer extends AbstractStreamConsumer {
 
-    private final RedissonClient redissonClient;
     private final GradingStreamProducer gradingStreamProducer;
     private final SubmissionMapper submissionMapper;
     private final FileStorageService fileStorageService;
@@ -69,10 +51,9 @@ public class GradingStreamConsumer {
     private final StudentQqBindingMapper studentQqBindingMapper;
     private final ObjectMapper objectMapper;
     private final CacheConsistencyService cacheConsistencyService;
-
-    private final AtomicBoolean running = new AtomicBoolean(false);
-    private ExecutorService executor;
-    private String consumerName;
+    private final RedisCacheReader redisCacheReader;
+    private final StructuredOutputInvoker structuredOutputInvoker;
+    private final PromptLoader promptLoader;
 
     public GradingStreamConsumer(RedissonClient redissonClient,
                                   GradingStreamProducer gradingStreamProducer,
@@ -86,8 +67,11 @@ public class GradingStreamConsumer {
                                   ClassStudentMapper classStudentMapper,
                                   StudentQqBindingMapper studentQqBindingMapper,
                                   ObjectMapper objectMapper,
-                                  CacheConsistencyService cacheConsistencyService) {
-        this.redissonClient = redissonClient;
+                                  CacheConsistencyService cacheConsistencyService,
+                                  RedisCacheReader redisCacheReader,
+                                  StructuredOutputInvoker structuredOutputInvoker,
+                                  PromptLoader promptLoader) {
+        super(redissonClient);
         this.gradingStreamProducer = gradingStreamProducer;
         this.submissionMapper = submissionMapper;
         this.fileStorageService = fileStorageService;
@@ -100,147 +84,25 @@ public class GradingStreamConsumer {
         this.studentQqBindingMapper = studentQqBindingMapper;
         this.objectMapper = objectMapper;
         this.cacheConsistencyService = cacheConsistencyService;
+        this.redisCacheReader = redisCacheReader;
+        this.structuredOutputInvoker = structuredOutputInvoker;
+        this.promptLoader = promptLoader;
     }
 
-    @PostConstruct
-    public void start() {
-        this.consumerName = AsyncTaskConstants.GRADING_CONSUMER_PREFIX
-                + UUID.randomUUID().toString().substring(0, 8);
+    // ==================== 钩子方法（身份标识） ====================
 
-        RStream<String, String> stream = redissonClient.getStream(
-                AsyncTaskConstants.GRADING_STREAM_KEY, StringCodec.INSTANCE);
-        try {
-            stream.createGroup(StreamCreateGroupArgs.name(AsyncTaskConstants.GRADING_GROUP)
-                    .makeStream());
-            log.info("消费者组已创建: {}", AsyncTaskConstants.GRADING_GROUP);
-        } catch (Exception e) {
-            log.info("消费者组已存在，跳过创建: {}", AsyncTaskConstants.GRADING_GROUP);
-        }
+    @Override protected String taskName() { return "批改任务"; }
+    @Override protected String streamKey() { return AsyncTaskConstants.GRADING_STREAM_KEY; }
+    @Override protected String groupName() { return AsyncTaskConstants.GRADING_GROUP; }
+    @Override protected String consumerPrefix() { return AsyncTaskConstants.GRADING_CONSUMER_PREFIX; }
+    @Override protected String threadName() { return "grading-consumer"; }
+    @Override protected int batchSize() { return AsyncTaskConstants.BATCH_SIZE; }
+    @Override protected long pollTimeoutMs() { return AsyncTaskConstants.POLL_TIMEOUT_MS; }
 
-        this.executor = Executors.newSingleThreadExecutor(r -> {
-            Thread t = new Thread(r, "grading-consumer");
-            t.setDaemon(true);
-            return t;
-        });
+    // ==================== 业务处理（唯一核心方法） ====================
 
-        running.set(true);
-        executor.submit(this::consumeLoop);
-        log.info("批改消费者已启动: consumerName={}", consumerName);
-    }
-
-    @PreDestroy
-    public void stop() {
-        running.set(false);
-        if (executor != null) {
-            executor.shutdown();
-        }
-        log.info("批改消费者已关闭: consumerName={}", consumerName);
-    }
-
-    // ==================== 消息消费 ====================
-
-    private void consumeLoop() {
-        RStream<String, String> stream = redissonClient.getStream(
-                AsyncTaskConstants.GRADING_STREAM_KEY, StringCodec.INSTANCE);
-
-        while (running.get()) {
-            try {
-                Map<StreamMessageId, Map<String, String>> messages = stream.readGroup(
-                        AsyncTaskConstants.GRADING_GROUP,
-                        consumerName,
-                        StreamReadGroupArgs.neverDelivered()
-                                .count(AsyncTaskConstants.BATCH_SIZE)
-                                .timeout(Duration.ofMillis(AsyncTaskConstants.POLL_TIMEOUT_MS))
-                );
-
-                if (messages == null || messages.isEmpty()) {
-                    continue;
-                }
-
-                for (Map.Entry<StreamMessageId, Map<String, String>> entry : messages.entrySet()) {
-                    processOne(entry.getKey(), entry.getValue());
-                }
-            } catch (RedissonShutdownException e) {
-                log.info("Redisson 已关闭，消费者退出");
-                break;
-            } catch (Exception e) {
-                if (Thread.currentThread().isInterrupted()) {
-                    log.info("消费者线程被中断");
-                    break;
-                }
-                log.error("消费异常", e);
-            }
-        }
-    }
-
-    /**
-     * 定时扫描 Pending 队列 — 僵尸消息兜底
-     * <p>
-     * 当消费者宕机时，其未 ACK 的消息会永久停留在 Pending 队列。
-     * claim() 改变消息 owner 并返回消息数据，提交到消费线程处理后 ACK。
-     */
-    @Scheduled(fixedDelay = 30_000)
-    @SuppressWarnings("unchecked")
-    public void claimPendingMessages() {
-        try {
-            RStream<String, String> stream = redissonClient.getStream(
-                    AsyncTaskConstants.GRADING_STREAM_KEY, StringCodec.INSTANCE);
-            java.util.List rawList = (java.util.List) stream.listPending(
-                    AsyncTaskConstants.GRADING_GROUP,
-                    StreamMessageId.MIN,
-                    StreamMessageId.MAX,
-                    100);
-
-            if (rawList == null || rawList.isEmpty()) {
-                return;
-            }
-
-            int claimedCount = 0;
-            for (Object item : rawList) {
-                try {
-                    StreamMessageId msgId = extractMessageId(item);
-                    long idleTime = extractIdleTime(item);
-                    if (idleTime > 300_000) {
-                        // claim 返回被认领的消息数据，直接处理
-                        Map<StreamMessageId, Map<String, String>> claimed = stream.claim(
-                                AsyncTaskConstants.GRADING_GROUP,
-                                this.consumerName, idleTime, TimeUnit.MILLISECONDS, msgId);
-
-                        if (claimed != null && !claimed.isEmpty()) {
-                            for (Map.Entry<StreamMessageId, Map<String, String>> entry : claimed.entrySet()) {
-                                executor.submit(() -> processOne(entry.getKey(), entry.getValue()));
-                                claimedCount++;
-                            }
-                        }
-                    }
-                } catch (Exception ignored) {
-                }
-            }
-            if (claimedCount > 0) {
-                log.info("认领并处理僵尸消息: count={}", claimedCount);
-            }
-        } catch (Exception e) {
-            log.debug("Pending扫描结束: {}", e.getMessage());
-        }
-    }
-
-    private StreamMessageId extractMessageId(Object entry) throws Exception {
-        if (entry instanceof StreamMessageId) {
-            return (StreamMessageId) entry;
-        }
-        return (StreamMessageId) entry.getClass().getMethod("getId").invoke(entry);
-    }
-
-    private long extractIdleTime(Object entry) throws Exception {
-        if (entry instanceof StreamMessageId) {
-            return Long.MAX_VALUE;
-        }
-        return (long) entry.getClass().getMethod("getIdleTime").invoke(entry);
-    }
-
-    // ==================== 消息处理 ====================
-
-    private void processOne(StreamMessageId messageId, Map<String, String> data) {
+    @Override
+    protected void processOne(StreamMessageId messageId, Map<String, String> data) {
         String submissionIdStr = data.get(AsyncTaskConstants.FIELD_SUBMISSION_ID);
         if (submissionIdStr == null) {
             ack(messageId);
@@ -248,9 +110,11 @@ public class GradingStreamConsumer {
         }
 
         Long submissionId = Long.parseLong(submissionIdStr);
+        String studentRequirement = data.getOrDefault(AsyncTaskConstants.FIELD_REQUIREMENT, "");
+        int retryCount = parseRetryCount(data);
 
         // 分布式锁防重复消费
-        RLock lock = redissonClient.getLock("lock:grading:" + submissionId);
+        RLock lock = redisson().getLock("lock:grading:" + submissionId);
         try {
             if (!lock.tryLock(0, 180, TimeUnit.SECONDS)) {
                 log.info("批改任务已在处理中，跳过: submissionId={}", submissionId);
@@ -264,9 +128,6 @@ public class GradingStreamConsumer {
         }
 
         try {
-            String studentRequirement = data.getOrDefault(AsyncTaskConstants.FIELD_REQUIREMENT, "");
-            int retryCount = Integer.parseInt(data.getOrDefault(AsyncTaskConstants.FIELD_RETRY_COUNT, "0"));
-
             log.info("开始批改: submissionId={}, retryCount={}", submissionId, retryCount);
 
             Submission submission = submissionMapper.selectById(submissionId);
@@ -275,81 +136,29 @@ public class GradingStreamConsumer {
                 return;
             }
 
-            // 从任务表获取老师布置的作业描述作为权威要求
-            String taskDescription = "";
-            if (submission.getTaskId() != null) {
-                HomeworkTask task = taskMapper.selectById(submission.getTaskId());
-                if (task != null && task.getDescription() != null && !task.getDescription().isEmpty()) {
-                    taskDescription = task.getDescription();
-                    log.info("已获取任务描述: taskId={}, descLen={}", submission.getTaskId(), taskDescription.length());
-                }
-            }
-            if (taskDescription.isEmpty()) {
-                log.warn("未找到任务描述: taskId={}, 回退到无特殊要求", submission.getTaskId());
-            }
-
-            // 防重复处理：已完成/已失败的跳过
-            if ("COMPLETED".equals(submission.getStatus())
-                    || "FAILED".equals(submission.getStatus())) {
-                log.info("提交已终态，跳过: submissionId={}, status={}",
-                        submissionId, submission.getStatus());
+            // 防重复处理
+            if (SubmissionStatus.isFinal(submission.getStatus())) {
+                log.info("提交已终态，跳过: submissionId={}", submissionId);
                 ack(messageId);
                 return;
             }
 
-            submission.setStatus("PROCESSING");
-            submissionMapper.updateById(submission);
-
-            String fileContent = fileStorageService.readFileContent(submission.getFilePath());
-            if (fileContent == null || fileContent.isEmpty()) {
-                throw new RuntimeException("无法读取文件内容");
-            }
-
-            String prompt = buildPrompt(submission, taskDescription, studentRequirement, fileContent);
-            String response = openClawService.chat(prompt, "grading_" + submissionId);
-            String jsonStr = extractJson(response);
-            EvaluationResultDTO evaluation = objectMapper.readValue(jsonStr, EvaluationResultDTO.class);
-
-            saveEvaluation(submission, evaluation, response);
-
-            submission.setStatus("COMPLETED");
-            submissionMapper.updateById(submission);
-
-            log.info("批改完成: submissionId={}, score={}", submissionId, evaluation.getTotalScore());
-
-            // 延迟双删 — 缓存一致性
-            if (submission.getClassId() != null) {
-                cacheConsistencyService.evictWithDoubleDelete("dashboard",
-                        "metrics:" + submission.getClassId(),
-                        "scoreDist:" + submission.getClassId(),
-                        "knowledge:" + submission.getClassId(),
-                        "errors:" + submission.getClassId());
-            }
-
-            if (evaluation.getTotalScore() != null && evaluation.getTotalScore() < 60) {
-                String qq = studentQqBindingMapper.selectQqByStudentId(submission.getStudentId());
-                if (qq != null) {
-                    oneBotHttpService.sendPrivateMessage(qq, String.format(
-                            "同学你好，你的作业「%s」得分 %d 分，建议多向老师或机器人提问。",
-                            submission.getAssignmentName(), evaluation.getTotalScore()));
-                }
-            }
+            // 执行批改
+            doGrade(submission, studentRequirement);
 
         } catch (Exception e) {
             log.error("批改失败: submissionId={}", submissionId, e);
-            int retryCount = Integer.parseInt(data.getOrDefault(AsyncTaskConstants.FIELD_RETRY_COUNT, "0"));
-            String studentRequirement = data.getOrDefault(AsyncTaskConstants.FIELD_REQUIREMENT, "");
             if (retryCount < AsyncTaskConstants.MAX_RETRY) {
                 gradingStreamProducer.retryTask(submissionId, studentRequirement, retryCount + 1);
                 Submission pending = submissionMapper.selectById(submissionId);
                 if (pending != null) {
-                    pending.setStatus("PENDING");
+                    pending.setStatus(SubmissionStatus.PENDING.getCode());
                     submissionMapper.updateById(pending);
                 }
             } else {
                 Submission failed = submissionMapper.selectById(submissionId);
                 if (failed != null) {
-                    failed.setStatus("FAILED");
+                    failed.setStatus(SubmissionStatus.FAILED.getCode());
                     failed.setErrorMessage(truncate(e.getMessage(), 500));
                     submissionMapper.updateById(failed);
                 }
@@ -363,88 +172,127 @@ public class GradingStreamConsumer {
         ack(messageId);
     }
 
+    // ==================== 批改核心流程 ====================
+
+    private void doGrade(Submission submission, String studentRequirement) throws Exception {
+        Long submissionId = submission.getId();
+
+        // 1. 状态标记
+        submission.setStatus(SubmissionStatus.PROCESSING.getCode());
+        submissionMapper.updateById(submission);
+
+        // 2. 获取作业描述
+        String taskDescription = "";
+        if (submission.getTaskId() != null) {
+            HomeworkTask task = redisCacheReader.read(
+                    "task:" + submission.getTaskId(),
+                    java.time.Duration.ofMinutes(30),
+                    () -> taskMapper.selectById(submission.getTaskId()));
+            if (task != null && task.getDescription() != null && !task.getDescription().isEmpty()) {
+                taskDescription = task.getDescription();
+            }
+        }
+
+        // 3. 读取文件
+        String fileContent = fileStorageService.readFileContent(submission.getFilePath());
+        if (fileContent == null || fileContent.isEmpty()) {
+            throw new RuntimeException("无法读取文件内容");
+        }
+
+        // 4. 调用 AI 批改
+        String prompt = buildPrompt(submission, taskDescription, studentRequirement, fileContent);
+        EvaluationResultDTO evaluation = structuredOutputInvoker.invoke(
+                p -> openClawService.chat(p, "grading_" + submissionId),
+                prompt,
+                EvaluationResultDTO.class,
+                "作业批改 submissionId=" + submissionId);
+        String response = ""; // StructuredOutputInvoker 内部已处理，此处不再返回原始响应
+
+        // 5. 保存结果
+        saveEvaluation(submission, evaluation, response);
+        submission.setStatus(SubmissionStatus.COMPLETED.getCode());
+        submissionMapper.updateById(submission);
+
+        log.info("批改完成: submissionId={}, score={}", submissionId, evaluation.getTotalScore());
+
+        // 6. 缓存一致性
+        if (submission.getClassId() != null) {
+            cacheConsistencyService.evictWithDoubleDelete("dashboard",
+                    "metrics:" + submission.getClassId(),
+                    "scoreDist:" + submission.getClassId(),
+                    "knowledge:" + submission.getClassId(),
+                    "errors:" + submission.getClassId());
+        }
+
+        // 7. 低分提醒
+        if (evaluation.getTotalScore() != null && evaluation.getTotalScore() < 60) {
+            String qq = studentQqBindingMapper.selectQqByStudentId(submission.getStudentId());
+            if (qq != null) {
+                oneBotHttpService.sendPrivateMessage(qq, String.format(
+                        "同学你好，你的作业「%s」得分 %d 分，建议多向老师或机器人提问。",
+                        submission.getAssignmentName(), evaluation.getTotalScore()));
+            }
+        }
+    }
+
     // ==================== 辅助方法 ====================
 
-    private String buildPrompt(Submission sub, String taskDescription, String studentRequirement, String fileContent) {
-        // 查询该班级教师定义的知识点列表
+    private String buildPrompt(Submission sub, String taskDescription,
+                                String studentRequirement, String fileContent) {
+        // 查询知识点列表
         String kpContext = "";
         List<TeacherKnowledge> kps = teacherKnowledgeMapper.selectByClassId(sub.getClassId());
         if (kps != null && !kps.isEmpty()) {
-            List<String> kpNames = kps.stream()
-                    .map(TeacherKnowledge::getName)
-                    .collect(java.util.stream.Collectors.toList());
+            List<String> kpNames = kps.stream().map(TeacherKnowledge::getName).collect(Collectors.toList());
             kpContext = String.format("""
+                    该班级教师定义的知识点列表：
+                    %s
 
-                        该班级教师定义的知识点列表：
-                        %s
-
-                        请根据以上知识点列表，将每条 errors[] 和 suggestions[] 归类到对应的知识点。
-                        如果某个错误/建议不属于列表中的任何一个知识点，则 knowledgePoint 填 "其他"。
-                        """, kpNames);
+                    请根据以上知识点列表，将每条 errors[] 和 suggestions[] 归类到对应的知识点。
+                    如果某个错误/建议不属于列表中的任何一个知识点，则 knowledgePoint 填 "其他"。
+                    """, kpNames);
         }
 
-        // 学生额外说明（可选）
         String studentNote = "";
         if (studentRequirement != null && !studentRequirement.isEmpty()) {
             studentNote = String.format("\n\n【学生提交说明】\n%s\n", studentRequirement);
         }
 
-        return String.format("""
-                        请作为严格的作业批改助手，评阅以下学生提交的作业：
-
-                        ━━━━━━━━━━━━━━━━━━━━━━
-                        【老师布置的作业要求】（这是权威标准，请严格对照检查）
-                        %s
-                        ━━━━━━━━━━━━━━━━━━━━━━
-
-                        学生姓名：%s
-                        班级：%s
-                        作业名称：%s%s
-
-                        文件内容：
-                        %s%s
-
-                        ━━━━━━━━━━━━━━━━━━━━━━
-                        【批改指引】
-                        1. 首先判断学生提交的内容是否与上述【老师布置的作业要求】相匹配
-                           - 如果完全不匹配（学生提交了错误题目/无关内容），请在 overallComment 中明确指出"学生提交的内容与作业要求不匹配"
-                           - 如果不匹配，totalScore 不得超过 30 分，contentScore 不得超过 15 分
-                           - 在 errors[] 中增加一条 type="requirement_mismatch" 的错误记录，severity="critical"
-                        2. 如果匹配，按照标准批改流程评阅：代码正确性、代码规范、逻辑清晰度、注释完整度
-                        3. 请使用批改作业助手的标准格式输出结果，必须是合法JSON格式
-                        """,
-                taskDescription != null && !taskDescription.isEmpty() ? taskDescription : "无特殊要求",
-                sub.getStudentName(),
-                sub.getClassName(),
-                sub.getAssignmentName(),
-                studentNote,
-                fileContent,
-                kpContext);
+        String template = promptLoader.load("grading-system.txt");
+        return template
+                .replace("{{taskDescription}}",
+                        taskDescription != null && !taskDescription.isEmpty() ? taskDescription : "无特殊要求")
+                .replace("{{studentName}}", sub.getStudentName())
+                .replace("{{className}}", sub.getClassName())
+                .replace("{{assignmentName}}", sub.getAssignmentName())
+                .replace("{{studentNote}}", studentNote)
+                .replace("{{fileContent}}", fileContent)
+                .replace("{{kpContext}}", kpContext);
     }
 
     private void saveEvaluation(Submission sub, EvaluationResultDTO eval, String rawResponse) {
         sub.setTotalScore(eval.getTotalScore());
-        sub.setContentScore(eval.getContentScore() != null
-                ? eval.getContentScore() : eval.getTotalScore());
+        sub.setContentScore(eval.getContentScore() != null ? eval.getContentScore() : eval.getTotalScore());
         sub.setOverallComment(eval.getOverallComment());
-        sub.setStrengths(eval.getStrengths() != null
-                ? String.join(",", eval.getStrengths()) : "");
-        sub.setWeaknesses(eval.getWeaknesses() != null
-                ? String.join(",", eval.getWeaknesses()) : "");
+        sub.setStrengths(eval.getStrengths() != null ? String.join(",", eval.getStrengths()) : "");
+        sub.setWeaknesses(eval.getWeaknesses() != null ? String.join(",", eval.getWeaknesses()) : "");
 
         String suggestionsStr = "";
         if (eval.getSuggestions() != null) {
             suggestionsStr = eval.getSuggestions().stream()
                     .map(s -> s.getPriority() + ": " + s.getIssue() + " -> " + s.getSuggestion())
-                    .reduce((a, b) -> a + "\n" + b)
-                    .orElse("");
+                    .reduce((a, b) -> a + "\n" + b).orElse("");
         }
         sub.setSuggestions(suggestionsStr);
         sub.setRawResponse(rawResponse);
 
+        // 延迟提交扣分
         Long taskId = sub.getTaskId();
         if (taskId != null) {
-            HomeworkTask task = taskMapper.selectById(taskId);
+            HomeworkTask task = redisCacheReader.read(
+                    "task:" + taskId,
+                    java.time.Duration.ofMinutes(30),
+                    () -> taskMapper.selectById(taskId));
             if (task != null && task.getDeadline() != null
                     && LocalDateTime.now().isAfter(task.getDeadline())) {
                 sub.setIsLate(true);
@@ -453,20 +301,15 @@ public class GradingStreamConsumer {
                     sub.setPenaltyApplied(true);
                     long days = java.time.Duration.between(task.getDeadline(), LocalDateTime.now()).toDays();
                     int penalty = (int) Math.ceil(days) * task.getLatePenalty();
-                    int finalScore = Math.max(0, (eval.getTotalScore() != null
-                            ? eval.getTotalScore() : 0) - penalty);
-                    sub.setFinalScore(finalScore);
+                    sub.setFinalScore(Math.max(0, (eval.getTotalScore() != null ? eval.getTotalScore() : 0) - penalty));
                 }
             }
         }
 
-        // 保存 errors/suggestions 到 submission_errors（按知识点归类）
         saveSubmissionErrors(sub, eval);
 
-        if (sub.getClassId() != null && sub.getStudentId() != null
-                && sub.getStudentName() != null) {
-            classStudentMapper.insertIgnore(sub.getClassId(),
-                    sub.getStudentId(), sub.getStudentName(), "auto");
+        if (sub.getClassId() != null && sub.getStudentId() != null && sub.getStudentName() != null) {
+            classStudentMapper.insertIgnore(sub.getClassId(), sub.getStudentId(), sub.getStudentName(), "auto");
         }
     }
 
@@ -476,7 +319,6 @@ public class GradingStreamConsumer {
 
         LocalDateTime now = LocalDateTime.now();
 
-        // 写入 errors[]
         if (eval.getErrors() != null) {
             for (EvaluationResultDTO.ErrorItem err : eval.getErrors()) {
                 if (err.getIssue() == null || err.getIssue().isEmpty()) continue;
@@ -493,7 +335,6 @@ public class GradingStreamConsumer {
             }
         }
 
-        // 写入 suggestions[]
         if (eval.getSuggestions() != null) {
             for (EvaluationResultDTO.SuggestionItem sug : eval.getSuggestions()) {
                 if (sug.getIssue() == null || sug.getIssue().isEmpty()) continue;
@@ -511,33 +352,5 @@ public class GradingStreamConsumer {
         }
     }
 
-    private String extractJson(String response) {
-        if (response == null || response.isEmpty()) {
-            return "{}";
-        }
-        String trimmed = response.trim();
-        int jsonStart = trimmed.indexOf('{');
-        int jsonEnd = trimmed.lastIndexOf('}');
-        if (jsonStart != -1 && jsonEnd != -1 && jsonEnd > jsonStart) {
-            return trimmed.substring(jsonStart, jsonEnd + 1);
-        }
-        return response;
-    }
 
-    private void ack(StreamMessageId messageId) {
-        try {
-            RStream<String, String> stream = redissonClient.getStream(
-                    AsyncTaskConstants.GRADING_STREAM_KEY, StringCodec.INSTANCE);
-            stream.ack(AsyncTaskConstants.GRADING_GROUP, messageId);
-        } catch (Exception e) {
-            log.error("ACK失败: messageId={}", messageId, e);
-        }
-    }
-
-    private String truncate(String text, int maxLen) {
-        if (text == null) {
-            return null;
-        }
-        return text.length() > maxLen ? text.substring(0, maxLen) : text;
-    }
 }

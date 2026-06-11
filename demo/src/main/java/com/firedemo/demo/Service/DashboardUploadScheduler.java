@@ -45,70 +45,19 @@ public class DashboardUploadScheduler {
         int failed = 0;
 
         for (ClassInfo cls : classes) {
-            String docIdPrefix = "dashboard_" + cls.getId();
-
-            // 今天已上传则跳过
-            if (vectorStoreService.existsToday(docIdPrefix)) {
-                log.info("今天已上传，跳过: classId={}, className={}", cls.getId(), cls.getName());
-                skipped++;
-                continue;
-            }
-
-            try {
-                DashboardUploadDTO data = buildUploadData(cls);
-                dashboardRagService.uploadDashboard(data);
-                success++;
-                log.info("上传成功: classId={}, className={}", cls.getId(), cls.getName());
-            } catch (Exception e) {
-                failed++;
-                log.error("上传失败: classId={}, className={}", cls.getId(), cls.getName(), e);
-            }
+            // 仪表盘 RAG 上传已禁用，数据应通过 MCP 工具查询
+            log.info("仪表盘 RAG 上传已禁用，跳过: classId={}, className={}", cls.getId(), cls.getName());
+            skipped++;
         }
 
         log.info("定时上传完成: 成功={}, 跳过={}, 失败={}", success, skipped, failed);
     }
 
     /**
-     * 构建上传数据
+     * 仪表盘 RAG 上传已禁用，保留方法签名以兼容编译。
      */
+    @Deprecated
     private DashboardUploadDTO buildUploadData(ClassInfo cls) {
-        Long classId = cls.getId();
-
-        DashboardUploadDTO data = new DashboardUploadDTO();
-        data.setClassId(classId);
-        data.setClassName(cls.getName());
-        data.setExportTime(LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
-
-        try {
-            data.setMetrics(dashboardService.getMetrics(classId));
-        } catch (Exception e) {
-            log.warn("获取核心指标失败: classId={}", classId, e);
-        }
-
-        try {
-            data.setScoreDistribution(dashboardService.getScoreDistribution(classId));
-        } catch (Exception e) {
-            log.warn("获取成绩分布失败: classId={}", classId, e);
-        }
-
-        try {
-            data.setKnowledgeMastery(dashboardService.getKnowledgeMastery(classId));
-        } catch (Exception e) {
-            log.warn("获取知识点掌握度失败: classId={}", classId, e);
-        }
-
-        try {
-            data.setFrequentErrors(dashboardService.getFrequentErrors(classId, null));
-        } catch (Exception e) {
-            log.warn("获取高频错题失败: classId={}", classId, e);
-        }
-
-        try {
-            data.setStudents(dashboardService.getStudentOverview(classId, "score", null));
-        } catch (Exception e) {
-            log.warn("获取学生概览失败: classId={}", classId, e);
-        }
-
-        return data;
+        return new DashboardUploadDTO();
     }
 }

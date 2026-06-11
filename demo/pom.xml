@@ -81,10 +81,27 @@
             <artifactId>postgresql</artifactId>
             <scope>runtime</scope>
         </dependency>
+
+        <!-- Flyway 数据库迁移 -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+        </dependency>
+
         <!-- 连接池 -->
         <dependency>
             <groupId>com.zaxxer</groupId>
             <artifactId>HikariCP</artifactId>
+        </dependency>
+
+        <!-- Spring Boot Actuator（健康检查 + 指标监控） -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
 
         <!-- Redisson Redis客户端（Stream消息队列） -->
@@ -99,6 +116,13 @@
             <groupId>com.bucket4j</groupId>
             <artifactId>bucket4j-redis</artifactId>
             <version>8.10.1</version>
+        </dependency>
+
+        <!-- Resilience4j 熔断降级（AI 服务保护） -->
+        <dependency>
+            <groupId>io.github.resilience4j</groupId>
+            <artifactId>resilience4j-spring-boot3</artifactId>
+            <version>2.3.0</version>
         </dependency>
 
         <!-- Spring Boot Cache + Caffeine 本地缓存 -->
@@ -199,7 +223,7 @@
             <version>3.0.0</version>
         </dependency>
 
-        <!-- LangChain4j OpenAI 模块（OpenClaw Gateway 兼容） -->
+        <!-- LangChain4j OpenAI 模块（OpenClaw Gateway 兼容，含流式模型） -->
         <dependency>
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j-open-ai</artifactId>
@@ -216,6 +240,13 @@
             <groupId>org.apache.tika</groupId>
             <artifactId>tika-parsers-standard-package</artifactId>
             <version>2.9.1</version>
+        </dependency>
+
+        <!-- AWS S3 SDK（兼容 MinIO / 阿里云 OSS / AWS S3 / 腾讯云 COS） -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
+            <version>2.29.52</version>
         </dependency>
 
     </dependencies>

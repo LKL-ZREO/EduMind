@@ -88,12 +88,18 @@
 
 <script>
 import * as echarts from 'echarts'
+import { useClassStore } from '@/stores/class'
+import request from '@/api/request'
+import { ElMessage } from 'element-plus'
 
 export default {
+  setup() {
+    const classStore = useClassStore()
+    return { classStore }
+  },
   name: 'TaskDetail',
   data() {
     return {
-      apiBaseUrl: 'http://localhost:8080/api',
       taskId: null,
       task: null,
       className: '',
@@ -107,17 +113,10 @@ export default {
   },
 
   beforeUnmount() {
-    // 清理 chart 实例
-    if (this.chart) {
-      this.chart.dispose()
-    }
+    if (this.chart) this.chart.dispose()
   },
 
   methods: {
-    getToken() {
-      return localStorage.getItem('token') || ''
-    },
-
     goBack() {
       this.$router.push('/teacher/tasks')
     },
@@ -125,25 +124,12 @@ export default {
     async loadDetail() {
       this.loading = true
       try {
-        const response = await fetch(`${this.apiBaseUrl}/tasks/${this.taskId}`, {
-          headers: { 'Authorization': `Bearer ${this.getToken()}` }
-        })
-        const result = await response.json()
-        if (result.code === 200) {
-          this.task = result.data
-          // 获取班级名称
-          try {
-            const clsResponse = await fetch(`${this.apiBaseUrl}/dashboard/classes`, {
-              headers: { 'Authorization': `Bearer ${this.getToken()}` }
-            })
-            const clsResult = await clsResponse.json()
-            if (clsResult.code === 200) {
-              const cls = clsResult.data.find(c => c.id === this.task.classId)
-              this.className = cls ? cls.name : '未知'
-            }
-          } catch (e) {
-            this.className = '未知'
-          }
+        const res = await request.get(`/tasks/${this.taskId}`)
+        if (res.data.code === 200) {
+          this.task = res.data.data
+          await this.classStore.fetchClassList()
+          const cls = this.classStore.classList.find(c => c.id === this.task.classId)
+          this.className = cls ? cls.name : '未知'
         } else {
           this.task = null
         }
@@ -236,7 +222,7 @@ export default {
 
     viewDetail(s) {
       if (!s.submissionId) {
-        alert('数据未加载完成，请刷新页面后重试')
+        ElMessage.warning('数据未加载完成，请刷新页面后重试')
         return
       }
       window.open(`/view/submission/${s.submissionId}`, '_blank')

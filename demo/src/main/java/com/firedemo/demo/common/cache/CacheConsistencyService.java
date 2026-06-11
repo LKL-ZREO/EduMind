@@ -7,6 +7,8 @@ import org.springframework.cache.CacheManager;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
+import java.util.Arrays;
+
 /**
  * 缓存一致性服务 — Cache Aside 模式 + 延迟双删
  * <p>
@@ -21,6 +23,7 @@ import org.springframework.stereotype.Service;
 public class CacheConsistencyService {
 
     private final CacheManager cacheManager;
+    private final RedisCacheReader redisCacheReader;
 
     /**
      * 同步删除 + 异步延迟二次删除（延迟双删）
@@ -36,8 +39,9 @@ public class CacheConsistencyService {
         // 第一次删除
         for (String key : keys) {
             cache.evict(key);
+            redisCacheReader.evict(key);
         }
-        log.debug("缓存第一删完成: cacheName={}, keys={}", cacheName, keys);
+        log.debug("缓存第一删完成(Caffeine+Redis): cacheName={}, keys={}", cacheName, Arrays.toString(keys));
         // 异步延迟第二次删除
         delayedEvict(cacheName, keys);
     }
@@ -56,7 +60,8 @@ public class CacheConsistencyService {
         }
         for (String key : keys) {
             cache.evict(key);
+            redisCacheReader.evict(key);
         }
-        log.debug("缓存延迟双删完成: cacheName={}, keys={}", cacheName, keys);
+        log.debug("缓存延迟双删完成(Caffeine+Redis): cacheName={}, keys={}", cacheName, Arrays.toString(keys));
     }
 }

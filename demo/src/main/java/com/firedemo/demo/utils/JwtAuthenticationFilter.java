@@ -13,8 +13,9 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import java.io.IOException;
 import java.util.Collections;
 
-import static reactor.netty.http.HttpConnectionLiveness.log;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
@@ -29,8 +30,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                                     FilterChain filterChain) throws ServletException, IOException {
 
         String path = request.getRequestURI();
-        String threadName = Thread.currentThread().getName();
-        log.info("[{}] 过滤器处理: {} {}", threadName, request.getMethod(), path);
+        log.debug("JWT过滤器处理: {} {}", request.getMethod(), path);
 
         // 放行 OPTIONS 预检请求
         if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
@@ -41,6 +41,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
          //放行路径（不需要 JWT）
         if (path.startsWith("/api/auth/") || path.startsWith("/api/chat/health")
                 || path.startsWith("/api/onebot/rag") || path.startsWith("/api/homework/")
+                || path.startsWith("/mcp")
                 || path.startsWith("/v3/api-docs") || path.startsWith("/swagger-ui")
                 || path.equals("/doc.html") || path.startsWith("/webjars")) {
             filterChain.doFilter(request, response);
@@ -49,10 +50,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         // 获取 token（只从 Header）
         String header = request.getHeader("Authorization");
-        log.info("[{}] 收到Authorization header: {}", threadName, header != null ? header.substring(0, Math.min(30, header.length())) + "..." : "null");
-        
+
         if (header == null || !header.startsWith("Bearer ") || header.length() <= 7) {
-            log.warn("Authorization header 格式错误或缺失");
+            log.warn("JWT认证失败: Authorization header 缺失或格式错误, path={}", path);
             response.setStatus(401);
             response.setContentType("application/json;charset=UTF-8");
             response.getWriter().write("{\"code\":401,\"message\":\"缺少 Token\"}");
@@ -60,13 +60,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
 
         String token = header.substring(7);
-        log.info("提取的token: {}", token);
 
         // 验证 token
         boolean isValid = jwtUtil.validateToken(token);
-        log.info("Token验证结果: {}", isValid);
         if (!isValid) {
-            log.warn("Token验证失败，token: {}", token.substring(0, Math.min(20, token.length())) + "...");
+            log.warn("JWT认证失败: Token无效或已过期, path={}", path);
             response.setStatus(401);
             response.setContentType("application/json;charset=UTF-8");
             response.getWriter().write("{\"code\":401,\"message\":\"Token 无效或已过期\"}");

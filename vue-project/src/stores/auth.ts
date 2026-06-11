@@ -1,56 +1,60 @@
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
-import { useRouter } from 'vue-router'
+import request from '@/api/request'
 
 type User = {
+  id: number
   username: string
   email: string
 }
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(null)
+  const token = ref<string | null>(localStorage.getItem('token'))
 
   // load persisted user
   try {
     const raw = localStorage.getItem('auth:user')
     if (raw) user.value = JSON.parse(raw) as User
-  } catch (err) {
-    // ignore malformed data
+  } catch {
     localStorage.removeItem('auth:user')
   }
 
-  function persist() {
+  function persistUser() {
     if (user.value) localStorage.setItem('auth:user', JSON.stringify(user.value))
     else localStorage.removeItem('auth:user')
   }
 
-  async function login(payload: { email: string; password: string }) {
-    if (!payload.email || !payload.password) throw new Error('请输入邮箱和密码')
-    const email = String(payload.email)
-    const username = (email.split('@')[0] || '')
-    user.value = { username, email }
-    persist()
+  function persistToken(value: string | null) {
+    token.value = value
+    if (value) localStorage.setItem('token', value)
+    else localStorage.removeItem('token')
   }
 
-  async function register(payload: { username?: string; email: string; password: string }) {
-    if (!payload.email || !payload.password) throw new Error('请输入邮箱和密码')
-    if (payload.password.length < 6) throw new Error('密码至少 6 位')
-    const email = String(payload.email)
-    const username = payload.username ? String(payload.username) : (email.split('@')[0] || '')
-    user.value = { username, email }
-    persist()
+  async function login(payload: { username: string; password: string }) {
+    const res = await request.post('/auth/login', payload)
+    const data = res.data
+    if (data.code !== 200) throw new Error(data.message || '登录失败')
+
+    const { id, username, email, token: jwt, sessionId } = data.data
+    user.value = { id, username, email }
+    persistUser()
+    persistToken(jwt)
+    if (sessionId) localStorage.setItem('sessionId', sessionId)
+  }
+
+  async function register(payload: { username: string; email: string; password: string }) {
+    const res = await request.post('/auth/register', payload)
+    const data = res.data
+    if (data.code !== 200) throw new Error(data.message || '注册失败')
   }
 
   function logout() {
     user.value = null
-    persist()
-    try {
-      const router = useRouter()
-      router.push('/')
-    } catch (e) {
-      // ignore if called outside setup
-    }
+    persistUser()
+    persistToken(null)
+    localStorage.removeItem('sessionId')
   }
 
-  return { user, login, register, logout }
+  return { user, token, login, register, logout }
 })

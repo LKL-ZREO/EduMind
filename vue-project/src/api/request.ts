@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { getCached, setCache } from './cache'
 
 // 创建 axios 实例
 const request = axios.create({
@@ -32,5 +33,16 @@ request.interceptors.response.use(
     return Promise.reject(error)
   }
 )
+
+/** 健康检查（带 3 分钟缓存） */
+export async function checkHealth() {
+  const cached = getCached('health')
+  if (cached) return cached
+
+  const res = await request.get('/chat/health')
+  const status = res.data.status
+  setCache('health', status)
+  return status
+}
 
 export default request

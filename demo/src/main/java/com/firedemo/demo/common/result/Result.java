@@ -1,5 +1,6 @@
 package com.firedemo.demo.common.result;
 
+import com.firedemo.demo.common.exception.ErrorCode;
 import lombok.Data;
 
 /**
@@ -33,6 +34,20 @@ public class Result<T> {
         result.setCode(code);
         result.setMessage(message);
         return result;
+    }
+
+    /** 带数据的错误响应（如校验不匹配警告） */
+    public static <T> Result<T> error(int code, String message, T data) {
+        Result<T> result = new Result<>();
+        result.setCode(code);
+        result.setMessage(message);
+        result.setData(data);
+        return result;
+    }
+
+    /** 使用 ErrorCode 枚举构建错误响应 */
+    public static <T> Result<T> error(ErrorCode errorCode) {
+        return error(errorCode.getCode(), errorCode.getMessage());
     }
     
     public boolean isSuccess() {

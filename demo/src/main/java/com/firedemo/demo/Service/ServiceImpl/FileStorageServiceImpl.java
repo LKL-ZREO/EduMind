@@ -1,5 +1,7 @@
 package com.firedemo.demo.Service.ServiceImpl;
 
+import com.firedemo.demo.common.exception.BusinessException;
+import com.firedemo.demo.common.exception.ErrorCode;
 import com.firedemo.demo.Service.FileStorageService;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.tika.exception.TikaException;
@@ -11,6 +13,7 @@ import org.apache.tika.parser.Parser;
 import org.apache.tika.parser.pdf.PDFParserConfig;
 import org.apache.tika.sax.BodyContentHandler;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 import org.xml.sax.ContentHandler;
@@ -26,6 +29,7 @@ import java.util.UUID;
 
 @Slf4j
 @Service
+@ConditionalOnProperty(name = "storage.type", havingValue = "local", matchIfMissing = true)
 public class FileStorageServiceImpl implements FileStorageService {
 
     @Value("${storage.upload-dir}")
@@ -48,7 +52,7 @@ public class FileStorageServiceImpl implements FileStorageService {
             return targetPath.toString();
         } catch (IOException e) {
             log.error("文件保存失败", e);
-            throw new RuntimeException("文件上传失败", e);
+            throw new BusinessException(ErrorCode.FILE_UPLOAD_ERROR);
         }
     }
 
@@ -90,7 +94,7 @@ public class FileStorageServiceImpl implements FileStorageService {
             }
         } catch (IOException e) {
             log.error("读取文件失败: {}", filePath, e);
-            throw new RuntimeException("读取文件失败", e);
+            throw new BusinessException(ErrorCode.FILE_READ_ERROR);
         }
     }
 

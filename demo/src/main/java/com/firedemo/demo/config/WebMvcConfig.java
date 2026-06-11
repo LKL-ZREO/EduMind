@@ -33,7 +33,7 @@ public class WebMvcConfig implements WebMvcConfigurer {
                 .excludePathPatterns(
                         "/api/auth/**",       // 认证接口不限流（登录、注册）
                         "/actuator/**",       // 健康检查不限流
-                        "/error"              // 错误页面不限流
+                        "/error"             // 错误页面不限流
                 )
                 .order(0); // 最先执行，作为第一道防线
     }

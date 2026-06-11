@@ -22,10 +22,10 @@ public class SmartChunkService {
 
     // 语义相似度阈值
     private static final double SEMANTIC_THRESHOLD = 0.6;
-    // 默认最大token数
-    private static final int DEFAULT_MAX_TOKENS = 10000;
-    // 默认重叠token数
-    private static final int DEFAULT_OVERLAP_TOKENS = 500;
+    // 默认最大 token 数（≈512 tokens，约1500中文字符，每个 chunk 覆盖1-2个知识点）
+    private static final int DEFAULT_MAX_TOKENS = 512;
+    // 默认重叠 token 数
+    private static final int DEFAULT_OVERLAP_TOKENS = 50;
 
     /**
      * 智能切割入口
@@ -71,11 +71,12 @@ public class SmartChunkService {
      * 文档类型检测
      */
     private DocType detectDocType(String content) {
+        // Markdown 优先级最高：中文教材/讲义通常有 # 标题 + 内嵌代码块
+        if (content.contains("\n#") || content.contains("\n##")) {
+            return DocType.MARKDOWN;
+        }
         if (content.contains("```") || content.contains("def ") || content.contains("class ")) {
             return DocType.CODE;
-        }
-        if (content.contains("#") && content.contains("\n#")) {
-            return DocType.MARKDOWN;
         }
         if (content.contains("User:") || content.contains("Assistant:") || 
             content.contains(" Human:") || content.contains(" AI:")) {
@@ -158,9 +159,8 @@ public class SmartChunkService {
         int lastEnd = 0;
         
         while (matcher.find()) {
-            if (lastEnd > 0) {
-                functions.add(code.substring(lastEnd, matcher.start()).trim());
-            }
+            // 保留第一个匹配前的文本（可能包含章节标题、说明文字等）
+            functions.add(code.substring(lastEnd, matcher.start()).trim());
             lastEnd = matcher.start();
         }
         

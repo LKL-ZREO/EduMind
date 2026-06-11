@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
+import { useAuthStore } from '@/stores/auth'
 
 interface FormData {
   username: string
@@ -23,10 +24,8 @@ const showPassword = ref(false)
 const showConfirmPassword = ref(false)
 
 const router = useRouter()
+const authStore = useAuthStore()
 
-
-
-// 验证函数
 const validateForm = (): string | null => {
   if (!form.username.trim()) return '请输入用户名'
   if (form.username.length < 3) return '用户名至少需要3个字符'
@@ -39,8 +38,7 @@ const validateForm = (): string | null => {
   return null
 }
 
-async function submit(e: Event) {
-  e.preventDefault()
+async function submit() {
   const validationError = validateForm()
   if (validationError) {
     error.value = validationError
@@ -53,36 +51,15 @@ async function submit(e: Event) {
   loading.value = true
 
   try {
-    const response = await fetch('/api/auth/register', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        username: form.username,
-        email: form.email,
-        password: form.password
-      })
+    await authStore.register({
+      username: form.username,
+      email: form.email,
+      password: form.password
     })
-
-    if (!response.ok) {
-      let errorMessage = '注册失败，请稍后重试'
-      try {
-        const errorData = await response.json()
-        errorMessage = errorData.message || errorData.error || errorMessage
-      } catch {
-        errorMessage = response.statusText || errorMessage
-      }
-      throw new Error(errorMessage)
-    }
-
     success.value = '注册成功！正在跳转...'
-    setTimeout(() => {
-      router.push('/login')
-    }, 1500)
+    setTimeout(() => router.push('/login'), 1500)
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    error.value = msg || '注册失败，请稍后重试'
+    error.value = err instanceof Error ? err.message : '注册失败，请稍后重试'
     success.value = null
   } finally {
     loading.value = false
