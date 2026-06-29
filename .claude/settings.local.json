@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node *)",
+      "Bash(git checkout *)",
+      "Bash(npm install *)",
+      "Bash(mvn compile *)",
+      "Bash(openclaw *)",
+      "WebFetch(domain:docs.openclaw.ai)",
+      "Bash(./mvnw *)",
+      "Bash(mvn *)",
+      "Read(//c/Users/LKL/.openclaw/**)",
+      "Read(//c/Users/LKL/.openclaw/agents/**)"
+    ]
+  }
+}

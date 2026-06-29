@@ -14,9 +14,11 @@ import com.firedemo.demo.common.util.JsonUtil;
 import com.firedemo.demo.mapper.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.CacheConfig;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.cache.annotation.Caching;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -47,6 +49,7 @@ public class DashboardServiceImpl implements DashboardService {
     private final SubmissionErrorMapper submissionErrorMapper;
     private final OpenClawService openClawService;
     private final ObjectMapper objectMapper;
+    private final CacheManager cacheManager;
 
     @PostConstruct
     void loadConceptKeywords() {
@@ -93,13 +96,14 @@ public class DashboardServiceImpl implements DashboardService {
             double avgScore = allScores.stream().mapToInt(Integer::intValue).average().orElse(0.0);
             metrics.setAvgScore(Math.round(avgScore * 10) / 10.0);
             metrics.setScoreTrend(0.0);
-            long warningCount = allScores.stream().filter(score -> score < 60).count();
-            metrics.setWarningStudents((int) warningCount);
         } else {
             metrics.setAvgScore(0.0);
             metrics.setScoreTrend(0.0);
-            metrics.setWarningStudents(0);
         }
+
+        // 需关注学生：按人去重统计（均分<60），而非按作业次数统计
+        int warningCount = countDistinctWarningStudents(classId);
+        metrics.setWarningStudents(warningCount);
         return metrics;
     }
 
@@ -329,7 +333,11 @@ public class DashboardServiceImpl implements DashboardService {
 
     @Override
     @Transactional
-    @CacheEvict(key = "'knowledge:' + #classId")
+    @Caching(evict = {
+        @CacheEvict(key = "'knowledge:' + #classId"),
+        @CacheEvict(key = "'metrics:' + #classId"),
+        @CacheEvict(key = "'scoreDist:' + #classId")
+    })
     public void saveTeacherKnowledge(Long classId, Long userId, List<TeacherKnowledgeDTO> items) {
         teacherKnowledgeMapper.delete(
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<TeacherKnowledge>()
@@ -355,7 +363,11 @@ public class DashboardServiceImpl implements DashboardService {
 
     @Override
     @Transactional
-    @CacheEvict(key = "'knowledge:' + #classId")
+    @Caching(evict = {
+        @CacheEvict(key = "'knowledge:' + #classId"),
+        @CacheEvict(key = "'metrics:' + #classId"),
+        @CacheEvict(key = "'scoreDist:' + #classId")
+    })
     public void addTeacherKnowledge(Long classId, Long userId, String name, String color) {
         TeacherKnowledge tk = new TeacherKnowledge();
         tk.setClassId(classId);
@@ -370,11 +382,12 @@ public class DashboardServiceImpl implements DashboardService {
     }
 
     @Override
-    @CacheEvict(key = "'knowledge:' + #classId")
     public void deleteTeacherKnowledge(Long id) {
         TeacherKnowledge tk = teacherKnowledgeMapper.selectById(id);
         if (tk != null) {
             teacherKnowledgeMapper.deleteById(id);
+            // 手动驱逐缓存 — 使用 tk.getClassId() 而非错误的 #classId SpEL
+            evictDashboardCache(tk.getClassId());
         }
     }
 
@@ -494,7 +507,67 @@ public class DashboardServiceImpl implements DashboardService {
         return null;
     }
 
+    // ======================== Warning Students ========================
+
+    /**
+     * 统计需关注的学生数（按人去重，均分 < 60）。
+     * 合并 homework_evaluation（按 user_id）和 submission（按 student_id）
+     * 两个数据源，使用与 getStudentOverview 相同的合并键避免重复计数。
+     */
+    private int countDistinctWarningStudents(Long classId) {
+        // identity key → 平均分
+        Map<String, Double> studentAvgs = new LinkedHashMap<>();
+
+        // 1. homework_evaluation 表：按 user_id 聚合
+        List<Map<String, Object>> evalStats = evaluationMapper.selectStudentStatsByClassId(classId);
+        Map<Long, Double> userIdAvgMap = new HashMap<>();
+        for (Map<String, Object> row : evalStats) {
+            long userId = ((Number) row.get("user_id")).longValue();
+            Number avgScore = (Number) row.get("avg_score");
+            if (avgScore != null) {
+                userIdAvgMap.put(userId, avgScore.doubleValue());
+            }
+        }
+
+        // 将 user_id 映射为 username（与 getStudentOverview 对齐）
+        List<User> classStudents = userMapper.selectStudentsByClassId(classId);
+        for (User u : classStudents) {
+            Double avg = userIdAvgMap.get(u.getId());
+            if (avg != null) {
+                studentAvgs.put(u.getUsername(), avg);
+            }
+        }
+
+        // 2. submission 表：按 student_id 聚合（只补充未在 sys_user 中出现的学生）
+        List<Map<String, Object>> subStudents = submissionMapper.selectStudentOverviewByClassId(classId);
+        for (Map<String, Object> row : subStudents) {
+            String studentId = (String) row.get("student_id");
+            String name = (String) row.get("student_name");
+            String key = (studentId != null && !studentId.isEmpty()) ? studentId : name;
+            Number avgScore = (Number) row.get("avg_score");
+            if (avgScore != null && !studentAvgs.containsKey(key)) {
+                studentAvgs.put(key, avgScore.doubleValue());
+            }
+        }
+
+        // 统计均分 < 60 的学生数
+        return (int) studentAvgs.values().stream().filter(avg -> avg < 60).count();
+    }
+
     // ======================== Utils ========================
+
+    /**
+     * 统一驱逐 classId 相关的所有仪表盘缓存
+     */
+    private void evictDashboardCache(Long classId) {
+        if (classId == null) return;
+        var cache = cacheManager.getCache("dashboard");
+        if (cache != null) {
+            cache.evict("knowledge:" + classId);
+            cache.evict("metrics:" + classId);
+            cache.evict("scoreDist:" + classId);
+        }
+    }
 
     private String convertDifficultyLabel(String priority) {
         switch (priority) {

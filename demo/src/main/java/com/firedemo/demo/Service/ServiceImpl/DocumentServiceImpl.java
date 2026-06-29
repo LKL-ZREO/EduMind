@@ -12,6 +12,7 @@ import com.firedemo.demo.mapper.DirectoryNodeMapper;
 import com.firedemo.demo.mapper.DocumentMapper;
 import com.firedemo.demo.mapper.SharedKbMemberMapper;
 import com.firedemo.demo.rag.EmbeddingService;
+import com.firedemo.demo.rag.RrfFusionService;
 import com.firedemo.demo.rag.SmartChunkService;
 import com.firedemo.demo.rag.VectorStoreService;
 import lombok.RequiredArgsConstructor;
@@ -45,6 +46,7 @@ public class DocumentServiceImpl implements DocumentService {
     private final SmartChunkService chunkService;
     private final EmbeddingService embeddingService;
     private final VectorStoreService vectorStoreService;
+    private final RrfFusionService rrfFusionService;
 
     @Value("${storage.upload-dir:${user.home}/.homework-grader/uploads}")
     private String uploadDir;
@@ -180,8 +182,6 @@ public class DocumentServiceImpl implements DocumentService {
         }
     }
 
-    // RRF 融合参数，k=60 是学术论文和 Elasticsearch 的标准默认值
-    private static final int RRF_K = 60;
     // 每路检索的候选数（多取一些参与融合，最后截断到 topK）
     private static final int CANDIDATE_MULTIPLIER = 3;
 
@@ -207,106 +207,26 @@ public class DocumentServiceImpl implements DocumentService {
         if (userId != null) {
             accessibleKbIds = sharedKbMemberMapper.selectKbIdsByUserId(userId);
         }
-
         // ===== 1. 语义向量检索（第一路，带权限过滤）=====
         float[] queryEmbedding = embeddingService.embedQuery(query);
         List<DocumentChunk> vectorResults = vectorStoreService.similaritySearch(
                 queryEmbedding, topK * CANDIDATE_MULTIPLIER, userId, accessibleKbIds);
-        Map<String, Double> semanticRanks = rankByCosine(queryEmbedding, vectorResults);
 
         // ===== 2. 关键词检索（第二路，带权限过滤）=====
         List<VectorStoreService.ScoredChunk> keywordResults = vectorStoreService.keywordSearch(
                 query, topK * CANDIDATE_MULTIPLIER, userId, accessibleKbIds);
-        Map<String, Double> keywordRanks = rankKeyword(keywordResults);
+        List<DocumentChunk> keywordChunks = keywordResults.stream()
+                .map(VectorStoreService.ScoredChunk::chunk)
+                .toList();
 
-        // ===== 3. RRF 融合 =====
-        Set<String> allChunkIds = new LinkedHashSet<>();
-        allChunkIds.addAll(semanticRanks.keySet());
-        allChunkIds.addAll(keywordRanks.keySet());
-
-        Map<String, DocumentChunk> chunkMap = buildChunkMap(vectorResults, keywordResults);
-
-        return allChunkIds.stream()
-                .map(id -> {
-                    double rrfScore = 0.0;
-                    Double semRank = semanticRanks.get(id);
-                    Double kwRank = keywordRanks.get(id);
-                    if (semRank != null) rrfScore += 1.0 / (RRF_K + semRank);
-                    if (kwRank != null) rrfScore += 1.0 / (RRF_K + kwRank);
-                    return new RrfResult(id, rrfScore);
-                })
-                .sorted((a, b) -> Double.compare(b.rrfScore, a.rrfScore))
+        // ===== 3. RRF 融合（委托 RrfFusionService）=====
+        return rrfFusionService.fuse(vectorResults, keywordChunks).stream()
                 .limit(topK)
-                .map(r -> chunkMap.get(r.chunkId))
-                .filter(Objects::nonNull)
-                .map(DocumentChunk::getContent)
+                .map(sc -> sc.chunk().getContent())
                 .toList();
     }
 
-    /**
-     * 语义路打分：按余弦相似度降序排列，rank 从 1 开始
-     */
-    private Map<String, Double> rankByCosine(float[] queryEmbedding, List<DocumentChunk> chunks) {
-        Map<String, Double> rankMap = new LinkedHashMap<>();
-        List<VectorStoreService.ScoredChunk> scored = chunks.stream()
-                .map(c -> {
-                    double sim = cosineSimilarity(queryEmbedding, c.getEmbedding());
-                    return new VectorStoreService.ScoredChunk(c, sim);
-                })
-                .sorted((a, b) -> Double.compare(b.score(), a.score()))
-                .toList();
 
-        for (int i = 0; i < scored.size(); i++) {
-            rankMap.put(scored.get(i).chunk().getId(), (double) (i + 1));
-        }
-        return rankMap;
-    }
-
-    /**
-     * 关键词路打分：按 keyword_score 降序排列，rank 从 1 开始
-     */
-    private Map<String, Double> rankKeyword(List<VectorStoreService.ScoredChunk> results) {
-        Map<String, Double> rankMap = new LinkedHashMap<>();
-        for (int i = 0; i < results.size(); i++) {
-            rankMap.put(results.get(i).chunk().getId(), (double) (i + 1));
-        }
-        return rankMap;
-    }
-
-    /**
-     * 构建 chunkId → DocumentChunk 映射
-     */
-    private Map<String, DocumentChunk> buildChunkMap(List<DocumentChunk> vectorResults,
-                                                      List<VectorStoreService.ScoredChunk> keywordResults) {
-        Map<String, DocumentChunk> map = new HashMap<>();
-        for (DocumentChunk c : vectorResults) {
-            map.putIfAbsent(c.getId(), c);
-        }
-        for (VectorStoreService.ScoredChunk sc : keywordResults) {
-            map.putIfAbsent(sc.chunk().getId(), sc.chunk());
-        }
-        return map;
-    }
-
-    /**
-     * 计算余弦相似度
-     */
-    private double cosineSimilarity(float[] a, float[] b) {
-        if (a == null || b == null || a.length != b.length) return 0;
-
-        double dot = 0;
-        double normA = 0;
-        double normB = 0;
-
-        for (int i = 0; i < a.length; i++) {
-            dot += a[i] * b[i];
-            normA += a[i] * a[i];
-            normB += b[i] * b[i];
-        }
-
-        if (normA == 0 || normB == 0) return 0;
-        return dot / (Math.sqrt(normA) * Math.sqrt(normB));
-    }
 
     // ==================== 目录树管理 ====================
 
@@ -489,8 +409,4 @@ public class DocumentServiceImpl implements DocumentService {
         return directoryNodeMapper.selectSharedByOthersWithName(userId);
     }
 
-    /**
-     * RRF 融合结果
-     */
-    private record RrfResult(String chunkId, double rrfScore) {}
 }

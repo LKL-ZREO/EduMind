@@ -12,8 +12,10 @@ import com.firedemo.demo.DTO.GradeRequest;
 import com.firedemo.demo.Entity.ChatHistory;
 import com.firedemo.demo.Entity.HomeworkEvaluation;
 
+import com.firedemo.demo.Entity.ClassInfo;
 import com.firedemo.demo.Entity.User;
 
+import com.firedemo.demo.mapper.ClassInfoMapper;
 import com.firedemo.demo.utils.JwtUtil;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
@@ -47,6 +49,7 @@ public class ChatController {
     private final ActiveTeacherService activeTeacherService;
     private final HomeworkResultService homeworkResultService;
     private final UserService userService;
+    private final ClassInfoMapper classInfoMapper;
     private final JwtUtil jwtUtil;
     private final ObjectMapper objectMapper;
 
@@ -141,6 +144,10 @@ public class ChatController {
                 history.add(Map.of("role", h.getRole(), "content", h.getContent()));
             }
         }
+
+        // 注册会话上下文（含课程ID，用于动态 System Prompt + 权限过滤）
+        Long courseId = resolveCourseId(userId);
+        openClawService.registerSessionContext(sessionId, userId, courseId);
 
         // 流式响应 — 使用 Tool Calling，LLM 自主决定是否检索知识库
         String finalSessionId = sessionId;
@@ -263,6 +270,7 @@ public class ChatController {
             entity.setRequirement(request.getRequirement());
             entity.setTotalScore(evaluation.getTotalScore());
             entity.setContentScore(evaluation.getContentScore() != null ? evaluation.getContentScore() : evaluation.getTotalScore());
+            entity.setFormatScore(evaluation.getFormatScore() != null ? evaluation.getFormatScore() : 0);
             entity.setOverallComment(evaluation.getOverallComment());
             entity.setStrengths(evaluation.getStrengths() != null ? 
                 String.join(",", evaluation.getStrengths()) : "");
@@ -324,6 +332,25 @@ public class ChatController {
     }
 
     // ============ 私有方法 ============
+
+    /**
+     * 从用户ID解析所属课程ID（用户 → 班级 → 课程）
+     */
+    private Long resolveCourseId(Long userId) {
+        if (userId == null) return null;
+        try {
+            User user = userService.getById(userId);
+            if (user != null && user.getClassId() != null) {
+                ClassInfo cls = classInfoMapper.selectById(user.getClassId());
+                if (cls != null && cls.getCourseId() != null) {
+                    return cls.getCourseId();
+                }
+            }
+        } catch (Exception e) {
+            log.warn("解析用户课程ID失败: userId={}", userId, e);
+        }
+        return null;
+    }
 
     /**
      * 从请求头获取当前用户ID

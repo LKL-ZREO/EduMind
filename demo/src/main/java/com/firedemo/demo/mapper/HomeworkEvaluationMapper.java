@@ -25,14 +25,6 @@ public interface HomeworkEvaluationMapper extends BaseMapper<HomeworkEvaluation>
     /**
      * 查询班级所有作业评价
      */
-    @Select("SELECT * FROM homework_evaluation WHERE class_id = #{classId} ORDER BY created_at DESC")
-    List<HomeworkEvaluation> selectByClassId(@Param("classId") Long classId);
-
-    /**
-     * 查询班级所有 raw_response（仅用于错误统计，不拉全字段）
-     */
-    @Select("SELECT raw_response FROM homework_evaluation WHERE class_id = #{classId} AND raw_response IS NOT NULL")
-    List<String> selectRawResponsesByClassId(@Param("classId") Long classId);
 
     /**
      * 查询班级作业数量
@@ -45,12 +37,6 @@ public interface HomeworkEvaluationMapper extends BaseMapper<HomeworkEvaluation>
      */
     @Select("SELECT COUNT(DISTINCT session_id) FROM homework_evaluation WHERE class_id = #{classId} AND created_at >= #{startTime}")
     Integer countNewByClassId(@Param("classId") Long classId, @Param("startTime") LocalDateTime startTime);
-
-    /**
-     * 查询学生的作业评价列表
-     */
-    @Select("SELECT * FROM homework_evaluation WHERE user_id = #{userId} ORDER BY created_at DESC")
-    List<HomeworkEvaluation> selectByUserId(@Param("userId") Long userId);
 
     /**
      * 批量查询学生平均分和错误数（避免N+1）

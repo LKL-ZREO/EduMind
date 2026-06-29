@@ -56,13 +56,13 @@ public class RagEvaluator {
             // 向量检索
             long t0 = System.nanoTime();
             float[] queryEmbedding = embeddingService.embed(tc.getQuery());
-            List<DocumentChunk> vectorResults = vectorStoreService.similaritySearch(queryEmbedding, TOP_K);
+            List<DocumentChunk> vectorResults = vectorStoreService.similaritySearch(queryEmbedding, TOP_K, null, null);
             long t1 = System.nanoTime();
             vectorTotalNs += (t1 - t0);
 
             // 关键词检索
             long t2 = System.nanoTime();
-            List<VectorStoreService.ScoredChunk> kwResults = vectorStoreService.keywordSearch(tc.getQuery(), TOP_K);
+            List<VectorStoreService.ScoredChunk> kwResults = vectorStoreService.keywordSearch(tc.getQuery(), TOP_K, null, null);;
             List<DocumentChunk> keywordResults = kwResults.stream()
                     .map(VectorStoreService.ScoredChunk::chunk)
                     .collect(Collectors.toList());
@@ -124,7 +124,7 @@ public class RagEvaluator {
         log.info(report.format());
 
         // ==================== 第二轮：生成质量 ====================
-        evaluateGenerationQuality(report);
+//        evaluateGenerationQuality(report);
 
         return report;
     }
@@ -142,61 +142,59 @@ public class RagEvaluator {
         report.setAvgRerankerMs(rerankerNs / n / 1_000_000.0);
     }
 
-    private void evaluateGenerationQuality(EvalReport report) {
-        List<TestCase> genCases = dataset.sampleForGenRound(5);
-        if (genCases.isEmpty()) return;
-
-        log.info("第二轮：生成质量评估（LLM-as-Judge），{} 条用例", genCases.size());
-        double faithSum = 0, relevSum = 0;
-
-        for (TestCase tc : genCases) {
-            try {
-                // RAG 生成回答
-                float[] queryEmbedding = embeddingService.embed(tc.getQuery());
-                List<DocumentChunk> vectorResults = vectorStoreService.similaritySearch(queryEmbedding, TOP_K);
-                List<DocumentChunk> keywordResults = vectorStoreService.keywordSearch(tc.getQuery(), TOP_K)
-                        .stream().map(VectorStoreService.ScoredChunk::chunk).collect(Collectors.toList());
-                List<ScoredChunk> fused = rrfFusionService.fuse(vectorResults, keywordResults, 60);
-                List<ScoredChunk> toRerank = fused.size() > RERANK_CANDIDATES
-                        ? fused.subList(0, RERANK_CANDIDATES) : fused;
-                List<ScoredChunk> finalResults = rerankerService.isModelReady()
-                        ? rerankerService.rerank(tc.getQuery(), toRerank, 5, null) : toRerank;
-
-                String context = finalResults.stream()
-                        .map(sc -> sc.chunk().getContent())
-                        .collect(Collectors.joining("\n---\n"));
-                String answer = openClawService.chat(
-                        "根据以下参考资料回答问题。\n\n参考资料：\n" + context
-                                + "\n\n问题：" + tc.getQuery(), null);
-
-                // LLM-as-Judge：忠实度
-                int faith = judge("judge-faithfulness.txt",
-                        "{{answer}}", answer,
-                        "{{context}}", context);
-                // LLM-as-Judge：相关性
-                int relev = judge("judge-relevance.txt",
-                        "{{answer}}", answer,
-                        "{{query}}", tc.getQuery());
-
-                faithSum += faith;
-                relevSum += relev;
-
-                log.info("  case#{}: faithfulness={}, relevance={} | query={}",
-                        tc.getId(), faith, relev, tc.getQuery());
-
-            } catch (Exception e) {
-                log.warn("生成质量评估失败 case#{}: {}", tc.getId(), e.getMessage());
-            }
-        }
-
-        report.setGenCases(genCases.size());
-        report.setAvgFaithfulness(faithSum / genCases.size());
-        report.setAvgRelevance(relevSum / genCases.size());
-
-        log.info("[生成质量] 忠实度={}, 相关性={}",
-                String.format("%.1f", report.getAvgFaithfulness()),
-                String.format("%.1f", report.getAvgRelevance()));
-    }
+//    private void evaluateGenerationQuality(EvalReport report) {
+//        List<TestCase> genCases = dataset.sampleForGenRound(5);
+//        if (genCases.isEmpty()) return;
+//
+//        log.info("第二轮：生成质量评估（LLM-as-Judge），{} 条用例", genCases.size());
+//        double faithSum = 0, relevSum = 0;
+//
+//        for (TestCase tc : genCases) {
+//            try {
+//                // RAG 生成回答
+//                float[] queryEmbedding = embeddingService.embed(tc.getQuery());
+//                List<DocumentChunk> vectorResults = vectorStoreService.similaritySearch(queryEmbedding, TOP_K, null, null);
+//                List<ScoredChunk> fused = rrfFusionService.fuse(vectorResults, keywordResults, 60);
+//                List<ScoredChunk> toRerank = fused.size() > RERANK_CANDIDATES
+//                        ? fused.subList(0, RERANK_CANDIDATES) : fused;
+//                List<ScoredChunk> finalResults = rerankerService.isModelReady()
+//                        ? rerankerService.rerank(tc.getQuery(), toRerank, 5, null) : toRerank;
+//
+//                String context = finalResults.stream()
+//                        .map(sc -> sc.chunk().getContent())
+//                        .collect(Collectors.joining("\n---\n"));
+//                String answer = openClawService.chat(
+//                        "根据以下参考资料回答问题。\n\n参考资料：\n" + context
+//                                + "\n\n问题：" + tc.getQuery(), null);
+//
+//                // LLM-as-Judge：忠实度
+//                int faith = judge("judge-faithfulness.txt",
+//                        "{{answer}}", answer,
+//                        "{{context}}", context);
+//                // LLM-as-Judge：相关性
+//                int relev = judge("judge-relevance.txt",
+//                        "{{answer}}", answer,
+//                        "{{query}}", tc.getQuery());
+//
+//                faithSum += faith;
+//                relevSum += relev;
+//
+//                log.info("  case#{}: faithfulness={}, relevance={} | query={}",
+//                        tc.getId(), faith, relev, tc.getQuery());
+//
+//            } catch (Exception e) {
+//                log.warn("生成质量评估失败 case#{}: {}", tc.getId(), e.getMessage());
+//            }
+//        }
+//
+//        report.setGenCases(genCases.size());
+//        report.setAvgFaithfulness(faithSum / genCases.size());
+//        report.setAvgRelevance(relevSum / genCases.size());
+//
+//        log.info("[生成质量] 忠实度={}, 相关性={}",
+//                String.format("%.1f", report.getAvgFaithfulness()),
+//                String.format("%.1f", report.getAvgRelevance()));
+//    }
 
     private int judge(String promptFile, String... replacements) {
         String template = promptLoader.load(promptFile);

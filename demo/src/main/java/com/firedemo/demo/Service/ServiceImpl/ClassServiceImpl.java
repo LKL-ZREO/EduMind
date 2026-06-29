@@ -5,12 +5,15 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.firedemo.demo.DTO.*;
 import com.firedemo.demo.Entity.ClassInfo;
 import com.firedemo.demo.Entity.ClassStudent;
+import com.firedemo.demo.Entity.Course;
 import com.firedemo.demo.Service.ClassService;
 import com.firedemo.demo.common.exception.BusinessException;
 import com.firedemo.demo.common.exception.ErrorCode;
 import com.firedemo.demo.mapper.ClassInfoMapper;
 import com.firedemo.demo.mapper.ClassStudentMapper;
+import com.firedemo.demo.mapper.CourseMapper;
 import com.firedemo.demo.mapper.StudentQqBindingMapper;
+import org.redisson.api.RBloomFilter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -31,6 +34,8 @@ public class ClassServiceImpl implements ClassService {
     private final ClassInfoMapper classInfoMapper;
     private final ClassStudentMapper classStudentMapper;
     private final StudentQqBindingMapper studentQqBindingMapper;
+    private final CourseMapper courseMapper;
+    private final RBloomFilter<String> classIdBloomFilter;
 
     private static final String CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     private static final int CODE_LEN = 6;
@@ -67,12 +72,37 @@ public class ClassServiceImpl implements ClassService {
     @Override
     public List<ClassGroupDTO> listGroupedByCourse(Long teacherId) {
         List<ClassInfo> classes = classInfoMapper.selectByTeacherId(teacherId);
+
+        // 预加载课程名（courseId → name）
+        Map<Long, String> courseNames = new HashMap<>();
+        for (ClassInfo c : classes) {
+            if (c.getCourseId() != null && !courseNames.containsKey(c.getCourseId())) {
+                Course course = courseMapper.selectById(c.getCourseId());
+                if (course != null) courseNames.put(c.getCourseId(), course.getName());
+            }
+        }
+
+        // 分组：优先 courseGroup 字符串，其次 courseId 查出的课程名
         Map<String, List<ClassInfo>> grouped = classes.stream()
                 .collect(Collectors.groupingBy(
-                        c -> c.getCourseGroup() == null || c.getCourseGroup().isEmpty()
-                                ? "__ungrouped__" : c.getCourseGroup(),
+                        c -> {
+                            String cg = c.getCourseGroup();
+                            if (cg != null && !cg.isEmpty()) return cg;
+                            if (c.getCourseId() != null && courseNames.containsKey(c.getCourseId()))
+                                return courseNames.get(c.getCourseId());
+                            return "__ungrouped__";
+                        },
                         LinkedHashMap::new,
                         Collectors.toList()));
+
+        // 批量查询学生数（一次查询替代 N+1）
+        List<Long> classIds = classes.stream().map(ClassInfo::getId).collect(Collectors.toList());
+        Map<Long, Integer> countMap = classIds.isEmpty()
+                ? Map.of()
+                : classStudentMapper.countByClassIds(classIds).stream()
+                        .collect(Collectors.toMap(
+                                row -> ((Number) row.get("class_id")).longValue(),
+                                row -> ((Number) row.get("cnt")).intValue()));
 
         // 按课程名排序，未分组放最后
         return grouped.entrySet().stream()
@@ -96,7 +126,10 @@ public class ClassServiceImpl implements ClassService {
                                 item.setId(ci.getId());
                                 item.setName(ci.getName());
                                 item.setDescription(ci.getDescription());
-                                item.setStudentCount(classStudentMapper.countByClassId(ci.getId()));
+                                item.setCourseGroup(ci.getCourseGroup());
+                                item.setCourseId(ci.getCourseId());
+                                item.setQqGroupId(ci.getQqGroupId());
+                                item.setStudentCount(countMap.getOrDefault(ci.getId(), 0));
                                 item.setInviteCode(ci.getInviteCode());
                                 item.setStatus(ci.getStatus());
                                 item.setCreatedAt(ci.getCreatedAt());
@@ -116,9 +149,12 @@ public class ClassServiceImpl implements ClassService {
         ci.setTeacherId(teacherId);
         ci.setDescription(dto.getDescription() != null ? dto.getDescription() : "");
         ci.setCourseGroup(dto.getCourseGroup() != null ? dto.getCourseGroup() : "");
+        ci.setCourseId(dto.getCourseId());
+        ci.setQqGroupId(dto.getQqGroupId());
         ci.setInviteCode(generateInviteCode());
         ci.setStatus("ACTIVE");
         classInfoMapper.insert(ci);
+        classIdBloomFilter.add(String.valueOf(ci.getId()));
         log.info("教师 {} 创建班级: {} (id={})", teacherId, ci.getName(), ci.getId());
         return ci;
     }
@@ -135,6 +171,8 @@ public class ClassServiceImpl implements ClassService {
         if (dto.getName() != null) wrapper.set(ClassInfo::getName, dto.getName());
         if (dto.getCourseGroup() != null) wrapper.set(ClassInfo::getCourseGroup, dto.getCourseGroup());
         if (dto.getDescription() != null) wrapper.set(ClassInfo::getDescription, dto.getDescription());
+        if (dto.getQqGroupId() != null) wrapper.set(ClassInfo::getQqGroupId, dto.getQqGroupId());
+        if (dto.getCourseId() != null) wrapper.set(ClassInfo::getCourseId, dto.getCourseId());
         classInfoMapper.update(null, wrapper);
     }
 

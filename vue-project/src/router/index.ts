@@ -26,12 +26,6 @@ const router = createRouter({
       meta: { requiresGuest: true }
     },
     {
-      path: '/about',
-      name: 'about',
-      component: () => import('../views/AboutView.vue'),
-      meta: { requiresAuth: true }
-    },
-    {
       path: '/teacher/chat',
       name: 'chat',
       component: () => import('../views/AIChat.vue'),

@@ -15,9 +15,9 @@ function formatDate(dateStr: string): string {
 }
 
 interface Student { studentId: string; studentName: string; joinedAt: string; source?: string }
-interface ClassDetail { id: number; name: string; courseGroup: string; description: string; inviteCode: string; status: 'ACTIVE' | 'ARCHIVED'; createdAt: string; updatedAt?: string }
+interface ClassDetail { id: number; name: string; courseGroup: string; courseId: number | null; qqGroupId?: string; description: string; inviteCode: string; status: 'ACTIVE' | 'ARCHIVED'; createdAt: string; updatedAt?: string }
 
-const classData = ref<ClassDetail>({ id: classId, name: '', courseGroup: '', description: '', inviteCode: '', status: 'ACTIVE', createdAt: '' })
+const classData = ref<ClassDetail>({ id: classId, name: '', courseGroup: '', courseId: null, qqGroupId: '', description: '', inviteCode: '', status: 'ACTIVE', createdAt: '' })
 const students = ref<Student[]>([])
 const loading = ref(true); const error = ref('')
 
@@ -27,38 +27,47 @@ async function fetchDetail() {
     const res = await request.get(`/teacher/classes/${classId}`)
     if (res.data.code === 200) {
       const d = res.data.data
-      classData.value = { id: d.class.id, name: d.class.name, courseGroup: d.class.courseGroup || '', description: d.class.description || '', inviteCode: d.class.inviteCode, status: d.class.status, createdAt: d.class.createdAt || '', updatedAt: d.class.updatedAt }
+      classData.value = { id: d.class.id, name: d.class.name, courseGroup: d.class.courseGroup || '', courseId: d.class.courseId || null, qqGroupId: d.class.qqGroupId || '', description: d.class.description || '', inviteCode: d.class.inviteCode, status: d.class.status, createdAt: d.class.createdAt || '', updatedAt: d.class.updatedAt }
       students.value = (d.students || []).map((s: any) => ({ studentId: s.studentId, studentName: s.studentName, joinedAt: s.createdAt || s.joinedAt || '', source: s.source }))
     } else { error.value = res.data.message || '加载失败' }
   } catch (e: any) { error.value = e.response?.data?.message || e.message || '网络错误' }
   finally { loading.value = false }
 }
 
-const courseNames = ref<string[]>([])
+const courseList = ref<Array<{ id: number; name: string }>>([])
 async function fetchCourseNames() {
   try {
-    const res = await request.get('/teacher/classes')
-    if (res.data.code === 200) { const s = new Set<string>(); for (const g of res.data.data || []) { if (g.courseGroup) s.add(g.courseGroup); for (const c of g.classes || []) { if (c.courseGroup) s.add(c.courseGroup) } } courseNames.value = [...s].sort() }
+    const res = await request.get('/courses')
+    if (res.data.code === 200) courseList.value = (res.data.data || []).map((c: any) => ({ id: c.id, name: c.name }))
   } catch { /* ignore */ }
 }
-
-function queryCourse(q: string, cb: (r: Array<{ value: string }>) => void) { cb(courseNames.value.filter(n => n.toLowerCase().includes((q || '').toLowerCase())).map(n => ({ value: n }))) }
 
 onMounted(() => { fetchDetail(); fetchCourseNames() })
 
 const showInvite = ref(false); const showImport = ref(false)
 const isEditing = ref(false)
-const editForm = ref({ name: '', description: '', courseGroup: '' })
+const editForm = ref({ name: '', description: '', courseGroup: '', courseId: null as number | null, qqGroupId: '' })
 const saving = ref(false)
 
-function startEdit() { editForm.value = { name: classData.value.name, description: classData.value.description, courseGroup: classData.value.courseGroup }; isEditing.value = true }
+function startEdit() { editForm.value = { name: classData.value.name, description: classData.value.description, courseGroup: classData.value.courseGroup, courseId: classData.value.courseId, qqGroupId: classData.value.qqGroupId || '' }; isEditing.value = true }
 function cancelEdit() { isEditing.value = false }
 
 async function saveEdit() {
   if (!editForm.value.name.trim()) return; saving.value = true
   try {
-    const res = await request.put(`/teacher/classes/${classId}`, { name: editForm.value.name.trim(), description: editForm.value.description.trim(), courseGroup: editForm.value.courseGroup.trim() || undefined })
-    if (res.data.code === 200) { classData.value.name = editForm.value.name.trim(); classData.value.description = editForm.value.description.trim(); classData.value.courseGroup = editForm.value.courseGroup.trim(); isEditing.value = false }
+    const body: any = { name: editForm.value.name.trim(), description: editForm.value.description.trim() }
+    if (editForm.value.courseId) body.courseId = editForm.value.courseId
+    if (editForm.value.courseGroup.trim()) body.courseGroup = editForm.value.courseGroup.trim()
+    if (editForm.value.qqGroupId.trim()) body.qqGroupId = editForm.value.qqGroupId.trim()
+    const res = await request.put(`/teacher/classes/${classId}`, body)
+    if (res.data.code === 200) {
+      classData.value.name = editForm.value.name.trim()
+      classData.value.description = editForm.value.description.trim()
+      classData.value.courseGroup = editForm.value.courseGroup.trim()
+      classData.value.courseId = editForm.value.courseId
+      classData.value.qqGroupId = editForm.value.qqGroupId || ''
+      isEditing.value = false
+    }
     else ElMessage.error(res.data.message || '保存失败')
   } catch (e: any) { ElMessage.error(e.response?.data?.message || e.message || '保存失败') }
   finally { saving.value = false }
@@ -124,7 +133,13 @@ function onImported() { showImport.value = false; fetchDetail() }
             <template v-else>
               <div class="edit-form">
                 <div class="form-row"><input v-model="editForm.name" class="form-input inline-input" placeholder="班级名称" maxlength="30" /></div>
-                <div class="form-row"><el-autocomplete v-model="editForm.courseGroup" :fetch-suggestions="queryCourse" :trigger-on-focus="true" placeholder="所属课程（选填）" class="inline-autocomplete" maxlength="30" clearable popper-class="course-popper" /></div>
+                <div class="form-row">
+                  <select v-model="editForm.courseId" class="form-select inline-select">
+                    <option :value="null">所属课程（选填）</option>
+                    <option v-for="c in courseList" :key="c.id" :value="c.id">{{ c.name }}</option>
+                  </select>
+                </div>
+                <div class="form-row"><input v-model="editForm.qqGroupId" class="form-input inline-input" placeholder="QQ群号（选填，用于AI自动识别班级）" maxlength="20" /></div>
                 <div class="form-row"><textarea v-model="editForm.description" class="form-textarea inline-textarea" placeholder="班级描述" rows="2" maxlength="200"></textarea></div>
                 <div class="edit-actions"><button class="btn-sm btn-cancel-sm" @click="cancelEdit">取消</button><button class="btn-sm btn-save" @click="saveEdit" :disabled="!editForm.name.trim() || saving">{{ saving ? '保存中...' : '保存' }}</button></div>
               </div>
@@ -135,6 +150,7 @@ function onImported() { showImport.value = false; fetchDetail() }
         <div class="info-meta">
           <div class="meta-item"><span class="meta-label">邀请码</span><span class="meta-value code-value">{{ classData.inviteCode }}<button class="copy-btn" @click="copyCode" title="复制">📋</button></span></div>
           <div class="meta-item"><span class="meta-label">学生人数</span><span class="meta-value">{{ students.length }} 人</span></div>
+          <div class="meta-item"><span class="meta-label">QQ群号</span><span class="meta-value">{{ classData.qqGroupId || '未绑定' }}</span></div>
           <div class="meta-item"><span class="meta-label">创建时间</span><span class="meta-value">{{ formatDate(classData.createdAt) }}</span></div>
           <div class="meta-item"><span class="meta-label">状态</span><span class="status-tag" :class="classData.status === 'ACTIVE' ? 'active' : 'archived'">{{ classData.status === 'ACTIVE' ? '进行中' : '已归档' }}</span></div>
         </div>
@@ -204,6 +220,8 @@ function onImported() { showImport.value = false; fetchDetail() }
 .inline-textarea { width: 100%; padding: 8px 12px; background: #fff; border: 1px solid #dcdfe6; border-radius: 8px; color: #303133; font-size: 0.85rem; outline: none; resize: vertical; font-family: inherit; box-sizing: border-box; }
 .inline-textarea:focus { border-color: #409EFF; box-shadow: 0 0 0 2px rgba(64,158,255,.1); }
 .inline-autocomplete { width: 100%; }
+.inline-select { width: 100%; padding: 8px 12px; background: #fff; border: 1px solid #dcdfe6; border-radius: 8px; color: #303133; font-size: 1rem; outline: none; box-sizing: border-box; cursor: pointer; }
+.inline-select:focus { border-color: #409EFF; box-shadow: 0 0 0 2px rgba(64,158,255,.1); }
 .edit-actions { display: flex; gap: 8px; }
 .btn-sm { padding: 6px 16px; border-radius: 6px; font-size: 0.8rem; cursor: pointer; border: none; transition: all 0.2s; }
 .btn-save { background: #409EFF; color: #fff; }
@@ -271,9 +289,3 @@ function onImported() { showImport.value = false; fetchDetail() }
 .btn-danger-solid:disabled { background: #fab6b6; cursor: not-allowed; }
 </style>
 
-<style>
-.course-popper { background: #fff !important; border: 1px solid #e4e7ed !important; box-shadow: 0 4px 12px rgba(0,0,0,.08) !important; }
-.course-popper .el-autocomplete-suggestion__wrap { background: #fff; }
-.course-popper li { color: #303133; padding: 8px 16px; }
-.course-popper li:hover, .course-popper li.highlighted { background: #ecf5ff !important; color: #409EFF !important; }
-</style>

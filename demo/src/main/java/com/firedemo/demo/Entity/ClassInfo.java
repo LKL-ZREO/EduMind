@@ -26,6 +26,9 @@ public class ClassInfo {
     /** 所属课程（多个班级归入同一课程） */
     private String courseGroup;
 
+    /** 所属课程ID（新） */
+    private Long courseId;
+
     /** 6位邀请码 */
     private String inviteCode;
 

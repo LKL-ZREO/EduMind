@@ -52,6 +52,17 @@ public interface SubmissionErrorMapper extends BaseMapper<SubmissionError> {
             @Param("limit") int limit);
 
     /**
+     * 批量插入错误记录（替代逐条 INSERT）
+     */
+    @org.apache.ibatis.annotations.Insert("<script>" +
+            "INSERT INTO submission_errors (submission_id, class_id, error_text, error_type, severity, knowledge_point, created_at, updated_at) VALUES " +
+            "<foreach collection='list' item='e' separator=','>" +
+            "(#{e.submissionId}, #{e.classId}, #{e.errorText}, #{e.errorType}, #{e.severity}, #{e.knowledgePoint}, #{e.createdAt}, #{e.updatedAt})" +
+            "</foreach>" +
+            "</script>")
+    int insertBatch(@Param("list") List<SubmissionError> errors);
+
+    /**
      * 查询某个班级所有未归类的错误（用于重分类）
      */
     @Select("SELECT * FROM submission_errors " +

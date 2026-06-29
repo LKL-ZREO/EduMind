@@ -2,10 +2,15 @@ package com.firedemo.demo.Service.ServiceImpl;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.firedemo.demo.Entity.Course;
+import com.firedemo.demo.Service.CourseService;
 import com.firedemo.demo.Service.OpenClawService;
 import com.firedemo.demo.common.exception.BusinessException;
 import com.firedemo.demo.common.exception.ErrorCode;
 import com.firedemo.demo.config.properties.OpenClawProperties;
+import com.firedemo.demo.mapper.SharedKbMemberMapper;
+import com.firedemo.demo.mcp.McpSessionStore;
+import com.firedemo.demo.mcp.ToolContext;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -14,7 +19,6 @@ import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.publisher.Flux;
 
 import java.io.IOException;
@@ -33,6 +37,9 @@ import java.util.*;
 public class OpenClawServiceImpl implements OpenClawService {
 
     private final OpenClawProperties agentRouting;
+    private final McpSessionStore mcpSessionStore;
+    private final SharedKbMemberMapper sharedKbMemberMapper;
+    private final CourseService courseService;
     private final String baseUrl;
     private final String apiKey;
     private final Double temperature;
@@ -43,12 +50,18 @@ public class OpenClawServiceImpl implements OpenClawService {
     private final WebClient webClient;
 
     public OpenClawServiceImpl(OpenClawProperties agentRouting,
+                               McpSessionStore mcpSessionStore,
+                               SharedKbMemberMapper sharedKbMemberMapper,
+                               CourseService courseService,
                                @Value("${langchain4j.openai.base-url}") String baseUrl,
                                @Value("${langchain4j.openai.api-key}") String apiKey,
                                @Value("${langchain4j.openai.temperature:0.2}") Double temperature,
                                @Value("${langchain4j.openai.timeout:300s}") Duration timeout,
                                ObjectMapper objectMapper) {
         this.agentRouting = agentRouting;
+        this.mcpSessionStore = mcpSessionStore;
+        this.sharedKbMemberMapper = sharedKbMemberMapper;
+        this.courseService = courseService;
         this.baseUrl = baseUrl;
         this.apiKey = apiKey;
         this.temperature = temperature;
@@ -155,12 +168,16 @@ public class OpenClawServiceImpl implements OpenClawService {
             }
         }
         messages.add(Map.of("role", "user", "content", message));
+        prependSystemPrompt(messages, sessionId);
 
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("model", "openclaw/" + agent);
         body.put("messages", messages);
         body.put("temperature", temperature);
         body.put("stream", true);
+        if (sessionId != null && !sessionId.isEmpty()) {
+            body.put("session_id", sessionId);
+        }
 
         return executeStreamRequest(body);
     }
@@ -229,39 +246,6 @@ public class OpenClawServiceImpl implements OpenClawService {
     }
 
     // ========================================================================
-    //  SSE（Spring SseEmitter）
-    // ========================================================================
-
-    @Override
-    public SseEmitter streamChatWithSse(String message) {
-        return streamChatWithSse(message, null, null);
-    }
-
-    @Override
-    public SseEmitter streamChatWithSse(String message, String sessionId) {
-        return streamChatWithSse(message, sessionId, null);
-    }
-
-    @Override
-    public SseEmitter streamChatWithSse(String message, String sessionId, Integer status) {
-        SseEmitter emitter = new SseEmitter(300_000L);
-        int s = status != null ? status : 0;
-        streamChat(message, sessionId, String.valueOf(s))
-                .subscribe(
-                        content -> {
-                            try {
-                                emitter.send(SseEmitter.event().data(content));
-                            } catch (IOException e) {
-                                emitter.completeWithError(e);
-                            }
-                        },
-                        emitter::completeWithError,
-                        emitter::complete
-                );
-        return emitter;
-    }
-
-    // ========================================================================
     //  健康检查
     // ========================================================================
 
@@ -294,7 +278,9 @@ public class OpenClawServiceImpl implements OpenClawService {
                                                   String agent, boolean stream) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("model", "openclaw/" + agent);
-        body.put("messages", List.of(Map.of("role", "user", "content", message)));
+        body.put("messages", List.of(
+                Map.of("role", "system", "content", resolveSystemPrompt(sessionId)),
+                Map.of("role", "user", "content", message)));
         body.put("temperature", temperature);
         if (stream) {
             body.put("stream", true);
@@ -313,6 +299,22 @@ public class OpenClawServiceImpl implements OpenClawService {
             } catch (NumberFormatException ignored) {}
         }
         return agentRouting.getDefaultAgent();
+    }
+
+    // ========================================================================
+    //  会话上下文（MCP 工具回调时用于权限过滤）
+    // ========================================================================
+
+    @Override
+    public void registerSessionContext(String sessionId, Long userId) {
+        registerSessionContext(sessionId, userId, null);
+    }
+
+    @Override
+    public void registerSessionContext(String sessionId, Long userId, Long courseId) {
+        if (sessionId == null || userId == null) return;
+        Set<Long> accessibleKbIds = sharedKbMemberMapper.selectKbIdsByUserId(userId);
+        mcpSessionStore.put(sessionId, userId, accessibleKbIds, courseId);
     }
 
     // ==================== 熔断 Fallback ====================
@@ -343,5 +345,51 @@ public class OpenClawServiceImpl implements OpenClawService {
     private String truncate(String text, int maxLen) {
         if (text == null) return null;
         return text.length() > maxLen ? text.substring(0, maxLen) + "…" : text;
+    }
+
+    // ==================== System Prompt ====================
+
+    /** 兜底默认 Prompt（无课程上下文时使用） */
+    static final String DEFAULT_SYSTEM_PROMPT = """
+            你是教学助手。请严格遵循以下工具调用规则：
+
+            1. 【必须检索知识库】涉及课程专业知识时，先调用 searchKnowledge
+            2. 【必须查实时数据】班级/学生问题调用对应工具：
+               - 班级整体情况 → queryClassStatus
+               - 单个学生成绩 → queryStudentStats
+               - 作业任务列表 → queryHomeworkTasks
+            3. 【无需工具】打招呼、闲聊、感谢、简单追问
+            关键原则：宁可多搜一次，不要凭记忆硬答。""";
+
+    /**
+     * 按课程动态解析 System Prompt。
+     * 优先从 session 中的 courseId 加载，无则用默认。
+     */
+    private String resolveSystemPrompt(String sessionId) {
+        if (sessionId != null && !sessionId.isEmpty()) {
+            ToolContext ctx = mcpSessionStore.get(sessionId);
+            if (ctx != null && ctx.getCourseId() != null) {
+                Course course = courseService.getById(ctx.getCourseId());
+                if (course != null && course.getSystemPrompt() != null) {
+                    log.debug("Using course prompt: courseId={}, courseName={}", course.getId(), course.getName());
+                    return course.getSystemPrompt();
+                }
+            }
+        }
+        return DEFAULT_SYSTEM_PROMPT;
+    }
+
+    /**
+     * 将 system prompt 作为第一条消息注入 messages 列表，并注入当前会话ID。
+     */
+    private void prependSystemPrompt(List<Map<String, String>> messages, String sessionId) {
+        if (messages.isEmpty() || !"system".equals(messages.get(0).get("role"))) {
+            String prompt = resolveSystemPrompt(sessionId);
+            if (sessionId != null && !sessionId.isEmpty()) {
+                prompt += "\n\n当前会话ID: " + sessionId
+                        + "\n调用 searchKnowledge 时必须传入此会话ID作为 sessionId 参数。";
+            }
+            messages.add(0, Map.of("role", "system", "content", prompt));
+        }
     }
 }

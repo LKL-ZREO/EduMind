@@ -1,6 +1,12 @@
 package com.firedemo.demo.Controller;
 
+import com.firedemo.demo.Entity.ClassInfo;
+import com.firedemo.demo.Entity.ClassStudent;
 import com.firedemo.demo.Entity.DocumentChunk;
+import com.firedemo.demo.mapper.ClassInfoMapper;
+import com.firedemo.demo.mapper.ClassStudentMapper;
+import com.firedemo.demo.mapper.SharedKbMemberMapper;
+import com.firedemo.demo.mapper.StudentQqBindingMapper;
 import com.firedemo.demo.rag.EmbeddingService;
 import com.firedemo.demo.rag.VectorStoreService;
 import lombok.RequiredArgsConstructor;
@@ -10,6 +16,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * OneBot RAG 接口 - 供 OpenClaw Gateway 调用
@@ -27,6 +34,10 @@ public class OnebotRagController {
 
     private final EmbeddingService embeddingService;
     private final VectorStoreService vectorStoreService;
+    private final StudentQqBindingMapper studentQqBindingMapper;
+    private final ClassStudentMapper classStudentMapper;
+    private final ClassInfoMapper classInfoMapper;
+    private final SharedKbMemberMapper sharedKbMemberMapper;
 
     /**
      * RAG 增强接口 - 本地检索，不调 LLM
@@ -39,9 +50,29 @@ public class OnebotRagController {
         log.debug("RAG request from QQ: {}, message: {}", request.getQq(), request.getMessage());
 
         try {
-            // 1. 向量检索知识库
+            // 1. 从QQ号解析用户上下文（QQ → 学号 → 班级 → 老师 → 知识库权限）
+            Long userId = null;
+            Set<Long> accessibleKbIds = null;
+            try {
+                String studentId = studentQqBindingMapper.selectStudentIdByQq(request.getQq());
+                if (studentId != null) {
+                    ClassStudent cs = classStudentMapper.selectByStudentId(studentId);
+                    if (cs != null && cs.getClassId() != null) {
+                        ClassInfo classInfo = classInfoMapper.selectById(cs.getClassId());
+                        if (classInfo != null && classInfo.getTeacherId() != null) {
+                            userId = classInfo.getTeacherId();
+                            accessibleKbIds = sharedKbMemberMapper.selectKbIdsByUserId(userId);
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                log.debug("无法从QQ解析用户上下文，回退搜全库: qq={}", request.getQq(), e);
+            }
+
+            // 2. 向量检索知识库（优先过滤，无上下文则搜全库）
             float[] embedding = embeddingService.embedQuery(request.getMessage());
-            List<DocumentChunk> chunks = vectorStoreService.similaritySearch(embedding, 3);
+            List<DocumentChunk> chunks = vectorStoreService.similaritySearch(
+                    embedding, 3, userId, accessibleKbIds);
 
             // 2. 无命中则返回原消息
             if (chunks == null || chunks.isEmpty()) {

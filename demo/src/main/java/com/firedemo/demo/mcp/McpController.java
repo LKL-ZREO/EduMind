@@ -31,11 +31,14 @@ public class McpController {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final Map<String, ToolDefinition> tools = new LinkedHashMap<>();
+    private final McpSessionStore mcpSessionStore;
 
-    public McpController(List<ToolDefinition> toolDefinitions) {
+    public McpController(List<ToolDefinition> toolDefinitions,
+                         McpSessionStore mcpSessionStore) {
         for (ToolDefinition tool : toolDefinitions) {
             tools.put(tool.name(), tool);
         }
+        this.mcpSessionStore = mcpSessionStore;
     }
 
     @PostConstruct
@@ -48,13 +51,20 @@ public class McpController {
      * MCP 主入口 — 所有 JSON-RPC 请求走这里
      */
     @PostMapping(produces = "application/json", consumes = "application/json")
-    public Map<String, Object> handle(@RequestBody Map<String, Object> request) {
+    public Map<String, Object> handle(@RequestBody Map<String, Object> request,
+                                      jakarta.servlet.http.HttpServletRequest httpRequest) {
+
         String method = (String) request.get("method");
         Object id = request.get("id");
         @SuppressWarnings("unchecked")
         Map<String, Object> params = (Map<String, Object>) request.getOrDefault("params", Map.of());
 
+        log.info("MCP X-MCP-API-Key present={}", httpRequest.getHeader("X-MCP-API-Key") != null);
         log.debug("MCP request: method={}, id={}", method, id);
+        if ("tools/call".equals(method)) {
+            log.debug("MCP tools/call raw params keys: {}, headers: X-Session-Id={}",
+                    params.keySet(), httpRequest.getHeader("X-Session-Id"));
+        }
 
         try {
             return switch (method) {
@@ -118,13 +128,30 @@ public class McpController {
         Map<String, Object> arguments = (Map<String, Object>) params.getOrDefault("arguments", Map.of());
 
         log.info("MCP tools/call: name={}, args={}", toolName, arguments);
+        log.info("MCP tools/call full params keys: {}", params.keySet());
+
+        // 尝试解析会话上下文（sessionId 可能由 OpenClaw 在 _meta 或顶层字段回传）
+        String sessionId = extractSessionId(params);
+        if (sessionId != null) {
+            ToolContext ctx = mcpSessionStore.get(sessionId);
+            if (ctx != null) {
+                ToolContextHolder.set(ctx);
+                log.debug("MCP tool context injected: {}", ctx);
+            }
+        }
 
         ToolDefinition tool = tools.get(toolName);
         if (tool == null) {
+            ToolContextHolder.clear();
             return errorResponse(id, -32602, "未知工具: " + toolName);
         }
 
-        String result = tool.execute(arguments);
+        String result;
+        try {
+            result = tool.execute(arguments);
+        } finally {
+            ToolContextHolder.clear();
+        }
         log.info("MCP tools/call 结果: name={}, resultLen={}", toolName,
                 result != null ? result.length() : 0);
 
@@ -135,6 +162,28 @@ public class McpController {
                         "text", result != null ? result : ""
                 ))
         ));
+    }
+
+    /**
+     * 从 MCP params 中尝试提取 sessionId。
+     * OpenClaw 可能通过 _meta.sessionId 或顶层 sessionId 字段回传。
+     */
+    private String extractSessionId(Map<String, Object> params) {
+        // 直接字段
+        Object sid = params.get("sessionId");
+        if (sid instanceof String s && !s.isEmpty()) return s;
+        sid = params.get("session_id");
+        if (sid instanceof String s && !s.isEmpty()) return s;
+        // _meta 子对象
+        @SuppressWarnings("unchecked")
+        Map<String, Object> meta = (Map<String, Object>) params.get("_meta");
+        if (meta != null) {
+            sid = meta.get("sessionId");
+            if (sid instanceof String s && !s.isEmpty()) return s;
+            sid = meta.get("session_id");
+            if (sid instanceof String s && !s.isEmpty()) return s;
+        }
+        return null;
     }
 
     // ==================== JSON-RPC 响应构造 ====================

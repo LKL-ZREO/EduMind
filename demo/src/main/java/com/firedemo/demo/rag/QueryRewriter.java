@@ -2,9 +2,13 @@ package com.firedemo.demo.rag;
 
 import com.firedemo.demo.Service.OpenClawService;
 import com.firedemo.demo.common.prompt.PromptLoader;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+
+import java.time.Duration;
 
 /**
  * Query Rewrite — 把口语化/模糊问题改写为检索友好的关键词
@@ -24,6 +28,12 @@ public class QueryRewriter {
     private final OpenClawService openClawService;
     private final PromptLoader promptLoader;
 
+    /** 改写结果本地缓存：同一查询 5 分钟内不重复调用 LLM */
+    private final Cache<String, String> rewriteCache = Caffeine.newBuilder()
+            .expireAfterWrite(Duration.ofMinutes(5))
+            .maximumSize(200)
+            .build();
+
     /**
      * 改写 query
      *
@@ -40,16 +50,24 @@ public class QueryRewriter {
             return originalQuery;
         }
 
+        // 查缓存 — 同一查询 5 分钟内不重复调用 LLM 改写
+        String cached = rewriteCache.getIfPresent(originalQuery);
+        if (cached != null) {
+            log.debug("Query rewrite cache hit: \"{}\" → \"{}\"", originalQuery, cached);
+            return cached;
+        }
+
         try {
             String template = promptLoader.load("query-rewrite.txt");
             String prompt = template.replace("{{query}}", originalQuery);
             String rewritten = openClawService.chat(prompt, null);
-            // null 会话 → 不污染对话历史
 
             if (rewritten != null && !rewritten.isBlank()
                     && rewritten.length() < originalQuery.length() * 3) {
-                log.debug("Query rewritten: \"{}\" → \"{}\"", originalQuery, rewritten);
-                return rewritten.trim();
+                String result = rewritten.trim();
+                rewriteCache.put(originalQuery, result);
+                log.debug("Query rewritten: \"{}\" → \"{}\"", originalQuery, result);
+                return result;
             }
         } catch (Exception e) {
             log.debug("Query rewrite failed, using original: {}", e.getMessage());

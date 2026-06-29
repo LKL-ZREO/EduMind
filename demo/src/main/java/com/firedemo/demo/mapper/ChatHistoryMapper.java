@@ -47,6 +47,17 @@ public interface ChatHistoryMapper extends BaseMapper<ChatHistory> {
     List<ChatHistory> selectByUserId(@Param("userId") Long userId);
 
     /**
+     * 批量插入对话记录（替代逐条 INSERT）
+     */
+    @org.apache.ibatis.annotations.Insert("<script>" +
+            "INSERT INTO chat_history (user_id, session_id, role, content, model, created_at) VALUES " +
+            "<foreach collection='list' item='h' separator=','>" +
+            "(#{h.userId}, #{h.sessionId}, #{h.role}, #{h.content}, #{h.model}, NOW())" +
+            "</foreach>" +
+            "</script>")
+    int insertBatch(@Param("list") List<ChatHistory> histories);
+
+    /**
      * 删除用户的所有历史记录
      *
      * @param userId 用户ID

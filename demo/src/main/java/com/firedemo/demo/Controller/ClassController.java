@@ -153,6 +153,8 @@ public class ClassController {
         dto.setId(ci.getId());
         dto.setName(ci.getName());
         dto.setCourseGroup(ci.getCourseGroup());
+        dto.setCourseId(ci.getCourseId());
+        dto.setQqGroupId(ci.getQqGroupId());
         dto.setDescription(ci.getDescription());
         dto.setInviteCode(ci.getInviteCode());
         dto.setStatus(ci.getStatus());

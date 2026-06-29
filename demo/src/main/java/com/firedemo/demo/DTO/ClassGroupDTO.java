@@ -11,6 +11,7 @@ import java.util.List;
 public class ClassGroupDTO {
 
     private String courseGroup;
+    private Long courseId;
     private List<ClassItem> classes;
 
     @Data
@@ -18,6 +19,9 @@ public class ClassGroupDTO {
         private Long id;
         private String name;
         private String description;
+        private String courseGroup;
+        private Long courseId;
+        private String qqGroupId;
         private Integer studentCount;
         private String inviteCode;
         private String status;

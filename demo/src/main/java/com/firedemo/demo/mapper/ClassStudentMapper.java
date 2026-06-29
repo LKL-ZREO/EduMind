@@ -34,6 +34,12 @@ public interface ClassStudentMapper extends BaseMapper<ClassStudent> {
     List<ClassStudent> selectByClassId(@Param("classId") Long classId);
 
     /**
+     * 根据学号查学生（获取其班级ID）
+     */
+    @Select("SELECT * FROM class_student WHERE student_id = #{studentId} LIMIT 1")
+    ClassStudent selectByStudentId(@Param("studentId") String studentId);
+
+    /**
      * 查询某作业未提交的学生（带QQ号）
      */
     @Select("SELECT cs.student_id, cs.student_name, b.qq_number " +
@@ -59,4 +65,17 @@ public interface ClassStudentMapper extends BaseMapper<ClassStudent> {
      */
     @Select("SELECT COUNT(*) FROM class_student WHERE class_id = #{classId}")
     Integer countByClassId(@Param("classId") Long classId);
+
+    /**
+     * 批量查询各班级学生数（避免 N+1）
+     */
+    @Select("<script>" +
+            "SELECT class_id, COUNT(*) as cnt FROM class_student " +
+            "WHERE class_id IN " +
+            "<foreach collection='classIds' item='id' open='(' separator=',' close=')'>" +
+            "#{id}" +
+            "</foreach>" +
+            " GROUP BY class_id" +
+            "</script>")
+    List<Map<String, Object>> countByClassIds(@Param("classIds") List<Long> classIds);
 }

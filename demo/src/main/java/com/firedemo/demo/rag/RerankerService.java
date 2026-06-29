@@ -63,11 +63,6 @@ public class RerankerService {
     }
 
     public List<RrfFusionService.ScoredChunk> rerank(
-            String query, List<RrfFusionService.ScoredChunk> candidates, int topK) {
-        return rerank(query, candidates, topK, null);
-    }
-
-    public List<RrfFusionService.ScoredChunk> rerank(
             String query, List<RrfFusionService.ScoredChunk> candidates, int topK, RagTrace trace) {
 
         if (candidates == null || candidates.isEmpty()) return List.of();

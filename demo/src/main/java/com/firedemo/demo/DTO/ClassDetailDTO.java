@@ -12,6 +12,8 @@ public class ClassDetailDTO {
     private Long id;
     private String name;
     private String courseGroup;
+    private Long courseId;
+    private String qqGroupId;
     private String description;
     private String inviteCode;
     private String status;

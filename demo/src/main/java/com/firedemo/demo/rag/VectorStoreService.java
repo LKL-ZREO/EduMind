@@ -112,13 +112,6 @@ public class VectorStoreService {
     }
 
     /**
-     * 相似度搜索 - 全库（兼容旧调用）
-     */
-    public List<DocumentChunk> similaritySearch(float[] queryEmbedding, int topK) {
-        return similaritySearch(queryEmbedding, topK, null, null);
-    }
-
-    /**
      * 相似度搜索 - 按用户权限过滤
      *
      * @param queryEmbedding   查询向量
@@ -158,13 +151,6 @@ public class VectorStoreService {
             log.error("pgvector search failed, falling back", e);
             return similaritySearchFallback(queryEmbedding, topK, userId, accessibleKbIds);
         }
-    }
-
-    /**
-     * 回退方案：全表扫描（兼容模式，无过滤）
-     */
-    private List<DocumentChunk> similaritySearchFallback(float[] queryEmbedding, int topK) {
-        return similaritySearchFallback(queryEmbedding, topK, null, null);
     }
 
     /**
@@ -421,13 +407,6 @@ public class VectorStoreService {
             }
             return embedding;
         }
-    }
-
-    /**
-     * 关键词检索 —— 全库（兼容旧调用）
-     */
-    public List<ScoredChunk> keywordSearch(String query, int topK) {
-        return keywordSearch(query, topK, null, null);
     }
 
     /**

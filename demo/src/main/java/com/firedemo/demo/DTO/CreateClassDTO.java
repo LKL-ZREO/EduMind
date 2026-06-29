@@ -19,4 +19,10 @@ public class CreateClassDTO {
 
     @Size(max = 200)
     private String description;
+
+    /** QQ群号 */
+    private String qqGroupId;
+
+    /** 课程ID */
+    private Long courseId;
 }

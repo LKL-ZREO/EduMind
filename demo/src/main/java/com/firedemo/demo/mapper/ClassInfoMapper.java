@@ -40,6 +40,12 @@ public interface ClassInfoMapper extends BaseMapper<ClassInfo> {
     List<Map<String, Object>> selectByTeacherIdWithStudentCount(@Param("teacherId") Long teacherId);
 
     /**
+     * 根据QQ群号反查班级
+     */
+    @Select("SELECT * FROM class_info WHERE qq_group_id = #{qqGroupId} AND status = 'ACTIVE' LIMIT 1")
+    ClassInfo selectByQqGroupId(@Param("qqGroupId") String qqGroupId);
+
+    /**
      * 根据班级ID查询QQ群号
      */
     @Select("SELECT qq_group_id FROM class_info WHERE id = #{classId}")

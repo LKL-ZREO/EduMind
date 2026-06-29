@@ -18,6 +18,12 @@ public interface StudentQqBindingMapper {
     String selectQqByStudentId(@Param("studentId") String studentId);
 
     /**
+     * 根据QQ号反查学号
+     */
+    @Select("SELECT student_id FROM student_qq_binding WHERE qq_number = #{qqNumber} LIMIT 1")
+    String selectStudentIdByQq(@Param("qqNumber") String qqNumber);
+
+    /**
      * 插入或更新绑定关系
      */
     @Insert("INSERT INTO student_qq_binding (student_id, qq_number, student_name, created_at) " +

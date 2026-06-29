@@ -136,12 +136,6 @@ public interface SubmissionMapper extends BaseMapper<Submission> {
     Integer countByStudentIdAndTaskId(@Param("studentId") String studentId, @Param("taskId") Long taskId);
 
     /**
-     * 查询班级所有 raw_response（仅用于错误统计）
-     */
-    @Select("SELECT raw_response FROM submission WHERE class_id = #{classId} AND raw_response IS NOT NULL")
-    List<String> selectRawResponsesByClassId(@Param("classId") Long classId);
-
-    /**
      * 批量查询班级下所有作业的统计（每个学生只取最新提交）
      */
     @Select("SELECT task_id, COUNT(DISTINCT student_id) as submitted_count, " +

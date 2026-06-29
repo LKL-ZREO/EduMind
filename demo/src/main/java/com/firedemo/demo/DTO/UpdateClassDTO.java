@@ -17,4 +17,10 @@ public class UpdateClassDTO {
 
     @Size(max = 200)
     private String description;
+
+    /** QQ群号，用于 OneBot 自动识别班级 */
+    private String qqGroupId;
+
+    /** 课程ID */
+    private Long courseId;
 }

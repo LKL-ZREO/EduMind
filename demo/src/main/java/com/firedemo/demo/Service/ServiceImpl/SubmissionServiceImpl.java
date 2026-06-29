@@ -28,22 +28,12 @@ public class SubmissionServiceImpl implements SubmissionService {
 
     @Override
     public List<Submission> listByStudentAndClassOrderByNo(String studentName, Long classId) {
-        return submissionMapper.selectList(
-                new LambdaQueryWrapper<Submission>()
-                        .eq(Submission::getStudentName, studentName)
-                        .eq(Submission::getClassId, classId)
-                        .orderByAsc(Submission::getAssignmentNo)
-                        .orderByAsc(Submission::getSubmittedAt));
+        return submissionMapper.selectByStudentAndClassOrderByNo(studentName, classId);
     }
 
     @Override
     public List<Submission> listByStudentIdAndClassOrderByNo(String studentId, Long classId) {
-        return submissionMapper.selectList(
-                new LambdaQueryWrapper<Submission>()
-                        .eq(Submission::getStudentId, studentId)
-                        .eq(Submission::getClassId, classId)
-                        .orderByAsc(Submission::getAssignmentNo)
-                        .orderByAsc(Submission::getSubmittedAt));
+        return submissionMapper.selectByStudentIdAndClassOrderByNo(studentId, classId);
     }
 
     @Override

@@ -34,8 +34,13 @@ public class ChatHistoryServiceImpl implements ChatHistoryService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public boolean saveBatch(List<ChatHistory> histories) {
-        for (ChatHistory history : histories) {
-            chatHistoryMapper.insert(history);
+        if (histories == null || histories.isEmpty()) return true;
+        // 批量插入替代逐条 INSERT，减少 DB 往返
+        int size = histories.size();
+        int batchSize = 100;
+        for (int i = 0; i < size; i += batchSize) {
+            List<ChatHistory> batch = histories.subList(i, Math.min(size, i + batchSize));
+            chatHistoryMapper.insertBatch(batch);
         }
         return true;
     }

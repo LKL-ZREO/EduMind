@@ -4,7 +4,6 @@ import com.firedemo.demo.DTO.*;
 import com.firedemo.demo.Entity.Submission;
 import com.firedemo.demo.Entity.TeacherKnowledge;
 import com.firedemo.demo.Service.DashboardService;
-import com.firedemo.demo.Service.HomeworkResultService;
 import com.firedemo.demo.Service.SubmissionService;
 import com.firedemo.demo.common.exception.ErrorCode;
 import com.firedemo.demo.common.prompt.PromptLoader;
@@ -34,7 +33,6 @@ public class DashboardController {
     private final JwtUtil jwtUtil;
     private final RBloomFilter<String> classIdBloomFilter;
     private final SubmissionService submissionService;
-    private final HomeworkResultService homeworkResultService;
     private final PromptLoader promptLoader;
 
     // ======================== 核心数据 ========================

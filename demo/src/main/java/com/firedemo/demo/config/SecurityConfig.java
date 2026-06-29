@@ -2,6 +2,7 @@ package com.firedemo.demo.config;
 
 import com.firedemo.demo.common.exception.ErrorCode;
 import com.firedemo.demo.utils.JwtAuthenticationFilter;
+import com.firedemo.demo.utils.McpApiKeyFilter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
@@ -32,6 +33,7 @@ import java.util.Map;
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtFilter;
+    private final McpApiKeyFilter mcpApiKeyFilter;
     private final ObjectMapper objectMapper;
 
     @PostConstruct
@@ -49,6 +51,7 @@ public class SecurityConfig {
             .sessionManagement(session ->
                 session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
             )
+            .addFilterBefore(mcpApiKeyFilter, UsernamePasswordAuthenticationFilter.class)
             .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
             .exceptionHandling(exception -> exception
                 .authenticationEntryPoint((req, res, ex) -> {
@@ -62,7 +65,6 @@ public class SecurityConfig {
             )
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/api/auth/**", "/api/chat/health", "/api/onebot/rag", "/api/homework/**",
-                        "/mcp/**",
                         "/api/teacher/classes/join",
                         "/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html", "/doc.html", "/webjars/**").permitAll()
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
