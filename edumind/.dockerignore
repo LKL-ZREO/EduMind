@@ -1,0 +1,11 @@
+node_modules/
+target/
+dist/
+.vscode/
+.idea/
+*.iml
+HELP.md
+RAG_README.md
+**/node_modules/
+**/.git
+*.log
