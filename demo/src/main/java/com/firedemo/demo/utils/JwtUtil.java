@@ -1,10 +1,15 @@
 package com.firedemo.demo.utils;
 
 import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.MalformedJwtException;
 import io.jsonwebtoken.SignatureAlgorithm;
+import io.jsonwebtoken.UnsupportedJwtException;
 import io.jsonwebtoken.security.Keys;
+import io.jsonwebtoken.security.SignatureException;
 import jakarta.servlet.http.HttpServletRequest;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -12,6 +17,7 @@ import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.util.Date;
 
+@Slf4j
 @Component
 public class JwtUtil {
 
@@ -78,7 +84,23 @@ public class JwtUtil {
         try {
             parseToken(token);
             return true;
+        } catch (ExpiredJwtException e) {
+            log.debug("JWT 已过期: {}", e.getMessage());
+            return false;
+        } catch (SignatureException e) {
+            log.warn("JWT 签名验证失败（可能被篡改）: {}", e.getMessage());
+            return false;
+        } catch (MalformedJwtException e) {
+            log.debug("JWT 格式错误: {}", e.getMessage());
+            return false;
+        } catch (UnsupportedJwtException e) {
+            log.debug("JWT 类型不支持: {}", e.getMessage());
+            return false;
+        } catch (IllegalArgumentException e) {
+            log.debug("JWT 参数为空: {}", e.getMessage());
+            return false;
         } catch (Exception e) {
+            log.warn("JWT 未知错误: {} - {}", e.getClass().getSimpleName(), e.getMessage());
             return false;
         }
     }

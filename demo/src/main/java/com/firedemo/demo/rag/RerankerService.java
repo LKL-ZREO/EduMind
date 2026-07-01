@@ -62,21 +62,26 @@ public class RerankerService {
         }
     }
 
+    /**
+     * Reranker 精排序 —— 按 query-doc 相关度重新打分
+     * <p>
+     * 使用 parallelStream 并行推理，ONNX Runtime session 支持多线程并行执行。
+     * <p>
+     * TODO: 改为真正的 stacked-batch 推理（需改造 OnnxRerankerTranslator，
+     * 将所有 [query, doc] 对 padded 后拼成 [batch, 2, max_len] 张量一次性推理）
+     */
     public List<RrfFusionService.ScoredChunk> rerank(
             String query, List<RrfFusionService.ScoredChunk> candidates, int topK, RagTrace trace) {
 
         if (candidates == null || candidates.isEmpty()) return List.of();
         if (!modelReady || candidates.size() <= topK) return candidates;
 
-        List<RrfFusionService.ScoredChunk> scored = new ArrayList<>();
-        for (RrfFusionService.ScoredChunk sc : candidates) {
-            String content = sc.chunk().getContent();
-            if (content == null || content.isBlank()) continue;
-            float score = computeScore(query, content);
-            scored.add(new RrfFusionService.ScoredChunk(sc.chunk(), score));
-        }
+        List<RrfFusionService.ScoredChunk> scored = candidates.parallelStream()
+                .filter(sc -> sc.chunk().getContent() != null && !sc.chunk().getContent().isBlank())
+                .map(sc -> new RrfFusionService.ScoredChunk(sc.chunk(), computeScore(query, sc.chunk().getContent())))
+                .sorted(Comparator.comparingDouble(RrfFusionService.ScoredChunk::score).reversed())
+                .toList();
 
-        scored.sort(Comparator.comparingDouble(RrfFusionService.ScoredChunk::score).reversed());
         List<RrfFusionService.ScoredChunk> top = scored.subList(0, Math.min(topK, scored.size()));
 
         if (trace != null) {

@@ -1,7 +1,5 @@
 package com.firedemo.demo.mcp;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
@@ -29,7 +27,6 @@ import java.util.stream.Collectors;
 @RequestMapping("/mcp")
 public class McpController {
 
-    private final ObjectMapper objectMapper = new ObjectMapper();
     private final Map<String, ToolDefinition> tools = new LinkedHashMap<>();
     private final McpSessionStore mcpSessionStore;
 
