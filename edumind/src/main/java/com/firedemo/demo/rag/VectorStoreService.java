@@ -154,28 +154,41 @@ public class VectorStoreService {
     }
 
     /**
-     * 回退方案：全表扫描（带权限过滤）
+     * 回退方案：SQL 层面加硬 LIMIT，在内存中用余弦相似度排序。
+     * 仅 pgvector 不可用时触发，最多扫描 500 行避免 OOM。
      */
     private List<DocumentChunk> similaritySearchFallback(float[] queryEmbedding, int topK,
                                                           Long userId, Set<Long> accessibleKbIds) {
-        log.warn("Using fallback similarity search (full scan)");
-        
-        List<DocumentChunkEntity> allEntities = documentChunkMapper.selectList(null);
-        
-        if (allEntities.isEmpty()) {
+        log.warn("Using fallback similarity search (limited scan)");
+
+        List<Object> params = new ArrayList<>();
+        StringBuilder sql = new StringBuilder();
+        sql.append("SELECT id, doc_id, doc_name, chunk_index, sub_index, content, ")
+           .append("token_count, char_count, embedding, prev_summary, next_summary, created_at, ")
+           .append("user_id, kb_id ")
+           .append("FROM document_chunk WHERE embedding IS NOT NULL ");
+
+        String accessClause = buildAccessWhereClause(userId, accessibleKbIds, params);
+        if (!accessClause.isEmpty()) {
+            sql.append("AND (").append(accessClause).append(") ");
+        }
+        sql.append("ORDER BY created_at DESC LIMIT 500");
+
+        List<DocumentChunk> candidates;
+        try {
+            candidates = jdbcTemplate.query(sql.toString(), new DocumentChunkRowMapper(), params.toArray());
+        } catch (Exception e) {
+            log.error("Fallback search query failed", e);
             return Collections.emptyList();
         }
-        
-        return allEntities.stream()
-            .map(entity -> {
-                DocumentChunk chunk = fromEntity(entity);
-                if (chunk.getEmbedding() != null && hasAccess(chunk, userId, accessibleKbIds)) {
-                    double score = cosineSimilarity(queryEmbedding, chunk.getEmbedding());
-                    return new ScoredChunk(chunk, score);
-                }
-                return null;
-            })
-            .filter(java.util.Objects::nonNull)
+
+        if (candidates.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        return candidates.stream()
+            .filter(chunk -> chunk.getEmbedding() != null)
+            .map(chunk -> new ScoredChunk(chunk, cosineSimilarity(queryEmbedding, chunk.getEmbedding())))
             .sorted((a, b) -> Double.compare(b.score, a.score))
             .limit(topK)
             .map(sc -> sc.chunk)

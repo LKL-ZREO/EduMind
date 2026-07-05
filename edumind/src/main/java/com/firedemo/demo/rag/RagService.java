@@ -241,11 +241,13 @@ public class RagService {
                     var chunk = sc.chunk();
                     String docName = chunk.getDocumentName();
                     String content = chunk.getContent();
+                    if (content == null || content.isBlank()) return null;
                     String truncated = content.length() > 500
                             ? content.substring(0, 500) + "…"
                             : content;
                     return (docName != null ? "【" + docName + "】\n" : "") + truncated;
                 })
+                .filter(java.util.Objects::nonNull)
                 .collect(Collectors.joining("\n\n---\n\n"));
 
         return courseHeader + body;

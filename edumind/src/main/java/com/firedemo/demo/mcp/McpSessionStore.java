@@ -53,7 +53,10 @@ public class McpSessionStore {
         String[] parts = data.split("\\|", 3);
         Long userId = Long.parseLong(parts[0]);
         Set<Long> kbIds = parts.length > 1 && !parts[1].isEmpty()
-                ? Set.of(parts[1].split(",")).stream().map(Long::valueOf).collect(java.util.stream.Collectors.toSet())
+                ? java.util.Arrays.stream(parts[1].split(","))
+                        .filter(s -> !s.isEmpty())
+                        .map(Long::valueOf)
+                        .collect(java.util.stream.Collectors.toSet())
                 : Set.of();
         Long courseId = parts.length > 2 && !parts[2].isEmpty()
                 ? Long.parseLong(parts[2]) : null;

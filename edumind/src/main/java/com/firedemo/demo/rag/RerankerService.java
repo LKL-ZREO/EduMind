@@ -76,7 +76,7 @@ public class RerankerService {
         if (candidates == null || candidates.isEmpty()) return List.of();
         if (!modelReady || candidates.size() <= topK) return candidates;
 
-        List<RrfFusionService.ScoredChunk> scored = candidates.parallelStream()
+        List<RrfFusionService.ScoredChunk> scored = candidates.stream()
                 .filter(sc -> sc.chunk().getContent() != null && !sc.chunk().getContent().isBlank())
                 .map(sc -> new RrfFusionService.ScoredChunk(sc.chunk(), computeScore(query, sc.chunk().getContent())))
                 .sorted(Comparator.comparingDouble(RrfFusionService.ScoredChunk::score).reversed())

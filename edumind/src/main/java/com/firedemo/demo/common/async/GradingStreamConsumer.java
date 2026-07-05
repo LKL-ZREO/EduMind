@@ -160,9 +160,13 @@ public class GradingStreamConsumer extends AbstractStreamConsumer {
 
             // 执行批改
             doGrade(submission, studentRequirement);
+            // 成功 → 先 ACK 原消息，再也不会被重复认领
+            ack(messageId);
 
         } catch (Exception e) {
             log.error("批改失败: submissionId={}", submissionId, e);
+            // 先 ACK 原消息，再创建重试——确保不会双重处理
+            ack(messageId);
             if (retryCount < AsyncTaskConstants.MAX_RETRY) {
                 gradingStreamProducer.retryTask(submissionId, studentRequirement, retryCount + 1);
                 Submission pending = submissionMapper.selectById(submissionId);
@@ -183,8 +187,6 @@ public class GradingStreamConsumer extends AbstractStreamConsumer {
                 lock.unlock();
             }
         }
-
-        ack(messageId);
     }
 
     // ==================== 批改核心流程 ====================
@@ -337,12 +339,13 @@ public class GradingStreamConsumer extends AbstractStreamConsumer {
                     java.time.Duration.ofMinutes(30),
                     () -> taskMapper.selectById(taskId));
             if (task != null && task.getDeadline() != null
-                    && LocalDateTime.now().isAfter(task.getDeadline())) {
+                    && sub.getSubmittedAt() != null
+                    && sub.getSubmittedAt().isAfter(task.getDeadline())) {
                 sub.setIsLate(true);
                 if (task.getAllowLate() != null && task.getAllowLate()
                         && task.getLatePenalty() != null && task.getLatePenalty() > 0) {
                     sub.setPenaltyApplied(true);
-                    long rawDays = java.time.Duration.between(task.getDeadline(), LocalDateTime.now()).toDays();
+                    long rawDays = java.time.Duration.between(task.getDeadline(), sub.getSubmittedAt()).toDays();
                     int days = (int) Math.min(rawDays, 30);  // 最多扣 30 天，防止溢出
                     int penalty = days * task.getLatePenalty();
                     sub.setFinalScore(Math.max(0, (eval.getTotalScore() != null ? eval.getTotalScore() : 0) - penalty));

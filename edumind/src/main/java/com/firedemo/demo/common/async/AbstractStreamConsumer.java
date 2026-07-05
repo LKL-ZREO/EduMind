@@ -117,6 +117,13 @@ public abstract class AbstractStreamConsumer {
                     break;
                 }
                 log.error("{} 消费异常", taskName(), e);
+                // 退避 1 秒，避免 Redis 故障时 100% CPU 自旋 + 日志风暴
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
             }
         }
     }
@@ -150,7 +157,7 @@ public abstract class AbstractStreamConsumer {
 
                         if (claimed != null && !claimed.isEmpty()) {
                             for (Map.Entry<StreamMessageId, Map<String, String>> entry : claimed.entrySet()) {
-                                executor.submit(() -> processOne(entry.getKey(), entry.getValue()));
+                                processOne(entry.getKey(), entry.getValue());
                                 claimedCount++;
                             }
                         }
