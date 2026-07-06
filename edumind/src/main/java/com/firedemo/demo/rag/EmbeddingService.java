@@ -163,32 +163,32 @@ public class EmbeddingService {
     // ==================== 公共 API ====================
 
     /**
-     * Query 嵌入 —— 加 BGE 指令前缀，用于检索时
+     * Query 嵌入 —— 加 BGE 指令前缀，用于检索时。
+     * 模型未就绪或推理失败时直接抛异常，不再静默回退 hashEmbed（假向量会污染检索结果）。
      */
     public float[] embedQuery(String query) {
         if (!modelReady) {
-            return hashEmbed(BGE_QUERY_PREFIX + query);
+            throw new IllegalStateException("Embedding model not ready");
         }
         try {
             return predictor.predict(BGE_QUERY_PREFIX + query);
-        } catch (Exception e) {
-            log.debug("ONNX inference failed for query, fallback: {}", e.getMessage());
-            return hashEmbed(query);
+        } catch (ai.djl.translate.TranslateException e) {
+            throw new RuntimeException("ONNX embedding inference failed", e);
         }
     }
 
     /**
-     * 文档嵌入 —— 不加前缀，用于文档入库时
+     * 文档嵌入 —— 不加前缀，用于文档入库时。
+     * 模型未就绪或推理失败时直接抛异常，调用方自行决定是否重试或跳过。
      */
     public float[] embedDocument(String text) {
         if (!modelReady) {
-            return hashEmbed(text);
+            throw new IllegalStateException("Embedding model not ready");
         }
         try {
             return predictor.predict(text);
-        } catch (Exception e) {
-            log.debug("ONNX inference failed for doc, fallback: {}", e.getMessage());
-            return hashEmbed(text);
+        } catch (ai.djl.translate.TranslateException e) {
+            throw new RuntimeException("ONNX embedding inference failed", e);
         }
     }
 
@@ -200,19 +200,17 @@ public class EmbeddingService {
     }
 
     /**
-     * 批量嵌入 —— 并行化单条推理
+     * 批量嵌入 —— 顺序单条推理。
+     * 当前 Predictor 不保证线程安全，使用 stream（非 parallelStream）。
      * <p>
-     * 当前使用 parallelStream 并行调用单条 ONNX 推理。
-     * ONNX Runtime 支持 session 级并行，多条推理可以充分利用多核。
-     * <p>
-     * TODO: 改为真正的 stacked-batch 推理（需改造 OnnxEmbeddingTranslator
+     * TODO: 改为真正的 stacked-batch 推理 + Predictor 池（需改造 OnnxEmbeddingTranslator
      * 为 BatchTranslator，将所有输入 padded 后拼成 [batch, max_len] 张量一次性推理）
      */
     public List<float[]> embedBatch(List<String> texts) {
         if (texts == null || texts.isEmpty()) {
             return java.util.Collections.emptyList();
         }
-        return texts.parallelStream()
+        return texts.stream()
                 .map(this::embed)
                 .toList();
     }

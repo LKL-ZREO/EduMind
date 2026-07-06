@@ -3,14 +3,19 @@ package com.firedemo.demo.Service;
 import com.firedemo.demo.Entity.HomeworkTask;
 import com.firedemo.demo.Service.ClassService;
 import com.firedemo.demo.Service.HomeworkTaskService;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.redisson.api.RScheduledExecutorService;
+import org.redisson.api.RedissonClient;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /**
@@ -24,6 +29,9 @@ public class TaskReminderService {
     private final OneBotHttpService oneBotHttpService;
     private final HomeworkTaskService taskService;
     private final ClassService classService;
+    private final RedissonClient redissonClient;
+
+    private RScheduledExecutorService scheduledExecutor;
 
     /**
      * 发送作业截止提醒（24小时前）
@@ -176,7 +184,22 @@ public class TaskReminderService {
                 taskName, deadlineStr));
     }
 
-    // ========== 定时调度 ==========
+    // ========== 定时调度（Redisson RScheduledExecutorService，重启不丢）==========
+
+    @PostConstruct
+    public void initScheduler() {
+        this.scheduledExecutor = redissonClient.getExecutorService("reminders");
+        this.scheduledExecutor.registerWorkers(2);
+        log.info("TaskReminderService 调度器已启动 (Redisson)");
+    }
+
+    @PreDestroy
+    public void shutdownScheduler() {
+        if (scheduledExecutor != null) {
+            scheduledExecutor.shutdown();
+            log.info("TaskReminderService 调度器已关闭");
+        }
+    }
 
     /**
      * 注册作业截止提醒（截止前24小时和1小时各提醒一次）
@@ -206,22 +229,20 @@ public class TaskReminderService {
         long delayMillis = java.time.Duration.between(LocalDateTime.now(), executeTime).toMillis();
         if (delayMillis <= 0) return;
 
-        java.util.Timer timer = new java.util.Timer("TaskReminder-" + taskId + "-" + hoursBefore);
-        timer.schedule(new java.util.TimerTask() {
-            @Override
-            public void run() {
-                try {
-                    if (hoursBefore == 24) {
-                        sendDeadlineReminder24h(taskId);
-                    } else if (hoursBefore == 1) {
-                        sendDeadlineReminder1h(taskId);
-                    }
-                } catch (Exception e) {
-                    log.error("提醒任务执行失败: taskId={}, hoursBefore={}", taskId, hoursBefore, e);
-                } finally {
-                    timer.cancel();
+        String taskName = "reminder:" + taskId + ":" + hoursBefore;
+        scheduledExecutor.schedule(() -> {
+            try {
+                if (hoursBefore == 24) {
+                    sendDeadlineReminder24h(taskId);
+                } else {
+                    sendDeadlineReminder1h(taskId);
                 }
+            } catch (Exception e) {
+                log.error("提醒任务执行失败: taskId={}, hoursBefore={}", taskId, hoursBefore, e);
             }
-        }, delayMillis);
+        }, delayMillis, TimeUnit.MILLISECONDS);
+
+        log.info("提醒已注册: taskId={}, hoursBefore={}, delayMinutes={}",
+                taskId, hoursBefore, delayMillis / 60_000);
     }
 }

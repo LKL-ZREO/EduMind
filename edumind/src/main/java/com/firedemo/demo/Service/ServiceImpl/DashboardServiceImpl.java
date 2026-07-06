@@ -449,6 +449,7 @@ public class DashboardServiceImpl implements DashboardService {
             if (results == null || !results.isArray()) return;
 
             int reclassified = 0;
+            List<SubmissionError> batch = new ArrayList<>();
             for (JsonNode r : results) {
                 int index = r.get("index").asInt();
                 String kp = r.get("knowledgePoint").asText();
@@ -456,8 +457,13 @@ public class DashboardServiceImpl implements DashboardService {
                     SubmissionError se = unclassified.get(index);
                     se.setKnowledgePoint(kp);
                     se.setUpdatedAt(LocalDateTime.now());
-                    submissionErrorMapper.updateById(se);
+                    batch.add(se);
                     reclassified++;
+                }
+            }
+            if (!batch.isEmpty()) {
+                for (SubmissionError e : batch) {
+                    submissionErrorMapper.updateById(e);
                 }
             }
             if (reclassified > 0) {

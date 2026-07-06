@@ -9,11 +9,15 @@ import com.firedemo.demo.mapper.StudentQqBindingMapper;
 import com.firedemo.demo.rag.RagResult;
 import com.firedemo.demo.rag.RagSearchRequest;
 import com.firedemo.demo.rag.RagService;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.Map;
 import java.util.Set;
 
@@ -34,11 +38,21 @@ public class OnebotRagController {
     private final ClassInfoMapper classInfoMapper;
     private final SharedKbMemberMapper sharedKbMemberMapper;
 
+    @Value("${mcp.api-key:}")
+    private String mcpApiKey;
+
     /**
      * RAG 增强接口 - 委托 RagService 统一检索
      */
     @PostMapping("/rag")
-    public ResponseEntity<RagResponse> rag(@RequestBody RagRequest request) {
+    public ResponseEntity<RagResponse> rag(@RequestBody RagRequest request,
+                                           HttpServletRequest httpRequest) {
+        // 服务间认证：与 MCP 共用同一把 API Key，防止外部直接调用
+        if (!apiKeyMatches(httpRequest.getHeader("X-MCP-API-Key"))) {
+            log.warn("OneBot RAG 认证失败: 请求来源缺少有效 API Key");
+            return ResponseEntity.status(401).build();
+        }
+
         log.debug("RAG request from QQ: {}, message: {}", request.getQq(), request.getMessage());
 
         try {
@@ -124,5 +138,16 @@ public class OnebotRagController {
     public static class RagResponse {
         private String enhancedMessage;
         private boolean hasContext;
+    }
+
+    /** 常量时间比较，防时序攻击（与 McpApiKeyFilter 一致） */
+    private boolean apiKeyMatches(String actual) {
+        if (mcpApiKey == null || mcpApiKey.isBlank() || actual == null || actual.isBlank()) {
+            return false;
+        }
+        return MessageDigest.isEqual(
+                mcpApiKey.getBytes(StandardCharsets.UTF_8),
+                actual.getBytes(StandardCharsets.UTF_8)
+        );
     }
 }

@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RStream;
 import org.redisson.api.RedissonClient;
 import org.redisson.api.stream.StreamAddArgs;
+import org.redisson.api.stream.StreamTrimArgs;
 import org.redisson.client.codec.StringCodec;
 import org.springframework.stereotype.Component;
 
@@ -37,6 +38,8 @@ public class GradingStreamProducer {
         );
 
         stream.add(StreamAddArgs.entries(message));
+        // 限制 Stream 长度，防止 Redis 内存无限增长
+        stream.trimNonStrict(StreamTrimArgs.maxLen(AsyncTaskConstants.STREAM_MAX_LEN).noLimit());
 
         log.info("批改任务已入队: submissionId={}", submissionId);
     }
@@ -55,6 +58,7 @@ public class GradingStreamProducer {
         );
 
         stream.add(StreamAddArgs.entries(message));
+        stream.trimNonStrict(StreamTrimArgs.maxLen(AsyncTaskConstants.STREAM_MAX_LEN).noLimit());
 
         log.info("批改任务重试入队: submissionId={}, retryCount={}", submissionId, retryCount);
     }

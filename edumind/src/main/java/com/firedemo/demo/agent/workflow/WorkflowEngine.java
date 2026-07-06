@@ -41,7 +41,28 @@ public class WorkflowEngine {
      * @param <S>         状态类型
      * @return 执行后的状态
      */
+    /**
+     * 执行前校验：检测 DAG 是否存在循环
+     */
+    public void validate(WorkflowDefinition<?> definition) {
+        Map<String, Integer> inDegree = new java.util.HashMap<>();
+        for (String name : definition.getNodes().keySet()) {
+            inDegree.putIfAbsent(name, 0);
+        }
+        for (var edgeList : definition.getEdges().values()) {
+            for (WorkflowDefinition.Edge<?> edge : edgeList) {
+                inDegree.merge(edge.getTarget(), 1, Integer::sum);
+            }
+        }
+        if (!inDegree.isEmpty() && inDegree.values().stream().noneMatch(d -> d == 0)) {
+            throw new IllegalStateException("工作流存在循环: " + definition.getName());
+        }
+    }
+
     public <S extends WorkflowState> S execute(WorkflowDefinition<S> definition, S initialState) {
+        // 先校验，避免循环空转 50 步才报错
+        validate(definition);
+
         S state = initialState;
         state.setCurrentNode(definition.getEntryNode());
 

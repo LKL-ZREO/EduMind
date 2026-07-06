@@ -24,8 +24,14 @@ public class SmartChunkService {
 
     // 默认最大 token 数（≈512 tokens，约1500中文字符，每个 chunk 覆盖1-2个知识点）
     private static final int DEFAULT_MAX_TOKENS = 512;
-    // 默认重叠 token 数
-    private static final int DEFAULT_OVERLAP_TOKENS = 50;
+    // 默认重叠 token 数（也用作相邻 section chunk 之间的上下文窗口）
+    private static final int DEFAULT_OVERLAP_TOKENS = 80;
+    // 上下文摘要长度（字符数），100 太短 → 300 能覆盖 2-3 句中文
+    private static final int SUMMARY_MAX_CHARS = 300;
+    // Markdown 表格正则
+    private static final Pattern TABLE_ROW = Pattern.compile("^\\|.*\\|$", Pattern.MULTILINE);
+    // 列表项正则（- * + 或 1. 2. 等）
+    private static final Pattern LIST_ITEM = Pattern.compile("(?m)^(?:[-*+]|\\d+\\.)\\s");
 
     /**
      * 智能切割入口
@@ -89,7 +95,8 @@ public class SmartChunkService {
      * Markdown结构切割 - 按标题层级
      */
     private List<String> splitByMarkdownHeaders(String content, ChunkConfig config) {
-        String[] sections = content.split("(?m)^(?=##+ )");
+        // 匹配所有层级的标题（# ~ ######），保留 H1 作为顶级边界
+        String[] sections = content.split("(?m)^(?=#{1,} )");
 
         List<String> chunks = new ArrayList<>();
         for (String section : sections) {
@@ -220,8 +227,8 @@ public class SmartChunkService {
             if (estimateTokens(para) <= config.getMaxTokens()) {
                 chunks.add(para);
             } else {
-                // 段落太大 → 按句子边界再切
-                chunks.addAll(splitBySentence(para, config));
+                // 段落太大 → 先提取表格，再对剩余文本按句子切分
+                chunks.addAll(splitWithTableProtection(para, config));
             }
         }
 
@@ -229,30 +236,135 @@ public class SmartChunkService {
     }
 
     /**
+     * 保护 Markdown 表格不被拆散：提取表格 → 独立 chunk，剩余文本按句子切。
+     */
+    private List<String> splitWithTableProtection(String text, ChunkConfig config) {
+        List<String> result = new ArrayList<>();
+        java.util.regex.Matcher tm = TABLE_ROW.matcher(text);
+
+        int lastEnd = 0;
+        int tableStart = -1;
+        boolean inTable = false;
+
+        // 找连续 |...| 行组成的表格块
+        while (tm.find()) {
+            if (!inTable) {
+                // 表格前的内容先处理
+                String before = text.substring(lastEnd, tm.start()).trim();
+                if (!before.isEmpty()) {
+                    result.addAll(splitBySentence(before, config));
+                }
+                tableStart = tm.start();
+                inTable = true;
+            }
+            // 检查下一行是否还是表格行
+            int nextLineStart = tm.end() + 1; // skip \n
+            if (nextLineStart >= text.length() ||
+                !TABLE_ROW.matcher(text.substring(nextLineStart)).lookingAt()) {
+                // 表格结束
+                String tableBlock = text.substring(tableStart, tm.end()).trim();
+                if (!tableBlock.isEmpty()) {
+                    result.add(tableBlock);
+                }
+                lastEnd = tm.end();
+                inTable = false;
+            }
+        }
+
+        // 尾部剩余文本
+        if (lastEnd < text.length()) {
+            String after = text.substring(lastEnd).trim();
+            if (!after.isEmpty()) {
+                result.addAll(splitBySentence(after, config));
+            }
+        } else if (!inTable && result.isEmpty()) {
+            // 没有表格 → 回退到普通句子切割
+            result.addAll(splitBySentence(text, config));
+        }
+
+        return result;
+    }
+
+    /**
      * 按句子边界切分一段过大的文本
      */
     private List<String> splitBySentence(String text, ChunkConfig config) {
+        // 先按列表项边界切分，列表项作为原子单元
+        List<String> atomicUnits = splitByListItems(text);
+
         List<String> result = new ArrayList<>();
-        String[] sentences = text.split("(?<=[。！？.!?])");
         StringBuilder buf = new StringBuilder();
         int bufTokens = 0;
 
-        for (String s : sentences) {
-            s = s.trim();
-            if (s.isEmpty()) continue;
-            int st = estimateTokens(s);
-            if (bufTokens + st > config.getMaxTokens() && buf.length() > 0) {
+        for (String unit : atomicUnits) {
+            int ut = estimateTokens(unit);
+            // 单个单元本身就超过上限 → 按句子切
+            if (ut > config.getMaxTokens()) {
+                if (buf.length() > 0) {
+                    result.add(buf.toString().trim());
+                    buf = new StringBuilder();
+                    bufTokens = 0;
+                }
+                // 对于超长列表项，不再按句子切（列表项内部句子通常不能独立存在）
+                // 而是按固定大小切
+                if (LIST_ITEM.matcher(unit).find()) {
+                    result.addAll(splitByFixedSize(unit, config));
+                } else {
+                    // 普通文本：按句子切
+                    String[] sentences = unit.split("(?<=[。！？.!?])");
+                    for (String s : sentences) {
+                        s = s.trim();
+                        if (s.isEmpty()) continue;
+                        result.add(s);
+                    }
+                }
+            } else if (bufTokens + ut > config.getMaxTokens() && buf.length() > 0) {
                 result.add(buf.toString().trim());
                 buf = new StringBuilder();
-                bufTokens = 0;
+                buf.append(unit);
+                bufTokens = ut;
+            } else {
+                buf.append(unit);
+                bufTokens += ut;
             }
-            buf.append(s);
-            bufTokens += st;
         }
         if (buf.length() > 0) {
             result.add(buf.toString().trim());
         }
-        return result;
+        return result.isEmpty() ? Collections.singletonList(text) : result;
+    }
+
+    /**
+     * 按列表项边界切分，每个 `- item` / `1. item` 作为原子单元。
+     * 连续列表项之间的文本（如引文）单独处理。
+     */
+    private List<String> splitByListItems(String text) {
+        List<String> units = new ArrayList<>();
+        java.util.regex.Matcher m = LIST_ITEM.matcher(text);
+        int lastEnd = 0;
+
+        while (m.find()) {
+            // 列表项前面的非列表文本
+            String before = text.substring(lastEnd, m.start());
+            if (!before.isBlank()) {
+                units.add(before);
+            }
+            // 列表项本身（可能跨多行，取到行尾）
+            int lineEnd = text.indexOf('\n', m.end());
+            int itemEnd = lineEnd > 0 ? lineEnd : m.end();
+            units.add(text.substring(m.start(), itemEnd).trim());
+            lastEnd = itemEnd;
+        }
+
+        // 尾部剩余文本
+        if (lastEnd < text.length()) {
+            String tail = text.substring(lastEnd).trim();
+            if (!tail.isBlank()) {
+                units.add(tail);
+            }
+        }
+
+        return units.isEmpty() ? Collections.singletonList(text) : units;
     }
 
     /**
@@ -274,19 +386,61 @@ public class SmartChunkService {
             }
         }
 
-        // 添加相邻chunk的上下文引用
+        // 相邻 chunk：添加上下文引用 + 文本重叠
+        int overlapChars = config.getOverlapTokens() * 3; // token→字符近似
         for (int i = 0; i < chunks.size(); i++) {
             DocumentChunk chunk = chunks.get(i);
 
             if (i > 0) {
-                chunk.setPrevSummary(summarize(chunks.get(i - 1).getContent()));
+                DocumentChunk prev = chunks.get(i - 1);
+                chunk.setPrevSummary(summarize(prev.getContent()));
+                // 在 chunk 内容前拼接前一个 chunk 末尾的 overlap，用于 embedding 捕获边界上下文
+                String prevTail = tailChars(prev.getContent(), overlapChars);
+                if (prevTail.length() > 20) {
+                    chunk.setContent(prevTail + "\n\n" + chunk.getContent());
+                }
             }
             if (i < chunks.size() - 1) {
-                chunk.setNextSummary(summarize(chunks.get(i + 1).getContent()));
+                DocumentChunk next = chunks.get(i + 1);
+                chunk.setNextSummary(summarize(next.getContent()));
+                // 在 chunk 内容后拼接下一个 chunk 开头的 overlap
+                String nextHead = headChars(next.getContent(), overlapChars);
+                if (nextHead.length() > 20) {
+                    chunk.setContent(chunk.getContent() + "\n\n" + nextHead);
+                }
             }
+            // 重新计算 token 数（因为内容变化了）
+            chunk.setTokenCount(estimateTokens(chunk.getContent()));
+            chunk.setCharCount(chunk.getContent().length());
         }
 
         return chunks;
+    }
+
+    /** 取文本末尾 N 字符，尽量在句子边界截断 */
+    private String tailChars(String text, int n) {
+        if (text.length() <= n) return text;
+        int start = text.length() - n;
+        for (int i = start; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '。' || c == '\n' || c == '！' || c == '？') {
+                return text.substring(i + 1);
+            }
+        }
+        return text.substring(start);
+    }
+
+    /** 取文本开头 N 字符，尽量在句子边界截断 */
+    private String headChars(String text, int n) {
+        if (text.length() <= n) return text;
+        int end = n;
+        for (int i = end; i > end - 80 && i > 0; i--) {
+            char c = text.charAt(i);
+            if (c == '。' || c == '\n' || c == '！' || c == '？') {
+                return text.substring(0, i + 1);
+            }
+        }
+        return text.substring(0, end);
     }
 
     /**
@@ -309,6 +463,11 @@ public class SmartChunkService {
             }
 
             chunks.add(content.substring(start, end).trim());
+
+            // 已到达内容末尾，退出，避免 start 被 overlap 拉回导致死循环
+            if (end >= content.length()) {
+                break;
+            }
             start = Math.max(0, end - overlapChars);
         }
 
@@ -350,10 +509,19 @@ public class SmartChunkService {
      * 生成摘要（用于上下文引用）
      */
     private String summarize(String content) {
-        if (content.length() <= 100) {
+        if (content.length() <= SUMMARY_MAX_CHARS) {
             return content;
         }
-        return content.substring(0, 100) + "...";
+        // 尽量在句子边界截断
+        int cut = SUMMARY_MAX_CHARS;
+        for (int i = cut; i > cut - 100 && i > 0; i--) {
+            char c = content.charAt(i);
+            if (c == '。' || c == '\n' || c == '！' || c == '？' || c == '.') {
+                cut = i + 1;
+                break;
+            }
+        }
+        return content.substring(0, cut) + "\n...(上文摘要)";
     }
 
     /**
