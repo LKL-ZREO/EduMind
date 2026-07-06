@@ -197,6 +197,8 @@ public class MineruClient {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new MineruException("MinerU CLI 被中断", e);
+        } catch (java.util.concurrent.ExecutionException e) {
+            throw new MineruException("MinerU CLI 执行异常: " + e.getMessage(), e);
         } finally {
             if (outputDir != null) {
                 deleteRecursively(outputDir);

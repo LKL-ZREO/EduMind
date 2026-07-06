@@ -106,6 +106,9 @@ public class OcrService {
             Thread.currentThread().interrupt();
             log.warn("Tesseract OCR 被中断");
             return null;
+        } catch (java.util.concurrent.ExecutionException e) {
+            log.warn("Tesseract OCR 执行异常: {}", e.getMessage());
+            return null;
         } finally {
             if (outputDir != null) {
                 try (var stream = Files.walk(outputDir)) {
