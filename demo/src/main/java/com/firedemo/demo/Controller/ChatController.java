@@ -27,7 +27,6 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import java.io.IOException;
@@ -46,7 +45,6 @@ public class ChatController {
     private final OpenClawService openClawService;
     private final FileStorageService fileStorageService;
     private final ChatHistoryService chatHistoryService;
-    private final ActiveTeacherService activeTeacherService;
     private final HomeworkResultService homeworkResultService;
     private final UserService userService;
     private final ClassInfoMapper classInfoMapper;
@@ -80,8 +78,6 @@ public class ChatController {
         if (userId == null) {
             return ResponseEntity.status(401).build();
         }
-        activeTeacherService.touch(userId);
-
         List<ChatHistory> history = chatHistoryService.getUserHistory(userId);
         return ResponseEntity.ok(history);
     }
@@ -95,8 +91,6 @@ public class ChatController {
         if (userId == null) {
             return ResponseEntity.status(401).build();
         }
-        activeTeacherService.touch(userId);
-
         // 删除该用户的所有历史记录
         chatHistoryService.deleteByUserId(userId);
 
@@ -126,10 +120,10 @@ public class ChatController {
         httpResponse.setHeader("Connection", "close");
 
         Long userId = getCurrentUserId(httpRequest);
-        activeTeacherService.touch(userId);
 
         // 生成 sessionId（如果没有）
-        if (sessionId == null || sessionId.isEmpty()) {
+        boolean newSession = (sessionId == null || sessionId.isEmpty());
+        if (newSession) {
             sessionId = UUID.randomUUID().toString();
         }
 
@@ -151,10 +145,18 @@ public class ChatController {
 
         // 流式响应 — 使用 Tool Calling，LLM 自主决定是否检索知识库
         String finalSessionId = sessionId;
+        boolean isNewSession = newSession;
         StreamingResponseBody responseBody = outputStream -> {
             StringBuilder responseBuilder = new StringBuilder();
 
             try {
+                // 首条 SSE 事件：返回 sessionId，让客户端后续请求携带实现多轮对话
+                if (isNewSession) {
+                    String sessionEvent = "data: {\"type\":\"session\",\"sessionId\":\"" + finalSessionId + "\"}\n\n";
+                    outputStream.write(sessionEvent.getBytes());
+                    outputStream.flush();
+                }
+
                 openClawService.streamChat(message, history, finalSessionId)
                         .doOnNext(chunk -> {
                             log.debug("发送SSE chunk: {}", chunk);
@@ -195,7 +197,9 @@ public class ChatController {
                 try {
                     outputStream.write("data: {\"error\":\"服务暂时不可用\"}\n\n".getBytes());
                     outputStream.flush();
-                } catch (IOException ignored) {}
+                } catch (IOException ex) {
+                    log.debug("SSE 错误消息写入失败（客户端可能已断开）: {}", ex.getMessage());
+                }
             }
         };
 
@@ -215,7 +219,6 @@ public class ChatController {
 
         // 获取当前用户ID
         Long userId = getCurrentUserId(httpRequest);
-        activeTeacherService.touch(userId);
 
         // 1. 读取文件内容
         String fileContent = fileStorageService.readFileContent(request.getFilePath());

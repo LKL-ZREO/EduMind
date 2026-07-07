@@ -155,7 +155,8 @@ public abstract class AbstractStreamConsumer {
                             }
                         }
                     }
-                } catch (Exception ignored) {
+                } catch (Exception e) {
+                    log.warn("{} 僵尸消息扫描失败，跳过本轮: {}", taskName(), e.getMessage());
                 }
             }
             if (claimedCount > 0) {

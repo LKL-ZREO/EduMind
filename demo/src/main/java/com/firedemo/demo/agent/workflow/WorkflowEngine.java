@@ -1,9 +1,11 @@
 package com.firedemo.demo.agent.workflow;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
+import java.time.Duration;
 
 import org.springframework.stereotype.Component;
 
@@ -25,8 +27,11 @@ public class WorkflowEngine {
     /** 最大执行步数（防死循环） */
     private static final int MAX_STEPS = 50;
 
-    /** 保存工作流执行轨迹 */
-    private final Map<String, List<String>> traces = new ConcurrentHashMap<>();
+    /** 执行轨迹，1小时自动过期，最多500条 */
+    private final Cache<String, List<String>> traces = Caffeine.newBuilder()
+            .expireAfterWrite(Duration.ofHours(1))
+            .maximumSize(500)
+            .build();
 
     /**
      * 执行工作流
@@ -103,7 +108,7 @@ public class WorkflowEngine {
      * 获取执行轨迹
      */
     public List<String> getTrace(String instanceId) {
-        return traces.getOrDefault(instanceId, Collections.emptyList());
+        return Optional.ofNullable(traces.getIfPresent(instanceId)).orElse(Collections.emptyList());
     }
 
     // ==================== 私有方法 ====================

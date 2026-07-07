@@ -10,7 +10,10 @@
       "Bash(./mvnw *)",
       "Bash(mvn *)",
       "Read(//c/Users/LKL/.openclaw/**)",
-      "Read(//c/Users/LKL/.openclaw/agents/**)"
+      "Read(//c/Users/LKL/.openclaw/agents/**)",
+      "Bash(git add *)",
+      "Bash(git commit -m 'fix: 修复多租户、ACK泄漏、sessionId、边界溢出等多个bug *)",
+      "Bash(git push *)"
     ]
   }
 }

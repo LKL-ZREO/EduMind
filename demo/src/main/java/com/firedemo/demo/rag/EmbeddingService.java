@@ -96,8 +96,8 @@ public class EmbeddingService {
         if (!Files.exists(tokCfgPath)) {
             try {
                 downloadFile(baseUrl + "/tokenizer_config.json", tokCfgPath);
-            } catch (Exception ignored) {
-                // 非必须
+            } catch (Exception e) {
+                log.debug("下载 tokenizer_config.json 失败（非必须）: {}", e.getMessage());
             }
         }
 
@@ -106,8 +106,8 @@ public class EmbeddingService {
         if (!Files.exists(stPath)) {
             try {
                 downloadFile(baseUrl + "/special_tokens_map.json", stPath);
-            } catch (Exception ignored) {
-                // 非必须
+            } catch (Exception e) {
+                log.debug("下载 special_tokens_map.json 失败（非必须）: {}", e.getMessage());
             }
         }
 
@@ -200,14 +200,21 @@ public class EmbeddingService {
     }
 
     /**
-     * 批量嵌入
+     * 批量嵌入 —— 并行化单条推理
+     * <p>
+     * 当前使用 parallelStream 并行调用单条 ONNX 推理。
+     * ONNX Runtime 支持 session 级并行，多条推理可以充分利用多核。
+     * <p>
+     * TODO: 改为真正的 stacked-batch 推理（需改造 OnnxEmbeddingTranslator
+     * 为 BatchTranslator，将所有输入 padded 后拼成 [batch, max_len] 张量一次性推理）
      */
     public List<float[]> embedBatch(List<String> texts) {
-        List<float[]> results = new ArrayList<>();
-        for (String text : texts) {
-            results.add(embed(text));
+        if (texts == null || texts.isEmpty()) {
+            return java.util.Collections.emptyList();
         }
-        return results;
+        return texts.parallelStream()
+                .map(this::embed)
+                .toList();
     }
 
     /**

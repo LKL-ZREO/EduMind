@@ -10,8 +10,10 @@ import java.util.*;
 import java.util.regex.Pattern;
 
 /**
- * RAG智能上下文切割服务
- * 结合语义分析、结构感知和滑动窗口策略
+ * RAG 文档切割服务
+ * <p>
+ * 按文档结构（Markdown标题 / 代码块 / 对话轮次 / 段落）切分，
+ * 仅用 token 计数控制块大小，不调用 ONNX 做语义边界检测。
  */
 @Slf4j
 @Service
@@ -20,8 +22,6 @@ public class SmartChunkService {
     @Autowired
     private EmbeddingService embeddingService;
 
-    // 语义相似度阈值
-    private static final double SEMANTIC_THRESHOLD = 0.6;
     // 默认最大 token 数（≈512 tokens，约1500中文字符，每个 chunk 覆盖1-2个知识点）
     private static final int DEFAULT_MAX_TOKENS = 512;
     // 默认重叠 token 数
@@ -52,10 +52,10 @@ public class SmartChunkService {
                 rawChunks = splitByConversationTurns(content, config);
                 break;
             default:
-                rawChunks = splitBySemanticBoundaries(content, config);
+                rawChunks = splitByParagraphs(content, config);
         }
 
-        // 3. 应用滑动窗口和语义边界优化
+        // 3. 应用滑动窗口
         List<DocumentChunk> chunks = applySlidingWindow(rawChunks, config);
 
         // 4. 生成嵌入向量
@@ -78,7 +78,7 @@ public class SmartChunkService {
         if (content.contains("```") || content.contains("def ") || content.contains("class ")) {
             return DocType.CODE;
         }
-        if (content.contains("User:") || content.contains("Assistant:") || 
+        if (content.contains("User:") || content.contains("Assistant:") ||
             content.contains(" Human:") || content.contains(" AI:")) {
             return DocType.CONVERSATION;
         }
@@ -89,17 +89,15 @@ public class SmartChunkService {
      * Markdown结构切割 - 按标题层级
      */
     private List<String> splitByMarkdownHeaders(String content, ChunkConfig config) {
-        // 按 ## 标题分割，保留层级结构
         String[] sections = content.split("(?m)^(?=##+ )");
-        
+
         List<String> chunks = new ArrayList<>();
         for (String section : sections) {
             section = section.trim();
             if (section.isEmpty()) continue;
-            
-            // 如果section太大，进一步按语义切割
+
             if (estimateTokens(section) > config.getMaxTokens()) {
-                chunks.addAll(splitBySemanticBoundaries(section, config));
+                chunks.addAll(splitByParagraphs(section, config));
             } else {
                 chunks.add(section);
             }
@@ -112,34 +110,31 @@ public class SmartChunkService {
      */
     private List<String> splitByCodeStructure(String content, ChunkConfig config) {
         List<String> chunks = new ArrayList<>();
-        
-        // 按代码块分割
+
         String[] codeBlocks = content.split("(?m)^```");
-        
+
         for (String block : codeBlocks) {
             block = block.trim();
             if (block.isEmpty()) continue;
-            
-            // 检测语言标记
+
             String lang = "";
             int newlineIdx = block.indexOf('\n');
             if (newlineIdx > 0 && newlineIdx < 20) {
                 lang = block.substring(0, newlineIdx).trim();
                 block = block.substring(newlineIdx + 1);
             }
-            
-            // 按函数/类定义分割
+
             List<String> units = splitCodeByFunctions(block, lang);
-            
+
             for (String unit : units) {
                 if (estimateTokens(unit) > config.getMaxTokens()) {
-                    chunks.addAll(splitBySemanticBoundaries(unit, config));
+                    chunks.addAll(splitByParagraphs(unit, config));
                 } else {
                     chunks.add("```" + lang + "\n" + unit + "\n```");
                 }
             }
         }
-        
+
         return chunks;
     }
 
@@ -148,26 +143,24 @@ public class SmartChunkService {
      */
     private List<String> splitCodeByFunctions(String code, String lang) {
         List<String> functions = new ArrayList<>();
-        
-        // 通用函数/类定义模式
+
         Pattern pattern = Pattern.compile(
             "(?m)^((?:public|private|protected|static|def|class|function|func|void|int|String)\\s+[^\\n]*\\{?\\s*$)",
             Pattern.MULTILINE
         );
-        
+
         java.util.regex.Matcher matcher = pattern.matcher(code);
         int lastEnd = 0;
-        
+
         while (matcher.find()) {
-            // 保留第一个匹配前的文本（可能包含章节标题、说明文字等）
             functions.add(code.substring(lastEnd, matcher.start()).trim());
             lastEnd = matcher.start();
         }
-        
+
         if (lastEnd < code.length()) {
             functions.add(code.substring(lastEnd).trim());
         }
-        
+
         return functions.isEmpty() ? Collections.singletonList(code) : functions;
     }
 
@@ -175,94 +168,91 @@ public class SmartChunkService {
      * 对话切割 - 按轮次
      */
     private List<String> splitByConversationTurns(String content, ChunkConfig config) {
-        // 按对话角色分割
         Pattern pattern = Pattern.compile(
             "(?m)^(?:(?:User|Human|Assistant|AI|System):\\s*)",
             Pattern.MULTILINE | Pattern.CASE_INSENSITIVE
         );
-        
+
         String[] turns = pattern.split(content);
         List<String> chunks = new ArrayList<>();
-        
+
         StringBuilder currentChunk = new StringBuilder();
         int currentTokens = 0;
-        
+
         for (String turn : turns) {
             turn = turn.trim();
             if (turn.isEmpty()) continue;
-            
+
             int turnTokens = estimateTokens(turn);
-            
-            // 保持对话轮次完整性
+
             if (currentTokens + turnTokens > config.getMaxTokens() && currentChunk.length() > 0) {
                 chunks.add(currentChunk.toString().trim());
                 currentChunk = new StringBuilder();
                 currentTokens = 0;
             }
-            
+
             currentChunk.append(turn).append("\n\n");
             currentTokens += turnTokens;
         }
-        
+
         if (currentChunk.length() > 0) {
             chunks.add(currentChunk.toString().trim());
         }
-        
+
         return chunks;
     }
 
     /**
-     * 语义边界切割 - 核心算法
-     * 使用句子边界 + 语义相似度
+     * 段落切割 —— 按双换行（自然段落边界）切分
+     * <p>
+     * 不再对每句话做嵌入推理（之前 splitBySemanticBoundaries 的 ONNX 调用已移除）。
+     * 段落是教学文档最自然的语义边界，免费且准确。
+     * 段落过大时按句子边界再切。
      */
-    private List<String> splitBySemanticBoundaries(String content, ChunkConfig config) {
-        // 1. 按句子分割
-        String[] sentences = content.split("(?<=[。！？.!?])\\s+");
-        
-        if (sentences.length == 0) {
-            return Collections.singletonList(content);
-        }
-        
+    private List<String> splitByParagraphs(String content, ChunkConfig config) {
         List<String> chunks = new ArrayList<>();
-        StringBuilder currentChunk = new StringBuilder();
-        int currentTokens = 0;
-        
-        // 获取句子嵌入向量（批量优化）
-        List<float[]> embeddings = embeddingService.embedBatch(Arrays.asList(sentences));
-        
-        for (int i = 0; i < sentences.length; i++) {
-            String sentence = sentences[i].trim();
-            if (sentence.isEmpty()) continue;
-            
-            int sentenceTokens = estimateTokens(sentence);
-            
-            // 检查语义边界
-            boolean isBoundary = false;
-            if (i > 0 && currentChunk.length() > 0) {
-                double similarity = cosineSimilarity(embeddings.get(i), embeddings.get(i-1));
-                // 语义相似度低 = 主题转换 = 切割点
-                if (similarity < SEMANTIC_THRESHOLD) {
-                    isBoundary = true;
-                }
+
+        String[] paragraphs = content.split("\\n\\s*\\n");
+        for (String para : paragraphs) {
+            para = para.trim();
+            if (para.isEmpty()) continue;
+
+            if (estimateTokens(para) <= config.getMaxTokens()) {
+                chunks.add(para);
+            } else {
+                // 段落太大 → 按句子边界再切
+                chunks.addAll(splitBySentence(para, config));
             }
-            
-            // 如果超出token限制或遇到语义边界，保存当前chunk
-            if ((currentTokens + sentenceTokens > config.getMaxTokens() || isBoundary) 
-                && currentChunk.length() > 0) {
-                chunks.add(currentChunk.toString().trim());
-                currentChunk = new StringBuilder();
-                currentTokens = 0;
+        }
+
+        return chunks.isEmpty() ? Collections.singletonList(content) : chunks;
+    }
+
+    /**
+     * 按句子边界切分一段过大的文本
+     */
+    private List<String> splitBySentence(String text, ChunkConfig config) {
+        List<String> result = new ArrayList<>();
+        String[] sentences = text.split("(?<=[。！？.!?])");
+        StringBuilder buf = new StringBuilder();
+        int bufTokens = 0;
+
+        for (String s : sentences) {
+            s = s.trim();
+            if (s.isEmpty()) continue;
+            int st = estimateTokens(s);
+            if (bufTokens + st > config.getMaxTokens() && buf.length() > 0) {
+                result.add(buf.toString().trim());
+                buf = new StringBuilder();
+                bufTokens = 0;
             }
-            
-            currentChunk.append(sentence).append(" ");
-            currentTokens += sentenceTokens;
+            buf.append(s);
+            bufTokens += st;
         }
-        
-        if (currentChunk.length() > 0) {
-            chunks.add(currentChunk.toString().trim());
+        if (buf.length() > 0) {
+            result.add(buf.toString().trim());
         }
-        
-        return chunks;
+        return result;
     }
 
     /**
@@ -270,11 +260,10 @@ public class SmartChunkService {
      */
     private List<DocumentChunk> applySlidingWindow(List<String> rawChunks, ChunkConfig config) {
         List<DocumentChunk> chunks = new ArrayList<>();
-        
+
         for (int i = 0; i < rawChunks.size(); i++) {
             String content = rawChunks.get(i);
-            
-            // 如果内容仍太大，进一步分割
+
             if (estimateTokens(content) > config.getMaxTokens()) {
                 List<String> subChunks = splitByFixedSize(content, config);
                 for (int j = 0; j < subChunks.size(); j++) {
@@ -284,12 +273,11 @@ public class SmartChunkService {
                 chunks.add(createChunk(content, i, 0, rawChunks.size()));
             }
         }
-        
+
         // 添加相邻chunk的上下文引用
         for (int i = 0; i < chunks.size(); i++) {
             DocumentChunk chunk = chunks.get(i);
-            
-            // 添加上下文摘要
+
             if (i > 0) {
                 chunk.setPrevSummary(summarize(chunks.get(i - 1).getContent()));
             }
@@ -297,7 +285,7 @@ public class SmartChunkService {
                 chunk.setNextSummary(summarize(chunks.get(i + 1).getContent()));
             }
         }
-        
+
         return chunks;
     }
 
@@ -306,25 +294,24 @@ public class SmartChunkService {
      */
     private List<String> splitByFixedSize(String content, ChunkConfig config) {
         List<String> chunks = new ArrayList<>();
-        int maxChars = config.getMaxTokens() * 4; // 粗略估算
+        int maxChars = config.getMaxTokens() * 4;
         int overlapChars = config.getOverlapTokens() * 4;
-        
+
         int start = 0;
         while (start < content.length()) {
             int end = Math.min(start + maxChars, content.length());
-            
-            // 尝试在句子边界结束
+
             if (end < content.length()) {
                 int lastSentenceEnd = findLastSentenceEnd(content, start, end);
                 if (lastSentenceEnd > start) {
                     end = lastSentenceEnd;
                 }
             }
-            
+
             chunks.add(content.substring(start, end).trim());
-            start = end - overlapChars;
+            start = Math.max(0, end - overlapChars);
         }
-        
+
         return chunks;
     }
 
@@ -337,10 +324,10 @@ public class SmartChunkService {
         int lastExclaim = substring.lastIndexOf('！');
         int lastQuestion = substring.lastIndexOf('？');
         int lastDot = substring.lastIndexOf('.');
-        
-        int lastEnd = Math.max(Math.max(lastPeriod, lastExclaim), 
+
+        int lastEnd = Math.max(Math.max(lastPeriod, lastExclaim),
                                Math.max(lastQuestion, lastDot));
-        
+
         return lastEnd > 0 ? start + lastEnd + 1 : end;
     }
 
@@ -363,7 +350,6 @@ public class SmartChunkService {
      * 生成摘要（用于上下文引用）
      */
     private String summarize(String content) {
-        // 简单摘要：取前100个字符
         if (content.length() <= 100) {
             return content;
         }
@@ -374,28 +360,7 @@ public class SmartChunkService {
      * 估算token数量（粗略）
      */
     private int estimateTokens(String text) {
-        // 中文约1.5字符/token，英文约4字符/token
-        // 简化计算：平均3.5字符/token
         return text.length() / 3;
-    }
-
-    /**
-     * 计算余弦相似度
-     */
-    private double cosineSimilarity(float[] a, float[] b) {
-        if (a.length != b.length) return 0;
-        
-        double dot = 0;
-        double normA = 0;
-        double normB = 0;
-        
-        for (int i = 0; i < a.length; i++) {
-            dot += a[i] * b[i];
-            normA += a[i] * a[i];
-            normB += b[i] * b[i];
-        }
-        
-        return dot / (Math.sqrt(normA) * Math.sqrt(normB));
     }
 
     /**
@@ -413,7 +378,6 @@ public class SmartChunkService {
         private int maxTokens = DEFAULT_MAX_TOKENS;
         private int overlapTokens = DEFAULT_OVERLAP_TOKENS;
         private boolean preserveStructure = true;
-        private boolean useSemanticBoundaries = true;
 
         public static ChunkConfig defaultConfig() {
             return new ChunkConfig();

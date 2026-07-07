@@ -148,7 +148,7 @@ public class S3FileStorageServiceImpl implements FileStorageService {
             for (String cs : charsets) {
                 try {
                     return new String(bytes, java.nio.charset.Charset.forName(cs));
-                } catch (Exception ignored) {}
+                } catch (java.nio.charset.UnsupportedCharsetException ignored) {}
             }
             return new String(bytes);
 

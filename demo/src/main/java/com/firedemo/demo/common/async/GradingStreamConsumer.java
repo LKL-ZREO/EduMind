@@ -147,6 +147,7 @@ public class GradingStreamConsumer extends AbstractStreamConsumer {
             Submission submission = submissionMapper.selectById(submissionId);
             if (submission == null) {
                 log.warn("提交记录不存在: submissionId={}", submissionId);
+                ack(messageId);
                 return;
             }
 
@@ -217,8 +218,8 @@ public class GradingStreamConsumer extends AbstractStreamConsumer {
         String kpNames = buildKpNames(submission.getClassId());
         String kpContext = buildKpContext(kpNames);
 
-        // 5. 查缓存 — 命中则跳过 LLM 调用
-        String cacheKey = buildCacheKey(taskDescription, studentRequirement, fileContent, kpNames);
+        // 5. 查缓存 — 命中则跳过 LLM 调用（key = submissionId + 题目 + 知识点 + 模板哈希）
+        String cacheKey = buildCacheKey(submissionId, taskDescription, kpNames);
         EvaluationResultDTO evaluation = getCachedResult(cacheKey);
 
         if (evaluation == null) {
@@ -341,8 +342,9 @@ public class GradingStreamConsumer extends AbstractStreamConsumer {
                 if (task.getAllowLate() != null && task.getAllowLate()
                         && task.getLatePenalty() != null && task.getLatePenalty() > 0) {
                     sub.setPenaltyApplied(true);
-                    long days = java.time.Duration.between(task.getDeadline(), LocalDateTime.now()).toDays();
-                    int penalty = (int) Math.ceil(days) * task.getLatePenalty();
+                    long rawDays = java.time.Duration.between(task.getDeadline(), LocalDateTime.now()).toDays();
+                    int days = (int) Math.min(rawDays, 30);  // 最多扣 30 天，防止溢出
+                    int penalty = days * task.getLatePenalty();
                     sub.setFinalScore(Math.max(0, (eval.getTotalScore() != null ? eval.getTotalScore() : 0) - penalty));
                 }
             }
@@ -403,15 +405,20 @@ public class GradingStreamConsumer extends AbstractStreamConsumer {
     // ==================== 批改结果缓存 ====================
 
     /**
-     * 构建缓存键：SHA-256(题目 + 学生说明 + 代码 + 知识点 + 模板哈希)
+     * 构建缓存键：SHA-256(submissionId + 题目 + 知识点 + 模板哈希)
+     * <p>
+     * <b>不再包含 fileContent。</b> submissionId 已经唯一标识了代码版本：
+     * <ul>
+     *   <li>同一 submissionId 重复批改 → 缓存命中（省 AI 调用）</li>
+     *   <li>学生修改代码后<b>重新提交</b> → 新 submissionId → 新 key → 不会命中旧缓存</li>
+     *   <li>老师修改了题目或知识点后重批 → key 中 taskDescription/kpNames 变了 → 缓存 miss</li>
+     * </ul>
      */
-    private String buildCacheKey(String taskDescription, String studentRequirement,
-                                  String fileContent, String kpNames) {
+    private String buildCacheKey(Long submissionId, String taskDescription, String kpNames) {
         String raw = String.join("|",
-                taskDescription,
-                studentRequirement != null ? studentRequirement : "",
-                fileContent,
-                kpNames,
+                String.valueOf(submissionId),
+                taskDescription != null ? taskDescription : "",
+                kpNames != null ? kpNames : "",
                 promptTemplateHash);
         return "grading:cache:" + sha256(raw);
     }

@@ -11,8 +11,9 @@ import com.firedemo.demo.Service.FileStorageService;
 import com.firedemo.demo.mapper.DirectoryNodeMapper;
 import com.firedemo.demo.mapper.DocumentMapper;
 import com.firedemo.demo.mapper.SharedKbMemberMapper;
-import com.firedemo.demo.rag.EmbeddingService;
-import com.firedemo.demo.rag.RrfFusionService;
+import com.firedemo.demo.rag.RagResult;
+import com.firedemo.demo.rag.RagSearchRequest;
+import com.firedemo.demo.rag.RagService;
 import com.firedemo.demo.rag.SmartChunkService;
 import com.firedemo.demo.rag.VectorStoreService;
 import lombok.RequiredArgsConstructor;
@@ -44,9 +45,8 @@ public class DocumentServiceImpl implements DocumentService {
     private final SharedKbMemberMapper sharedKbMemberMapper;
     private final FileStorageService fileStorageService;
     private final SmartChunkService chunkService;
-    private final EmbeddingService embeddingService;
     private final VectorStoreService vectorStoreService;
-    private final RrfFusionService rrfFusionService;
+    private final RagService ragService;
 
     @Value("${storage.upload-dir:${user.home}/.homework-grader/uploads}")
     private String uploadDir;
@@ -182,18 +182,13 @@ public class DocumentServiceImpl implements DocumentService {
         }
     }
 
-    // 每路检索的候选数（多取一些参与融合，最后截断到 topK）
-    private static final int CANDIDATE_MULTIPLIER = 3;
-
     @Override
     public List<String> searchRelevantContent(String query, int topK) {
         return searchRelevantContent(query, topK, null);
     }
 
     /**
-     * RRF 混合检索 —— 按用户权限隔离
-     * <p>userId == null → 全库检索（兼容模式）
-     * <p>userId != null → 私人文档(user_id=?) + 已加入的共享知识库(kb_id IN)
+     * RRF 混合检索 —— 委托 {@link RagService} 统一处理
      *
      * @param query  查询文本
      * @param topK   返回条数
@@ -202,26 +197,21 @@ public class DocumentServiceImpl implements DocumentService {
      */
     @Override
     public List<String> searchRelevantContent(String query, int topK, Long userId) {
-        // 获取用户可访问的共享知识库
         Set<Long> accessibleKbIds = null;
         if (userId != null) {
             accessibleKbIds = sharedKbMemberMapper.selectKbIdsByUserId(userId);
         }
-        // ===== 1. 语义向量检索（第一路，带权限过滤）=====
-        float[] queryEmbedding = embeddingService.embedQuery(query);
-        List<DocumentChunk> vectorResults = vectorStoreService.similaritySearch(
-                queryEmbedding, topK * CANDIDATE_MULTIPLIER, userId, accessibleKbIds);
 
-        // ===== 2. 关键词检索（第二路，带权限过滤）=====
-        List<VectorStoreService.ScoredChunk> keywordResults = vectorStoreService.keywordSearch(
-                query, topK * CANDIDATE_MULTIPLIER, userId, accessibleKbIds);
-        List<DocumentChunk> keywordChunks = keywordResults.stream()
-                .map(VectorStoreService.ScoredChunk::chunk)
-                .toList();
+        RagResult result = ragService.search(RagSearchRequest.builder()
+                .query(query)
+                .topK(topK)
+                .userId(userId)
+                .accessibleKbIds(accessibleKbIds)
+                .enableReranker(false)  // 兼容旧行为：不触发 Reranker
+                .format(RagSearchRequest.Format.RAW_RESULTS)
+                .build());
 
-        // ===== 3. RRF 融合（委托 RrfFusionService）=====
-        return rrfFusionService.fuse(vectorResults, keywordChunks).stream()
-                .limit(topK)
+        return result.getResults().stream()
                 .map(sc -> sc.chunk().getContent())
                 .toList();
     }

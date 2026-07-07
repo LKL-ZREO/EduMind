@@ -117,6 +117,6 @@ public class SharedKbController {
         String auth = request.getHeader("Authorization");
         if (auth == null || !auth.startsWith(TOKEN_PREFIX)) return null;
         try { return jwtUtil.getUserIdFromToken(auth.substring(TOKEN_PREFIX.length())); }
-        catch (Exception e) { return null; }
+        catch (Exception e) { log.warn("共享知识库 Token 解析失败: {}", e.getMessage()); return null; }
     }
 }

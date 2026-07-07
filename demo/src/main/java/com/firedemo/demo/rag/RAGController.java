@@ -60,18 +60,6 @@ public class RAGController {
         return result;
     }
 
-    // ==================== upload check ====================
-
-    @GetMapping("/check-uploaded")
-    public Map<String, Object> checkUploaded(@RequestParam("classId") Long classId) {
-        // 仪表盘 RAG 上传已禁用，始终返回 false
-        Map<String, Object> result = new HashMap<>();
-        result.put("classId", classId);
-        result.put("uploadedToday", false);
-        result.put("message", "仪表盘数据不应存入知识库");
-        return result;
-    }
-
     // ==================== DTOs ====================
 
     @lombok.Data

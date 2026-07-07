@@ -2,9 +2,6 @@ package com.firedemo.demo.mcp.tools;
 
 import com.firedemo.demo.Entity.ClassInfo;
 import com.firedemo.demo.Entity.ClassStudent;
-import com.firedemo.demo.Entity.Course;
-import com.firedemo.demo.Entity.DocumentChunk;
-import com.firedemo.demo.Service.CourseService;
 import com.firedemo.demo.mapper.ClassInfoMapper;
 import com.firedemo.demo.mapper.ClassStudentMapper;
 import com.firedemo.demo.mapper.SharedKbMemberMapper;
@@ -20,53 +17,38 @@ import org.springframework.stereotype.Component;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 /**
- * MCP 工具：知识库 RAG 检索（全管线版）
+ * MCP 工具：知识库 RAG 检索（委托 RagService）
+ *
  * <pre>
- *   检索链路：Embedding → pgvector + ILIKE → RRF 融合 → Reranker 精排
+ *   检索链路：Embedding → pgvector + ILIKE（双路） → RRF 融合 → Reranker 精排
+ *   LLM 自主判断是否调用此工具，实现 Agentic RAG。
  * </pre>
- * LLM 自主判断是否调用此工具，实现 Agentic RAG。
  */
 @Slf4j
 @Component
 public class KnowledgeSearchTool implements ToolDefinition {
 
-    private final EmbeddingService embeddingService;
-    private final VectorStoreService vectorStoreService;
-    private final RrfFusionService rrfFusionService;
-    private final RerankerService rerankerService;
-    private final QueryRewriter queryRewriter;
+    private final RagService ragService;
     private final McpSessionStore mcpSessionStore;
     private final ClassInfoMapper classInfoMapper;
     private final StudentQqBindingMapper studentQqBindingMapper;
     private final ClassStudentMapper classStudentMapper;
     private final SharedKbMemberMapper sharedKbMemberMapper;
-    private final CourseService courseService;
 
-    public KnowledgeSearchTool(EmbeddingService embeddingService,
-                               VectorStoreService vectorStoreService,
-                               RrfFusionService rrfFusionService,
-                               RerankerService rerankerService,
-                               QueryRewriter queryRewriter,
+    public KnowledgeSearchTool(RagService ragService,
                                McpSessionStore mcpSessionStore,
                                ClassInfoMapper classInfoMapper,
                                StudentQqBindingMapper studentQqBindingMapper,
                                ClassStudentMapper classStudentMapper,
-                               SharedKbMemberMapper sharedKbMemberMapper,
-                               CourseService courseService) {
-        this.embeddingService = embeddingService;
-        this.vectorStoreService = vectorStoreService;
-        this.rrfFusionService = rrfFusionService;
-        this.rerankerService = rerankerService;
-        this.queryRewriter = queryRewriter;
+                               SharedKbMemberMapper sharedKbMemberMapper) {
+        this.ragService = ragService;
         this.mcpSessionStore = mcpSessionStore;
         this.classInfoMapper = classInfoMapper;
         this.studentQqBindingMapper = studentQqBindingMapper;
         this.classStudentMapper = classStudentMapper;
         this.sharedKbMemberMapper = sharedKbMemberMapper;
-        this.courseService = courseService;
     }
 
     @Override
@@ -117,94 +99,54 @@ public class KnowledgeSearchTool implements ToolDefinition {
         int topK = Math.max(1, Math.min(10, getInt(arguments, "topK", 3)));
 
         log.info("MCP Tool searchKnowledge: query={}, topK={}", query, topK);
-        log.debug("MCP Tool searchKnowledge diag: sessionId={}, groupId={}, userId={}",
-                arguments.get("sessionId"), arguments.get("groupId"), arguments.get("userId"));
 
         try {
-            RagTrace trace = new RagTrace(query);
-
-            // ① Query Rewrite
-            trace.step("rewrite");
-            query = queryRewriter.rewrite(query);
-            trace.endStep(query);
-
-            // ② Embedding
-            trace.step("embed");
-            float[] queryEmbedding = embeddingService.embedQuery(query);
-            trace.endStep();
-
-            // 获取当前用户上下文（多路径解析，优先级递减）
-            ToolContext ctx = ToolContextHolder.get();                          // ① McpController ThreadLocal
+            // ① 解析用户上下文（多路径，优先级递减）
+            ToolContext ctx = ToolContextHolder.get();                          // McpController ThreadLocal
             if (ctx == null) {
                 String sid = (String) arguments.get("sessionId");
                 if (sid != null && !sid.isEmpty()) {
-                    ctx = mcpSessionStore.get(sid);                            // ② ChatController Redis
+                    ctx = mcpSessionStore.get(sid);                            // ChatController Redis
                 }
             }
             if (ctx == null) {
-                ctx = resolveByGroupId((String) arguments.get("groupId"));    // ③ QQ群 → 班级 → 老师
+                ctx = resolveByGroupId((String) arguments.get("groupId"));    // QQ群 → 班级 → 老师
             }
             if (ctx == null) {
-                ctx = resolveByQq((String) arguments.get("userId"));          // ④ QQ号 → 学生 → 班级 → 老师
+                ctx = resolveByQq((String) arguments.get("userId"));          // QQ号 → 学生 → 班级 → 老师
             }
+
             Long userId = ctx != null ? ctx.getUserId() : null;
             Set<Long> accessibleKbIds = ctx != null ? ctx.getAccessibleKbIds() : null;
-            log.info("RAG filter: userId={}, kbIds={}", userId, accessibleKbIds);
+            Long courseId = ctx != null ? ctx.getCourseId() : null;
 
-            // ③ 双路并行检索（带权限过滤）
-            trace.step("vector");
-            List<DocumentChunk> vectorResults = vectorStoreService.similaritySearch(
-                    queryEmbedding, topK * 2, userId, accessibleKbIds);
-            trace.set("vectorHits", vectorResults.size()).endStep();
+            // ② 委托 RagService 统一检索
+            RagSearchRequest request = RagSearchRequest.builder()
+                    .query(query)
+                    .topK(topK)
+                    .userId(userId)
+                    .accessibleKbIds(accessibleKbIds)
+                    .courseId(courseId)
+                    .enableReranker(true)
+                    .sessionId((String) arguments.get("sessionId"))
+                    .format(RagSearchRequest.Format.FORMATTED_CONTENT)
+                    .build();
 
-            trace.step("keyword");
-            List<VectorStoreService.ScoredChunk> keywordScored = vectorStoreService.keywordSearch(
-                    query, topK * 2, userId, accessibleKbIds);
-            List<DocumentChunk> keywordResults = keywordScored.stream()
-                    .map(VectorStoreService.ScoredChunk::chunk)
-                    .collect(Collectors.toList());
-            trace.set("keywordHits", keywordResults.size()).endStep();
+            RagResult result = ragService.search(request);
 
-            if (vectorResults.isEmpty() && keywordResults.isEmpty()) {
-                log.info("RAG Trace: {}", trace.finish(0));
-                return "知识库中未找到与「" + query + "」相关的内容。";
+            if (!result.isHasContext()) {
+                return result.getFormattedContent();
             }
 
-            // ④ RRF 融合
-            trace.step("rrf");
-            List<RrfFusionService.ScoredChunk> fused = rrfFusionService.fuse(vectorResults, keywordResults);
-            trace.set("rrfFused", fused.size()).endStep();
-
-            // ⑤ Reranker 精排
-            trace.step("reranker");
-            List<RrfFusionService.ScoredChunk> reranked = rerankerService.rerank(query, fused, topK, trace);
-            trace.endStep();
-
-            log.info("RAG Trace: {}", trace.finish(0));
-
-            // ⑥ 构建课程上下文头部（告诉 Jarvis 当前是哪个课程）
-            String courseHeader = buildCourseHeader(ctx);
-
-            // ⑦ 格式化输出
-            String body = reranked.stream()
-                    .map(sc -> {
-                        DocumentChunk chunk = sc.chunk();
-                        String docName = chunk.getDocumentName();
-                        String content = chunk.getContent();
-                        String truncated = content.length() > 500
-                                ? content.substring(0, 500) + "…"
-                                : content;
-                        return (docName != null ? "【" + docName + "】\n" : "") + truncated;
-                    })
-                    .collect(Collectors.joining("\n\n---\n\n"));
-
-            return courseHeader + body;
+            return result.getFormattedContent();
 
         } catch (Exception e) {
             log.error("知识库搜索失败", e);
             return "搜索知识库时出错: " + e.getMessage();
         }
     }
+
+    // ==================== 上下文解析 ====================
 
     /**
      * 通过 QQ群号解析上下文：群号 → 班级 → 老师 → KB权限 + 课程ID
@@ -216,10 +158,7 @@ public class KnowledgeSearchTool implements ToolDefinition {
             if (cls != null && cls.getTeacherId() != null) {
                 Long teacherId = cls.getTeacherId();
                 Set<Long> kbIds = sharedKbMemberMapper.selectKbIdsByUserId(teacherId);
-                Long courseId = cls.getCourseId();
-                log.debug("GroupId resolve: groupId={}, class={}, teacher={}, kbIds={}, courseId={}",
-                        groupId, cls.getName(), teacherId, kbIds != null ? kbIds.size() : 0, courseId);
-                return new ToolContext(teacherId, kbIds, courseId);
+                return new ToolContext(teacherId, kbIds, cls.getCourseId());
             }
         } catch (Exception e) {
             log.warn("通过群号解析上下文失败: groupId={}", groupId, e);
@@ -241,10 +180,7 @@ public class KnowledgeSearchTool implements ToolDefinition {
                     if (cls != null && cls.getTeacherId() != null) {
                         Long teacherId = cls.getTeacherId();
                         Set<Long> kbIds = sharedKbMemberMapper.selectKbIdsByUserId(teacherId);
-                        Long courseId = cls.getCourseId();
-                        log.debug("QQ resolve: qq={}, student={}, class={}, teacher={}, kbIds={}, courseId={}",
-                                qqNumber, studentId, cls.getName(), teacherId, kbIds != null ? kbIds.size() : 0, courseId);
-                        return new ToolContext(teacherId, kbIds, courseId);
+                        return new ToolContext(teacherId, kbIds, cls.getCourseId());
                     }
                 }
             }
@@ -252,29 +188,6 @@ public class KnowledgeSearchTool implements ToolDefinition {
             log.warn("通过QQ号解析上下文失败: qqNumber={}", qqNumber, e);
         }
         return null;
-    }
-
-    /**
-     * 构建课程上下文头部，注入到检索结果中，让 Jarvis 知道当前是哪个课程。
-     */
-    private String buildCourseHeader(ToolContext ctx) {
-        if (ctx == null || ctx.getCourseId() == null) return "";
-        try {
-            Course course = courseService.getById(ctx.getCourseId());
-            if (course != null) {
-                String header = String.format(
-                        "\n【系统提示】当前对话所属课程：%s。",
-                        course.getName());
-                if (course.getKnowledgeScope() != null && !course.getKnowledgeScope().isEmpty()) {
-                    header += String.format("知识范围：%s。", course.getKnowledgeScope());
-                }
-                header += "请以此课程助教身份回答问题。\n\n";
-                return header;
-            }
-        } catch (Exception e) {
-            log.warn("构建课程上下文头部失败: courseId={}", ctx.getCourseId(), e);
-        }
-        return "";
     }
 
     private int getInt(Map<String, Object> args, String key, int defaultValue) {
