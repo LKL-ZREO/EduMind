@@ -104,7 +104,7 @@ router.beforeEach((to: RouteLocationNormalized) => {
 })
 
 // AI 回复中切换页面 → 确认弹窗
-router.beforeEach((to) => {
+router.beforeEach((_to) => {
   // 在 Pinia store 可用时才检查（确保组件已初始化）
   try {
     const chatStore = useChatStore()
