@@ -193,10 +193,10 @@
           <el-option v-for="kb in [...myKbs, ...joinedKbs]" :key="kb.id" :value="kb.id" :label="kb.name" />
         </el-select>
       </div>
-      <el-upload ref="uploadRef" v-model:file-list="uploadFileList" :auto-upload="false" drag multiple accept=".txt,.md,.pdf,.doc,.docx" :on-change="(_, files) => uploadFileList = files" class="kb-upload">
+      <el-upload ref="uploadRef" v-model:file-list="uploadFileList" :auto-upload="false" drag multiple accept=".txt,.md,.pdf,.doc,.docx,.ppt,.pptx" :on-change="(_, files) => uploadFileList = files" class="kb-upload">
         <el-icon class="el-icon--upload" :size="40"><UploadFilled /></el-icon>
         <div class="el-upload__text">拖拽文件到此处，或 <em>点击选择</em></div>
-        <template #tip><div class="el-upload__tip">支持 .txt .md .pdf .doc .docx</div></template>
+        <template #tip><div class="el-upload__tip">支持 .txt .md .pdf .doc .docx .ppt .pptx</div></template>
       </el-upload>
       <template #footer><el-button @click="uploadVisible = false">取消</el-button><el-button type="primary" :loading="uploadLoading" :disabled="uploadFileList.length === 0" @click="submitUpload">上传 {{ uploadFileList.length ? `${uploadFileList.length} 个文件` : '' }}</el-button></template>
     </el-dialog>

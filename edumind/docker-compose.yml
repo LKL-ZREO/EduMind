@@ -108,6 +108,8 @@ services:
       ONEBOT_HTTP_TOKEN: ${ONEBOT_TOKEN:-change-me}
       # Reranker 模型目录（可选，未安装 ONNX 模型时自动回退）
       AI_MODEL_DIR: ${AI_MODEL_DIR:-/app/models}
+      # 日志输出目录
+      LOG_DIR: /root/.edumind/logs
       # S3 对象存储（local=本地磁盘，s3=MinIO/OSS/COS）
       STORAGE_TYPE: ${STORAGE_TYPE:-local}
       S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
@@ -119,6 +121,7 @@ services:
     volumes:
       - uploads:/root/.homework-grader/uploads
       - djl_models:/root/.djl
+      - logs:/root/.edumind/logs
     depends_on:
       postgres:
         condition: service_healthy
@@ -152,6 +155,53 @@ services:
       timeout: 3s
       retries: 3
 
+  # ======================== Prometheus 指标采集 ========================
+  prometheus:
+    image: prom/prometheus:v2.55.0
+    container_name: firedemo-prometheus
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"
+      - "--web.enable-lifecycle"
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      - app
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ======================== Grafana 指标可视化 ========================
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: firedemo-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_INSTALL_PLUGINS: ""
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    depends_on:
+      - prometheus
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
 volumes:
   pgdata:
   redis_data:
@@ -159,3 +209,6 @@ volumes:
   minio_data:
   uploads:
   djl_models:
+  logs:
+  prometheus_data:
+  grafana_data:

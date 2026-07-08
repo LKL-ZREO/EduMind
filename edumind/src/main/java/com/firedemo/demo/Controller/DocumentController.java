@@ -166,7 +166,7 @@ public class DocumentController {
         }
 
         try {
-            // 使用 FileStorageService（Apache Tika）解析，支持 txt/md/pdf/doc/docx
+            // 使用 FileStorageService（Apache Tika）解析，支持 txt/md/pdf/doc/docx/ppt/pptx
             String content = fileStorageService.readFileContent(document.getFilePath());
             return ResponseEntity.ok(content);
         } catch (Exception e) {

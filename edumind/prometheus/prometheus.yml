@@ -1,0 +1,29 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: edumind
+    env: production
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+      # 生产环境替换为实际 Alertmanager 地址:
+      #   - targets: ['alertmanager:9093']
+
+rule_files:
+  # - "alerts.yml"  # 生产环境启用告警规则
+
+scrape_configs:
+  - job_name: "edumind"
+    metrics_path: "/actuator/prometheus"
+    scrape_interval: 10s
+    static_configs:
+      - targets: ["host.docker.internal:8080"]
+        labels:
+          service: "edumind-backend"
+
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]

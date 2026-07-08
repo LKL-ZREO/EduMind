@@ -1,0 +1,165 @@
+package com.firedemo.demo.Controller;
+
+import com.firedemo.demo.DTO.*;
+import com.firedemo.demo.Entity.ClassInfo;
+import com.firedemo.demo.Entity.ClassStudent;
+import com.firedemo.demo.Service.ClassService;
+import com.firedemo.demo.common.result.Result;
+import com.firedemo.demo.utils.JwtUtil;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.*;
+import java.util.stream.Collectors;
+
+/**
+ * 班级管理控制器（教师端）
+ */
+@Slf4j
+@RestController
+@RequestMapping("/api/teacher/classes")
+@RequiredArgsConstructor
+public class ClassController {
+
+    private final ClassService classService;
+    private final JwtUtil jwtUtil;
+
+    /**
+     * 获取当前教师的班级列表（按课程分组）
+     */
+    @GetMapping
+    public Result<List<ClassGroupDTO>> listClasses(HttpServletRequest request) {
+        Long userId = jwtUtil.getUserIdFromRequest(request);
+        if (userId == null) return Result.error(401, "未登录");
+        return Result.success(classService.listGroupedByCourse(userId));
+    }
+
+    /**
+     * 创建班级
+     */
+    @PostMapping
+    public Result<ClassDetailDTO> createClass(@Valid @RequestBody CreateClassDTO dto,
+                                              HttpServletRequest request) {
+        Long userId = jwtUtil.getUserIdFromRequest(request);
+        if (userId == null) return Result.error(401, "未登录");
+        ClassInfo ci = classService.createClass(userId, dto);
+        return Result.success(toDetailDTO(ci));
+    }
+
+    /**
+     * 获取班级详情（含学生列表）
+     */
+    @GetMapping("/{id}")
+    public Result<Map<String, Object>> getClassDetail(@PathVariable Long id,
+                                                       HttpServletRequest request) {
+        Long userId = jwtUtil.getUserIdFromRequest(request);
+        if (userId == null) return Result.error(401, "未登录");
+
+        ClassInfo ci = classService.getClassById(id);
+        if (!ci.getTeacherId().equals(userId)) {
+            return Result.error(403, "无权访问此班级");
+        }
+
+        List<ClassStudent> students = classService.listStudentsByClassId(id);
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("class", toDetailDTO(ci));
+        result.put("students", students);
+        return Result.success(result);
+    }
+
+    /**
+     * 编辑班级
+     */
+    @PutMapping("/{id}")
+    public Result<Void> updateClass(@PathVariable Long id,
+                                    @Valid @RequestBody UpdateClassDTO dto,
+                                    HttpServletRequest request) {
+        Long userId = jwtUtil.getUserIdFromRequest(request);
+        if (userId == null) return Result.error(401, "未登录");
+        classService.updateClass(id, userId, dto);
+        return Result.success(null);
+    }
+
+    /**
+     * 删除班级（仅空班）
+     */
+    @DeleteMapping("/{id}")
+    public Result<Void> deleteClass(@PathVariable Long id,
+                                    HttpServletRequest request) {
+        Long userId = jwtUtil.getUserIdFromRequest(request);
+        if (userId == null) return Result.error(401, "未登录");
+        classService.deleteClass(id, userId);
+        return Result.success(null);
+    }
+
+    /**
+     * 归档/取消归档
+     */
+    @PostMapping("/{id}/archive")
+    public Result<Void> toggleArchive(@PathVariable Long id,
+                                       HttpServletRequest request) {
+        Long userId = jwtUtil.getUserIdFromRequest(request);
+        if (userId == null) return Result.error(401, "未登录");
+        classService.toggleArchive(id, userId);
+        return Result.success(null);
+    }
+
+    /**
+     * 移除学生
+     */
+    @DeleteMapping("/{id}/students/{studentId}")
+    public Result<Void> removeStudent(@PathVariable Long id,
+                                      @PathVariable String studentId,
+                                      HttpServletRequest request) {
+        Long userId = jwtUtil.getUserIdFromRequest(request);
+        if (userId == null) return Result.error(401, "未登录");
+        classService.removeStudent(id, studentId, userId);
+        return Result.success(null);
+    }
+
+    /**
+     * 批量导入学生
+     */
+    @PostMapping("/{id}/students/import")
+    public Result<Map<String, Integer>> importStudents(@PathVariable Long id,
+                                                        @Valid @RequestBody ImportStudentsDTO dto,
+                                                        HttpServletRequest request) {
+        Long userId = jwtUtil.getUserIdFromRequest(request);
+        if (userId == null) return Result.error(401, "未登录");
+        Map<String, Integer> result = classService.importStudents(id, userId, dto.getStudents());
+        return Result.success(result);
+    }
+
+    /**
+     * 通过邀请码加入班级（公开接口，无需登录）
+     */
+    @PostMapping("/join")
+    public Result<Map<String, String>> joinByInvite(@Valid @RequestBody JoinByInviteDTO dto) {
+        String className = classService.joinByInviteCode(
+                dto.getInviteCode(), dto.getStudentId(), dto.getStudentName());
+        Map<String, String> result = new HashMap<>();
+        result.put("className", className);
+        return Result.success(result);
+    }
+
+    // ========== 内部工具 ==========
+
+    private ClassDetailDTO toDetailDTO(ClassInfo ci) {
+        ClassDetailDTO dto = new ClassDetailDTO();
+        dto.setId(ci.getId());
+        dto.setName(ci.getName());
+        dto.setCourseGroup(ci.getCourseGroup());
+        dto.setCourseId(ci.getCourseId());
+        dto.setQqGroupId(ci.getQqGroupId());
+        dto.setDescription(ci.getDescription());
+        dto.setInviteCode(ci.getInviteCode());
+        dto.setStatus(ci.getStatus());
+        dto.setCreatedAt(ci.getCreatedAt());
+        dto.setUpdatedAt(ci.getUpdatedAt());
+        return dto;
+    }
+}

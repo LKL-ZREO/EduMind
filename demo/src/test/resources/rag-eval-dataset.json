@@ -1,0 +1,107 @@
+[
+  {
+    "id": 1,
+    "query": "C语言中标识符的命名规则是什么？",
+    "expectedKeywords": ["标识符", "字母", "数字", "下划线", "关键字"],
+    "expectedContent": ["合法的要求是由字母，数字，下划线组成", "第一个必须为字母或则是下划线", "不可以作为用户标识符号"],
+    "minChunksToCover": 2
+  },
+  {
+    "id": 2,
+    "query": "C语言程序从哪开始执行？main函数有什么特点？",
+    "expectedKeywords": ["main", "入口", "有且只有", "程序结构"],
+    "expectedContent": ["有且只有一个main函数", "从main()入口", "程序运行的起点"],
+    "minChunksToCover": 2
+  },
+  {
+    "id": 3,
+    "query": "printf和scanf的基本用法？",
+    "expectedKeywords": ["printf", "scanf", "格式说明", "输出", "输入", "地址"],
+    "expectedContent": ["scanf的第二个部分一定要是地址", "printf（\" 第一部分 \"，第二部分 ）", "一模一样"],
+    "minChunksToCover": 2
+  },
+  {
+    "id": 4,
+    "query": "C语言的数据类型有哪些？整型和字符型各占几个字节？",
+    "expectedKeywords": ["整型", "字符型", "双精度", "字节", "long", "unsigned"],
+    "expectedContent": ["整型一般是4个字节", "字符型是1个字节", "双精度一般是8个字节"],
+    "minChunksToCover": 2
+  },
+  {
+    "id": 5,
+    "query": "自加运算符++a和a++有什么区别？",
+    "expectedKeywords": ["自加", "++a", "a++", "先加后用", "先用后加"],
+    "expectedContent": ["++在前先加后用", "++在后先用后加", "++a 是先把变量的数值加上1"],
+    "minChunksToCover": 2
+  },
+  {
+    "id": 6,
+    "query": "C语言中的除法运算符/有什么注意事项？",
+    "expectedKeywords": ["除法", "整型", "小数", "取余"],
+    "expectedContent": ["两边都是整型的话，结果就是一个整型", "如果有一边是小数，那么结果就是小数", "3/2的结果就是1"],
+    "minChunksToCover": 2
+  },
+  {
+    "id": 7,
+    "query": "C语言中八进制和十六进制怎么表示？",
+    "expectedKeywords": ["八进制", "十六进制", "0开头", "0x开头", "进制转换"],
+    "expectedContent": ["八进制规定要以0开头", "十六进制规定要以0x开头", "没有二进制"],
+    "minChunksToCover": 2
+  },
+  {
+    "id": 8,
+    "query": "编译预处理是什么？define有什么注意事项？",
+    "expectedKeywords": ["编译预处理", "define", "分号", "不是C语言", "宏"],
+    "expectedContent": ["编译预处理不是C语言的一部分", "不占运行时间", "一定不能出现分号"],
+    "minChunksToCover": 2
+  },
+  {
+    "id": 9,
+    "query": "逗号表达式和赋值表达式的值怎么算？",
+    "expectedKeywords": ["逗号", "赋值", "表达式", "优先级别", "最右边"],
+    "expectedContent": ["逗号运算符的级别最低", "表达式的数值逗号最右边的那个表达式的数值", "赋值的级别倒数第二"],
+    "minChunksToCover": 2
+  },
+  {
+    "id": 10,
+    "query": "强制类型转换怎么写？有哪些取整丢小数的情况？",
+    "expectedKeywords": ["强制类型转换", "int", "取整", "小数"],
+    "expectedContent": ["一定是 （int）a 不是 int（a）", "注意类型上一定有括号的", "三种取整丢小数的情况"],
+    "minChunksToCover": 2
+  },
+  {
+    "id": 11,
+    "query": "字符型数据和整型数据有什么关系？ASCII码怎么记？",
+    "expectedKeywords": ["字符", "ASCII", "整型", "48", "65", "97"],
+    "expectedContent": ["字符型和整数是近亲", "'0' 的ASCII数值表示为48", "'A'的ASCII数值是65", "'a'的ASCII数值是97"],
+    "minChunksToCover": 2
+  },
+  {
+    "id": 12,
+    "query": "转义字符有哪些？八进制和十六进制转义字符怎么写？",
+    "expectedKeywords": ["转义字符", "\\n", "\\0", "八进制", "十六进制", "\\x"],
+    "expectedContent": ["一般转义字符：背诵\\0、 \\n、 \\'、 \\\"、 \\\\", "八进制转义字符： '\\141' 是合法的", "十六进制转义字符：'\\x6d' 才是合法的"],
+    "minChunksToCover": 2
+  },
+  {
+    "id": 13,
+    "query": "C语言的程序结构有哪三种？",
+    "expectedKeywords": ["程序结构", "顺序", "选择", "循环", "分支"],
+    "expectedContent": ["程序结构是三种: 顺序结构 、选择结构(分支结构)、循环结构"],
+    "minChunksToCover": 1
+  },
+  {
+    "id": 14,
+    "query": "位运算左移和右移的规则是什么？",
+    "expectedKeywords": ["位运算", "左移", "右移", "二进制", "异或"],
+    "expectedContent": ["<<左移一位表示乘以2", ">>右移一位表示除以2", "异或的位运算符号\" ^ \""],
+    "minChunksToCover": 2
+  },
+  {
+    "id": 15,
+    "query": "scanf输入时为什么要用取地址符&？",
+    "expectedKeywords": ["scanf", "地址", "&", "输入"],
+    "expectedContent": ["scanf的第二个部分一定要是地址", "scanf（\"%d，%d\"，x，y）这种写法绝对错误"],
+    "minChunksToCover": 1
+  }
+]

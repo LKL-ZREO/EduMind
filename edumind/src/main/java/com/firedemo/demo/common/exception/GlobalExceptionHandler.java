@@ -3,6 +3,7 @@ package com.firedemo.demo.common.exception;
 import com.firedemo.demo.common.result.Result;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.validation.BindException;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -35,6 +36,19 @@ public class GlobalExceptionHandler {
         return Result.error(ErrorCode.PARAM_ERROR.getCode(), message);
     }
     
+    /**
+     * @Valid 校验失败（@RequestBody JSON 请求体）
+     */
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public Result<Void> handleMethodArgumentNotValid(MethodArgumentNotValidException e) {
+        String message = e.getBindingResult().getFieldErrors().stream()
+                .map(error -> error.getField() + ": " + error.getDefaultMessage())
+                .findFirst()
+                .orElse("参数校验失败");
+        log.warn("参数校验失败: {}", message);
+        return Result.error(ErrorCode.PARAM_ERROR.getCode(), message);
+    }
+
     /**
      * 非法参数异常
      */

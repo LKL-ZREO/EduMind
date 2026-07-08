@@ -3,6 +3,8 @@ package com.firedemo.demo.rag;
 import com.firedemo.demo.Entity.Course;
 import com.firedemo.demo.Entity.DocumentChunk;
 import com.firedemo.demo.Service.CourseService;
+import io.micrometer.core.annotation.Timed;
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -58,8 +60,10 @@ public class RagService {
     }
 
     /**
-     * 统一检索入口
+     * 统一检索入口。
+     * 耗时作为 {@code rag.search} Timer 暴露到 Prometheus。
      */
+    @Timed(value = "rag.search", description = "RAG retrieval latency", histogram = true)
     public RagResult search(RagSearchRequest request) {
         long start = System.currentTimeMillis();
         String originalQuery = request.getQuery();

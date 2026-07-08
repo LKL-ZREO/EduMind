@@ -87,8 +87,6 @@ let pollTimer: ReturnType<typeof setInterval> | null = null
 const MAX_SIZE_MB = 20
 const acceptTypes = '.pdf,.doc,.docx,.txt,.jpg,.jpeg,.png,.zip,.rar'
 
-const apiBaseUrl = import.meta.env.VITE_API_URL || ''
-
 // ===== 生命周期 =====
 onMounted(async () => {
   await loadClasses()
@@ -103,10 +101,9 @@ onUnmounted(() => {
 // ===== 方法 =====
 async function loadClasses() {
   try {
-    const res = await fetch(`${apiBaseUrl}/api/homework/classes`)
-    const data = await res.json()
-    if (data.code === 200) {
-      classes.value = data.data
+    const res = await request.get('/homework/classes')
+    if (res.data.code === 200) {
+      classes.value = res.data.data
     }
   } catch (e) {
     console.error('加载班级列表失败', e)
@@ -121,10 +118,9 @@ async function onClassChange() {
   if (!selectedClassId.value) return
 
   try {
-    const res = await fetch(`${apiBaseUrl}/api/homework/tasks?classId=${selectedClassId.value}`)
-    const data = await res.json()
-    if (data.code === 200) {
-      tasks.value = data.data
+    const res = await request.get('/homework/tasks', { params: { classId: selectedClassId.value } })
+    if (res.data.code === 200) {
+      tasks.value = res.data.data
     }
   } catch (e) {
     console.error('加载作业列表失败', e)
@@ -329,19 +325,13 @@ async function submit() {
   }, 300)
 
   try {
-    const res = await fetch(`${apiBaseUrl}/api/homework/submit`, {
-      method: 'POST',
-      body: formData,
+    const res = await request.post('/homework/submit', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
     })
 
     clearInterval(progTimer)
 
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}))
-      throw new Error(data.message || data.error || '上传失败，请稍后重试')
-    }
-
-    const result = await res.json()
+    const result = res.data
 
     // 需要绑定QQ号
     if (result.code === 401 && result.data?.needBind) {
@@ -412,23 +402,18 @@ async function bindQq() {
 
   bindLoading.value = true
   try {
-    const res = await fetch(`${apiBaseUrl}/api/homework/bind-qq`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        studentId: bindStudentId.value,
-        studentName: bindStudentName.value,
-        qqNumber: qqNumberInput.value
-      })
+    const res = await request.post('/homework/bind-qq', {
+      studentId: bindStudentId.value,
+      studentName: bindStudentName.value,
+      qqNumber: qqNumberInput.value,
     })
-    const data = await res.json()
-    if (data.code === 200) {
+    if (res.data.code === 200) {
       showQqBindDialog.value = false
       qqNumberInput.value = ''
       // 自动重新提交
       submit()
     } else {
-      alert(data.message || '绑定失败')
+      alert(res.data.message || '绑定失败')
     }
   } catch (e) {
     alert('绑定失败，请检查网络')

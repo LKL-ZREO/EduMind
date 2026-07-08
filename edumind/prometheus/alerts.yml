@@ -1,0 +1,53 @@
+# EduMind 告警规则 —— 生产环境请取消 prometheus.yml 中 rule_files 的注释
+groups:
+  - name: edumind
+    rules:
+      # === 应用存活 ===
+      - alert: EduMindDown
+        expr: up{job="edumind"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "EduMind 应用不可用"
+          description: "实例 {{ $labels.instance }} 已 down 超过 1 分钟"
+
+      # === 高错误率 ===
+      - alert: HighErrorRate
+        expr: sum(rate(http_server_requests_seconds_count{status=~"5.."}[1m])) / sum(rate(http_server_requests_seconds_count[1m])) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "5xx 错误率超过 5%"
+          description: "当前 5xx 比例: {{ $value | humanizePercentage }}"
+
+      # === 高延迟 ===
+      - alert: HighLatency
+        expr: histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket[1m])) by (le)) > 3
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "API p99 延迟超过 3 秒"
+          description: "p99: {{ $value }}s"
+
+      # === RAG 检索慢 ===
+      - alert: RagSearchSlow
+        expr: histogram_quantile(0.95, sum(rate(rag_search_seconds_bucket[5m])) by (le)) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "RAG 检索 p95 延迟超过 5 秒"
+          description: "p95: {{ $value }}s — 可能 Embedding/Reranker 模型异常"
+
+      # === JVM 堆内存高水位 ===
+      - alert: HighHeapUsage
+        expr: sum(jvm_memory_used_bytes{area="heap"}) / sum(jvm_memory_max_bytes{area="heap"}) > 0.90
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "JVM 堆内存使用率超过 90%"
+          description: "当前: {{ $value | humanizePercentage }}"

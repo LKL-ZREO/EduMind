@@ -64,10 +64,14 @@ public class OnnxEmbeddingTranslator implements NoBatchifyTranslator<String, flo
         NDArray mask = manager.create(attentionMask).reshape(1, attentionMask.length);
         mask.setName("attention_mask");
 
+        // token_type_ids: 全零（单序列，无 segment 区分）
+        NDArray typeIds = manager.zeros(ids.getShape(), ids.getDataType());
+        typeIds.setName("token_type_ids");
+
         // 存入 context，供 processOutput 使用
         ctx.setAttachment(ATTACHMENT_MASK, mask);
 
-        return new NDList(ids, mask);
+        return new NDList(ids, mask, typeIds);
     }
 
     @Override
