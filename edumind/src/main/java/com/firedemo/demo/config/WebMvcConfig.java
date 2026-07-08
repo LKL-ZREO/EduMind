@@ -1,8 +1,8 @@
 package com.firedemo.demo.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.firedemo.demo.common.limiter.DistributedRateLimiter;
-import com.firedemo.demo.common.limiter.TokenBucketInterceptor;
+import com.firedemo.demo.infrastructure.limiter.DistributedRateLimiter;
+import com.firedemo.demo.infrastructure.limiter.TokenBucketInterceptor;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.lang.NonNull;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;

@@ -5,6 +5,7 @@ import { marked } from 'marked'
 import { markedHighlight } from 'marked-highlight'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github-dark.css'
+import request from '@/api/request'
 
 /* ====== Markdown Setup ====== */
 marked.use(markedHighlight({
@@ -44,7 +45,6 @@ const selectedFile = ref<File | null>(null)
 const messageContainer = ref<HTMLElement | null>(null)
 const textarea = ref<HTMLTextAreaElement | null>(null)
 
-const API = 'http://localhost:8080/api'
 const QUICK = [
   '帮我写一段 C 语言代码',
   '解释一下指针和内存管理',
@@ -63,7 +63,7 @@ onMounted(async () => {
 })
 
 async function checkConnection() {
-  try { const r = await fetch(`${API}/chat/health`); isConnected.value = r.ok }
+  try { await request.get('/chat/health'); isConnected.value = true }
   catch { isConnected.value = false }
 }
 
@@ -74,9 +74,8 @@ async function loadHistory() {
   const t = token()
   if (!t) { sessionId.value = genSessionId(); return }
   try {
-    const r = await fetch(`${API}/chat/history`, { headers: { Authorization: `Bearer ${t}` } })
-    if (!r.ok) { sessionId.value = genSessionId(); return }
-    const list: any[] = await r.json()
+    const r = await request.get('/chat/history')
+    const list: any[] = r.data
     if (!list?.length) { sessionId.value = genSessionId(); return }
     const groups = new Map<string, any[]>()
     list.forEach((m: any) => {
@@ -93,8 +92,8 @@ async function clearChat() {
   const t = token()
   try {
     if (t) {
-      const r = await fetch(`${API}/chat/clear`, { method: 'POST', headers: { Authorization: `Bearer ${t}` } })
-      if (r.ok) sessionId.value = (await r.json()).sessionId
+      const r = await request.post('/chat/clear')
+      if (r.data) sessionId.value = r.data.sessionId
       else sessionId.value = genSessionId()
     } else { sessionId.value = genSessionId() }
   } catch { sessionId.value = genSessionId() }
@@ -120,7 +119,7 @@ async function streamChat(userMsg: string) {
   const ai = addMsg('assistant', '')
   messages.value.push(ai)
   const idx = messages.value.length - 1
-  const url = `${API}/chat/stream?message=${encodeURIComponent(userMsg)}&sessionId=${sessionId.value}`
+  const url = `/api/chat/stream?message=${encodeURIComponent(userMsg)}&sessionId=${sessionId.value}`
   try {
     const r = await fetch(url, {
       headers: { Accept: 'text/event-stream', Authorization: token() ? `Bearer ${token()}` : '' }
@@ -166,22 +165,15 @@ function clearFile() {
 
 async function uploadAndGrade(req: string) {
   const file = selectedFile.value!
-  const t = token()
   try {
     const fd = new FormData(); fd.append('file', file)
-    const up = await fetch(`${API}/upload`, { method: 'POST', headers: t ? { Authorization: `Bearer ${t}` } : {}, body: fd })
-    if (!up.ok) throw new Error('上传失败')
-    const fp = (await up.json()).filePath
+    const up = await request.post('/upload', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+    const fp = up.data.filePath
     messages.value.push(addMsg('user', `📎 ${file.name}\n${req}`))
     inputMessage.value = ''; autoResize(); clearFile(); scrollBottom()
     isLoading.value = isTyping.value = true
-    const gr = await fetch(`${API}/chat/grade`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: t ? `Bearer ${t}` : '' },
-      body: JSON.stringify({ filePath: fp, requirement: req || '请批改', sessionId: sessionId.value })
-    })
-    if (!gr.ok) throw new Error('批改失败')
-    messages.value.push(addMsg('assistant', (await gr.json()).content, undefined, 'OpenClaw'))
+    const gr = await request.post('/chat/grade', { filePath: fp, requirement: req || '请批改', sessionId: sessionId.value })
+    messages.value.push(addMsg('assistant', gr.data.content, undefined, 'OpenClaw'))
     scrollBottom()
   } catch (e: any) {
     ElMessage.error(e.message)

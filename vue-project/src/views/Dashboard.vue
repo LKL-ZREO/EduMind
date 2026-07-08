@@ -385,6 +385,7 @@
 
 <script>
 import * as echarts from 'echarts'
+import request from '@/api/request'
 
 export default {
   name: 'TeacherDashboard',
@@ -400,7 +401,6 @@ export default {
       planType: 'review',
       selectedGoals: [],
       generatedPlan: '',
-      apiBaseUrl: 'http://localhost:8080/api',
 
       // 班级列表
       classList: [],
@@ -517,25 +517,11 @@ export default {
   },
 
   methods: {
-    // 获取 Token
-    getToken() {
-      return localStorage.getItem('token') || ''
-    },
-
     // 加载班级列表
     async loadClassList() {
       try {
-        const response = await fetch(`${this.apiBaseUrl}/dashboard/classes`, {
-          headers: {
-            'Authorization': `Bearer ${this.getToken()}`
-          }
-        })
-
-        if (!response.ok) {
-          throw new Error('获取班级列表失败')
-        }
-
-        const result = await response.json()
+        const res = await request.get('/dashboard/classes')
+        const result = res.data
         if (result.code === 200) {
           this.classList = result.data
           if (this.classList.length > 0) {
@@ -565,18 +551,8 @@ export default {
     async loadMetrics() {
       if (!this.selectedClass || this.selectedClass === 'null') return
       try {
-        const response = await fetch(`${this.apiBaseUrl}/dashboard/metrics?classId=${this.selectedClass}`, {
-          headers: {
-            'Authorization': `Bearer ${this.getToken()}`
-          }
-        })
-
-        if (!response.ok) throw new Error('获取指标失败')
-
-        const result = await response.json()
-        if (result.code === 200) {
-          this.metrics = result.data
-        }
+        const res = await request.get('/dashboard/metrics', { params: { classId: this.selectedClass } })
+        if (res.data.code === 200) { this.metrics = res.data.data }
       } catch (error) {
         console.error('加载指标失败:', error)
       }
@@ -586,18 +562,8 @@ export default {
     async loadScoreDistribution() {
       if (!this.selectedClass || this.selectedClass === 'null') return
       try {
-        const response = await fetch(`${this.apiBaseUrl}/dashboard/score-distribution?classId=${this.selectedClass}`, {
-          headers: {
-            'Authorization': `Bearer ${this.getToken()}`
-          }
-        })
-
-        if (!response.ok) throw new Error('获取成绩分布失败')
-
-        const result = await response.json()
-        if (result.code === 200) {
-          this.scoreDistribution = result.data
-        }
+        const res = await request.get('/dashboard/score-distribution', { params: { classId: this.selectedClass } })
+        if (res.data.code === 200) { this.scoreDistribution = res.data.data }
       } catch (error) {
         console.error('加载成绩分布失败:', error)
       }
@@ -607,18 +573,10 @@ export default {
     async loadKnowledgeMastery() {
       if (!this.selectedClass || this.selectedClass === 'null') return
       try {
-        const response = await fetch(`${this.apiBaseUrl}/dashboard/knowledge-mastery?classId=${this.selectedClass}`, {
-          headers: {
-            'Authorization': `Bearer ${this.getToken()}`
-          }
-        })
-
-        if (!response.ok) throw new Error('获取知识点掌握度失败')
-
-        const result = await response.json()
-        console.log('知识点掌握度接口返回:', result)
-        if (result.code === 200) {
-          this.knowledgeMastery = result.data
+        const res = await request.get('/dashboard/knowledge-mastery', { params: { classId: this.selectedClass } })
+        console.log('知识点掌握度接口返回:', res.data)
+        if (res.data.code === 200) {
+          this.knowledgeMastery = res.data.data
           console.log('热力图数据:', this.knowledgeMastery)
         }
       } catch (error) {
@@ -630,22 +588,10 @@ export default {
     async loadFrequentErrors() {
       if (!this.selectedClass || this.selectedClass === 'null') return
       try {
-        let url = `${this.apiBaseUrl}/dashboard/frequent-errors?classId=${this.selectedClass}`
-        if (this.selectedKp) {
-          url += `&knowledgePoint=${encodeURIComponent(this.selectedKp)}`
-        }
-        const response = await fetch(url, {
-          headers: {
-            'Authorization': `Bearer ${this.getToken()}`
-          }
-        })
-
-        if (!response.ok) throw new Error('获取高频错题失败')
-
-        const result = await response.json()
-        if (result.code === 200) {
-          this.frequentErrors = result.data
-        }
+        const params = { classId: this.selectedClass }
+        if (this.selectedKp) params.knowledgePoint = this.selectedKp
+        const res = await request.get('/dashboard/frequent-errors', { params })
+        if (res.data.code === 200) { this.frequentErrors = res.data.data }
       } catch (error) {
         console.error('加载高频错题失败:', error)
       }
@@ -655,21 +601,10 @@ export default {
     async loadStudents() {
       if (!this.selectedClass || this.selectedClass === 'null') return
       try {
-        const response = await fetch(
-          `${this.apiBaseUrl}/dashboard/students?classId=${this.selectedClass}&sortBy=${this.sortBy}`,
-          {
-            headers: {
-              'Authorization': `Bearer ${this.getToken()}`
-            }
-          }
-        )
-
-        if (!response.ok) throw new Error('获取学生列表失败')
-
-        const result = await response.json()
-        if (result.code === 200) {
-          this.students = result.data
-        }
+        const res = await request.get('/dashboard/students', {
+          params: { classId: this.selectedClass, sortBy: this.sortBy }
+        })
+        if (res.data.code === 200) { this.students = res.data.data }
       } catch (error) {
         console.error('加载学生列表失败:', error)
       }
@@ -707,27 +642,19 @@ export default {
 
       try {
         this.savingKnowledge = true
-        const response = await fetch(`${this.apiBaseUrl}/dashboard/teacher-knowledge/add`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${this.getToken()}`
-          },
-          body: JSON.stringify({
-            classId: this.selectedClass,
-            name: this.newKpItem.name.trim(),
-            color: this.newKpItem.color
-          })
+        const res = await request.post('/dashboard/teacher-knowledge/add', {
+          classId: this.selectedClass,
+          name: this.newKpItem.name.trim(),
+          color: this.newKpItem.color
         })
-        const result = await response.json()
-        if (response.ok && result.code === 200) {
+        if (res.data.code === 200) {
           this.$message?.success('添加成功，正在后台重归类历史错误...')
           this.newKpItem = { name: '', color: '#1890ff' }
           this.showAddKpDialog = false
           await this.loadKnowledgeMastery()
           this.pollReclassifyResult()
         } else {
-          throw new Error(result.message || '添加失败')
+          throw new Error(res.data.message || '添加失败')
         }
       } catch (error) {
         console.error('添加知识点失败:', error)
@@ -746,18 +673,12 @@ export default {
       }
 
       try {
-        const response = await fetch(`${this.apiBaseUrl}/dashboard/teacher-knowledge/${item.id}`, {
-          method: 'DELETE',
-          headers: {
-            'Authorization': `Bearer ${this.getToken()}`
-          }
-        })
-        const result = await response.json()
-        if (response.ok && result.code === 200) {
+        const res = await request.delete(`/dashboard/teacher-knowledge/${item.id}`)
+        if (res.data.code === 200) {
           this.knowledgeMastery.splice(index, 1)
           this.$message?.success('删除成功')
         } else {
-          throw new Error(result.message || '删除失败')
+          throw new Error(res.data.message || '删除失败')
         }
       } catch (error) {
         console.error('删除知识点失败:', error)
@@ -780,26 +701,17 @@ export default {
             sortOrder: i
           }))
 
-        const response = await fetch(`${this.apiBaseUrl}/dashboard/teacher-knowledge/batch`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${this.getToken()}`
-          },
-          body: JSON.stringify({
-            classId: this.selectedClass,
-            items: items
-          })
+        const res = await request.post('/dashboard/teacher-knowledge/batch', {
+          classId: this.selectedClass,
+          items: items
         })
-
-        const result = await response.json()
-        if (response.ok && result.code === 200) {
+        if (res.data.code === 200) {
           this.$message?.success('保存成功，正在后台重归类历史错误...')
           this.isEditing = false
           await this.loadKnowledgeMastery()
           this.pollReclassifyResult()
         } else {
-          throw new Error(result.message || '保存失败')
+          throw new Error(res.data.message || '保存失败')
         }
       } catch (error) {
         console.error('保存知识点失败:', error)
@@ -842,14 +754,10 @@ export default {
       this.showKpErrorModal = true
 
       try {
-        const url = `${this.apiBaseUrl}/dashboard/frequent-errors?classId=${this.selectedClass}&knowledgePoint=${encodeURIComponent(item.name)}`
-        const response = await fetch(url, {
-          headers: { 'Authorization': `Bearer ${this.getToken()}` }
+        const res = await request.get('/dashboard/frequent-errors', {
+          params: { classId: this.selectedClass, knowledgePoint: item.name }
         })
-        const result = await response.json()
-        if (result.code === 200) {
-          this.kpErrorList = result.data
-        }
+        if (res.data.code === 200) { this.kpErrorList = res.data.data }
       } catch (error) {
         console.error('加载知识点错误详情失败:', error)
         this.kpErrorList = []
@@ -895,24 +803,13 @@ export default {
       this.showProgressModal = true
 
       try {
-        const params = new URLSearchParams({ studentName: student.name, classId: this.selectedClass })
-        if (student.studentId) params.append('studentId', student.studentId)
-        const response = await fetch(
-          `${this.apiBaseUrl}/dashboard/student-progress?${params}`,
-          { headers: { 'Authorization': `Bearer ${this.getToken()}` } }
-        )
-
-        if (!response.ok) {
-          const err = await response.json()
-          this.$message?.error(err.message || '获取成长数据失败')
-          return
-        }
-
-        const result = await response.json()
-        if (result.code === 200) {
-          this.progressData = result.data
+        const params = { studentName: student.name, classId: String(this.selectedClass) }
+        if (student.studentId) params.studentId = student.studentId
+        const res = await request.get('/dashboard/student-progress', { params })
+        if (res.data.code === 200) {
+          this.progressData = res.data.data
           // 等 DOM 更新后渲染图表
-          this.$nextTick(() => this.renderProgressChart(result.data.points))
+          this.$nextTick(() => this.renderProgressChart(res.data.data.points))
         }
       } catch (error) {
         console.error('加载成长曲线失败:', error)
@@ -1033,18 +930,9 @@ export default {
 
       // 加载薄弱知识点
       try {
-        const response = await fetch(`${this.apiBaseUrl}/dashboard/weak-points?classId=${this.selectedClass}`, {
-          headers: {
-            'Authorization': `Bearer ${this.getToken()}`
-          }
-        })
-
-        if (response.ok) {
-          const result = await response.json()
-          if (result.code === 200) {
-            // 使用后端返回的薄弱知识点
-            console.log('薄弱知识点:', result.data)
-          }
+        const res = await request.get('/dashboard/weak-points', { params: { classId: this.selectedClass } })
+        if (res.data.code === 200) {
+          console.log('薄弱知识点:', res.data.data)
         }
       } catch (error) {
         console.error('加载薄弱知识点失败:', error)
@@ -1061,26 +949,13 @@ export default {
       this.generatingPlan = true
 
       try {
-        const response = await fetch(`${this.apiBaseUrl}/dashboard/teaching-plan/generate`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${this.getToken()}`
-          },
-          body: JSON.stringify({
-            classId: this.selectedClass,
-            goals: this.selectedGoals,
-            planType: this.planType,
-            weakKnowledgePoints: this.weakKnowledgePoints.slice(0, 3)
-          })
+        const res = await request.post('/dashboard/teaching-plan/generate', {
+          classId: this.selectedClass,
+          goals: this.selectedGoals,
+          planType: this.planType,
+          weakKnowledgePoints: this.weakKnowledgePoints.slice(0, 3)
         })
-
-        if (!response.ok) throw new Error('生成教案失败')
-
-        const result = await response.json()
-        if (result.code === 200) {
-          this.generatedPlan = result.data
-        }
+        if (res.data.code === 200) { this.generatedPlan = res.data.data }
       } catch (error) {
         console.error('生成教案失败:', error)
         this.$message?.error('生成教案失败')

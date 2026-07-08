@@ -1,7 +1,7 @@
 package com.firedemo.demo.rag;
 
 import com.firedemo.demo.Service.OpenClawService;
-import com.firedemo.demo.common.prompt.PromptLoader;
+import com.firedemo.demo.infrastructure.prompt.PromptLoader;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import lombok.RequiredArgsConstructor;

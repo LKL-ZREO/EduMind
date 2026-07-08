@@ -1,9 +1,11 @@
 package com.firedemo.demo.utils;
 
+import com.firedemo.demo.common.web.RequestIdFilter;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -43,7 +45,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 || path.startsWith("/api/onebot/rag") || path.startsWith("/api/homework/")
                 || path.startsWith("/mcp")
                 || path.startsWith("/v3/api-docs") || path.startsWith("/swagger-ui")
-                || path.equals("/doc.html") || path.startsWith("/webjars")) {
+                || path.equals("/doc.html") || path.startsWith("/webjars")
+                || path.startsWith("/actuator") || path.equals("/error") || path.equals("/favicon.ico")) {
             filterChain.doFilter(request, response);
             return;
         }
@@ -74,21 +77,30 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         // 设置 Spring Security 上下文
         Long userId = jwtUtil.getUserIdFromToken(token);
         String username = jwtUtil.getUsernameFromToken(token);
-        
-        UsernamePasswordAuthenticationToken authentication =
-                new UsernamePasswordAuthenticationToken(
-                        username, null, Collections.emptyList());
-        authentication.setDetails(userId);
-        SecurityContextHolder.getContext().setAuthentication(authentication);
-        
-        // 设置用户上下文
-        request.setAttribute("userId", userId);
-        
-        // 设置 status 到上下文（status=1用main，status=2用jarvis）
-        Integer status = jwtUtil.getStatusFromToken(token);
-        request.setAttribute("status", status);
-        log.info("用户上下文: userId={}, status={}", userId, status);
 
-        filterChain.doFilter(request, response);
+        // 将用户信息注入 MDC，后续所有日志自动携带 userId 和 username
+        MDC.put("userId", String.valueOf(userId));
+        MDC.put("username", username);
+
+        try {
+            UsernamePasswordAuthenticationToken authentication =
+                    new UsernamePasswordAuthenticationToken(
+                            username, null, Collections.emptyList());
+            authentication.setDetails(userId);
+            SecurityContextHolder.getContext().setAuthentication(authentication);
+
+            // 设置用户上下文
+            request.setAttribute("userId", userId);
+
+            // 设置 status 到上下文（status=1用main，status=2用jarvis）
+            Integer status = jwtUtil.getStatusFromToken(token);
+            request.setAttribute("status", status);
+            log.debug("用户上下文已注入 MDC: userId={}, status={}", userId, status);
+
+            filterChain.doFilter(request, response);
+        } finally {
+            MDC.remove("userId");
+            MDC.remove("username");
+        }
     }
 }

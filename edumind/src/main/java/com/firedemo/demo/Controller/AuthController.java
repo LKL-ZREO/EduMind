@@ -6,6 +6,7 @@ import com.firedemo.demo.DTO.UserRegisterDTO;
 import com.firedemo.demo.Service.UserService;
 import com.firedemo.demo.VO.UserLoginVO;
 import com.firedemo.demo.common.result.Result;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -17,13 +18,13 @@ public class AuthController {
 
 
     @PostMapping("/register")
-    public Result<Void> register(@RequestBody UserRegisterDTO dto) {
+    public Result<Void> register(@Valid @RequestBody UserRegisterDTO dto) {
         userService.register(dto);
         return Result.success(null);
     }
 
     @PostMapping("/login")
-    public Result<UserLoginVO> login(@RequestBody UserLoginDTO dto) {
+    public Result<UserLoginVO> login(@Valid @RequestBody UserLoginDTO dto) {
         UserLoginVO vo = userService.login(dto);
         return Result.success(vo);
     }

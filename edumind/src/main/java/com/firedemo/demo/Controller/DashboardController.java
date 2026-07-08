@@ -6,7 +6,7 @@ import com.firedemo.demo.Entity.TeacherKnowledge;
 import com.firedemo.demo.Service.DashboardService;
 import com.firedemo.demo.Service.SubmissionService;
 import com.firedemo.demo.common.exception.ErrorCode;
-import com.firedemo.demo.common.prompt.PromptLoader;
+import com.firedemo.demo.infrastructure.prompt.PromptLoader;
 import com.firedemo.demo.common.result.Result;
 import com.firedemo.demo.utils.JwtUtil;
 import jakarta.servlet.http.HttpServletRequest;
