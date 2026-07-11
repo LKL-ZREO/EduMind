@@ -28,7 +28,7 @@
     "element-plus": "^2.13.6",
     "highlight.js": "^11.11.1",
     "katex": "^0.17.0",
-    "marked": "^18.0.5",
+    "marked": "^18.0.6",
     "marked-highlight": "^2.2.4",
     "pinia": "^3.0.4",
     "qrcode": "^1.5.4",
