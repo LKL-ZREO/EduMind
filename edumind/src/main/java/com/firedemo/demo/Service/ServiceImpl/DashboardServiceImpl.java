@@ -332,7 +332,7 @@ public class DashboardServiceImpl implements DashboardService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     @Caching(evict = {
         @CacheEvict(key = "'knowledge:' + #classId"),
         @CacheEvict(key = "'metrics:' + #classId"),
@@ -362,7 +362,7 @@ public class DashboardServiceImpl implements DashboardService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     @Caching(evict = {
         @CacheEvict(key = "'knowledge:' + #classId"),
         @CacheEvict(key = "'metrics:' + #classId"),

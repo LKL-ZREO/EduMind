@@ -31,7 +31,6 @@ public class WebMvcConfig implements WebMvcConfigurer {
         registry.addInterceptor(new TokenBucketInterceptor(rateLimiter, bucketConfig, objectMapper))
                 .addPathPatterns("/api/**")
                 .excludePathPatterns(
-                        "/api/auth/**",       // 认证接口不限流（登录、注册）
                         "/actuator/**",       // 健康检查不限流
                         "/error"             // 错误页面不限流
                 )

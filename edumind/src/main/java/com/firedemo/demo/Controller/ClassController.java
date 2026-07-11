@@ -5,11 +5,11 @@ import com.firedemo.demo.Entity.ClassInfo;
 import com.firedemo.demo.Entity.ClassStudent;
 import com.firedemo.demo.Service.ClassService;
 import com.firedemo.demo.common.result.Result;
-import com.firedemo.demo.utils.JwtUtil;
-import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
@@ -25,14 +25,13 @@ import java.util.stream.Collectors;
 public class ClassController {
 
     private final ClassService classService;
-    private final JwtUtil jwtUtil;
 
     /**
-     * 获取当前教师的班级列表（按课程分组）
+     * 获取当前教师的班级列表（按课程分组）— 天然按 userId 过滤，无需 @PreAuthorize
      */
     @GetMapping
-    public Result<List<ClassGroupDTO>> listClasses(HttpServletRequest request) {
-        Long userId = jwtUtil.getUserIdFromRequest(request);
+    public Result<List<ClassGroupDTO>> listClasses() {
+        Long userId = getCurrentUserId();
         if (userId == null) return Result.error(401, "未登录");
         return Result.success(classService.listGroupedByCourse(userId));
     }
@@ -41,9 +40,8 @@ public class ClassController {
      * 创建班级
      */
     @PostMapping
-    public Result<ClassDetailDTO> createClass(@Valid @RequestBody CreateClassDTO dto,
-                                              HttpServletRequest request) {
-        Long userId = jwtUtil.getUserIdFromRequest(request);
+    public Result<ClassDetailDTO> createClass(@Valid @RequestBody CreateClassDTO dto) {
+        Long userId = getCurrentUserId();
         if (userId == null) return Result.error(401, "未登录");
         ClassInfo ci = classService.createClass(userId, dto);
         return Result.success(toDetailDTO(ci));
@@ -53,83 +51,53 @@ public class ClassController {
      * 获取班级详情（含学生列表）
      */
     @GetMapping("/{id}")
-    public Result<Map<String, Object>> getClassDetail(@PathVariable Long id,
-                                                       HttpServletRequest request) {
-        Long userId = jwtUtil.getUserIdFromRequest(request);
-        if (userId == null) return Result.error(401, "未登录");
-
+    @PreAuthorize("@sec.isClassOwner(#id)")
+    public Result<Map<String, Object>> getClassDetail(@PathVariable Long id) {
         ClassInfo ci = classService.getClassById(id);
-        if (!ci.getTeacherId().equals(userId)) {
-            return Result.error(403, "无权访问此班级");
-        }
-
         List<ClassStudent> students = classService.listStudentsByClassId(id);
-
         Map<String, Object> result = new HashMap<>();
         result.put("class", toDetailDTO(ci));
         result.put("students", students);
         return Result.success(result);
     }
 
-    /**
-     * 编辑班级
-     */
     @PutMapping("/{id}")
-    public Result<Void> updateClass(@PathVariable Long id,
-                                    @Valid @RequestBody UpdateClassDTO dto,
-                                    HttpServletRequest request) {
-        Long userId = jwtUtil.getUserIdFromRequest(request);
-        if (userId == null) return Result.error(401, "未登录");
+    @PreAuthorize("@sec.isClassOwner(#id)")
+    public Result<Void> updateClass(@PathVariable Long id, @Valid @RequestBody UpdateClassDTO dto) {
+        Long userId = getCurrentUserId();
         classService.updateClass(id, userId, dto);
         return Result.success(null);
     }
 
-    /**
-     * 删除班级（仅空班）
-     */
     @DeleteMapping("/{id}")
-    public Result<Void> deleteClass(@PathVariable Long id,
-                                    HttpServletRequest request) {
-        Long userId = jwtUtil.getUserIdFromRequest(request);
-        if (userId == null) return Result.error(401, "未登录");
+    @PreAuthorize("@sec.isClassOwner(#id)")
+    public Result<Void> deleteClass(@PathVariable Long id) {
+        Long userId = getCurrentUserId();
         classService.deleteClass(id, userId);
         return Result.success(null);
     }
 
-    /**
-     * 归档/取消归档
-     */
     @PostMapping("/{id}/archive")
-    public Result<Void> toggleArchive(@PathVariable Long id,
-                                       HttpServletRequest request) {
-        Long userId = jwtUtil.getUserIdFromRequest(request);
-        if (userId == null) return Result.error(401, "未登录");
+    @PreAuthorize("@sec.isClassOwner(#id)")
+    public Result<Void> toggleArchive(@PathVariable Long id) {
+        Long userId = getCurrentUserId();
         classService.toggleArchive(id, userId);
         return Result.success(null);
     }
 
-    /**
-     * 移除学生
-     */
     @DeleteMapping("/{id}/students/{studentId}")
-    public Result<Void> removeStudent(@PathVariable Long id,
-                                      @PathVariable String studentId,
-                                      HttpServletRequest request) {
-        Long userId = jwtUtil.getUserIdFromRequest(request);
-        if (userId == null) return Result.error(401, "未登录");
+    @PreAuthorize("@sec.isClassOwner(#id)")
+    public Result<Void> removeStudent(@PathVariable Long id, @PathVariable String studentId) {
+        Long userId = getCurrentUserId();
         classService.removeStudent(id, studentId, userId);
         return Result.success(null);
     }
 
-    /**
-     * 批量导入学生
-     */
     @PostMapping("/{id}/students/import")
+    @PreAuthorize("@sec.isClassOwner(#id)")
     public Result<Map<String, Integer>> importStudents(@PathVariable Long id,
-                                                        @Valid @RequestBody ImportStudentsDTO dto,
-                                                        HttpServletRequest request) {
-        Long userId = jwtUtil.getUserIdFromRequest(request);
-        if (userId == null) return Result.error(401, "未登录");
+                                                        @Valid @RequestBody ImportStudentsDTO dto) {
+        Long userId = getCurrentUserId();
         Map<String, Integer> result = classService.importStudents(id, userId, dto.getStudents());
         return Result.success(result);
     }
@@ -147,6 +115,13 @@ public class ClassController {
     }
 
     // ========== 内部工具 ==========
+
+    private Long getCurrentUserId() {
+        var auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated() || auth.getDetails() == null) return null;
+        if (auth.getDetails() instanceof Long uid) return uid;
+        return null;
+    }
 
     private ClassDetailDTO toDetailDTO(ClassInfo ci) {
         ClassDetailDTO dto = new ClassDetailDTO();

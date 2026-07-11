@@ -385,6 +385,14 @@
                     </execution>
                 </executions>
             </plugin>
+            <!-- Surefire — 默认跳过集成测试（@Tag("integration")），CI 用 -Dgroups=integration 激活 -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <excludedGroups>integration</excludedGroups>
+                </configuration>
+            </plugin>
             <!-- OWASP Dependency-Check：扫描依赖已知 CVE 漏洞 -->
             <plugin>
                 <groupId>org.owasp</groupId>

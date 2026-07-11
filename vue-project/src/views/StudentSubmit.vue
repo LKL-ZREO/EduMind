@@ -74,6 +74,7 @@ const pendingSubmit = ref(false)  // confirm=true 重新提交标记
 // 文件上传
 const file = ref<File | null>(null)
 const uploading = ref(false)
+const submitting = ref(false)  // 提交锁：防止双击重复提交
 const uploaded = ref(false)
 const error = ref('')
 const progress = ref(0)
@@ -285,9 +286,12 @@ function removeFile() {
   showConfirmSubmit.value = false
   fileNameWarnings.value = []
   pendingSubmit.value = false
+  submitting.value = false
 }
 
 async function submit() {
+  if (submitting.value) return  // 提交锁：防双击
+
   if (!file.value) {
     error.value = '请先选择文件'
     return
@@ -308,6 +312,7 @@ async function submit() {
     return
   }
 
+  submitting.value = true
   uploading.value = true
   error.value = ''
   progress.value = 0
@@ -339,6 +344,16 @@ async function submit() {
       bindStudentName.value = result.data?.studentName || ''
       showQqBindDialog.value = true
       uploading.value = false
+      submitting.value = false
+      progress.value = 0
+      return
+    }
+
+    // 后端幂等拦截：10 秒内重复提交
+    if (result.code === 429) {
+      error.value = result.message || '请勿重复提交，请稍后再试'
+      uploading.value = false
+      submitting.value = false
       progress.value = 0
       return
     }
@@ -356,6 +371,7 @@ async function submit() {
       showConfirmSubmit.value = true
       pendingSubmit.value = true
       uploading.value = false
+      submitting.value = false
       progress.value = 0
       return
     }
@@ -380,15 +396,22 @@ async function submit() {
     showConfirmSubmit.value = false
     fileNameWarnings.value = []
     pendingSubmit.value = false
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '上传失败，请检查网络后重试'
+  } catch (err: any) {
+    // 处理后端返回的 429 幂等性拦截
+    if (err?.response?.status === 429) {
+      error.value = err.response.data?.message || '请勿重复提交'
+    } else {
+      error.value = err instanceof Error ? err.message : '上传失败，请检查网络后重试'
+    }
     progress.value = 0
   } finally {
     uploading.value = false
+    submitting.value = false
   }
 }
 
 function confirmSubmitAnyway() {
+  if (submitting.value) return
   pendingSubmit.value = true
   submit()
 }
@@ -557,8 +580,8 @@ function joinArray(arr: string[]): string {
           </div>
           <div class="file-actions">
             <button class="btn-remove" @click="removeFile">移除</button>
-            <button class="btn-submit" @click="submit" :disabled="uploading || remainingAttempts <= 0">
-              {{ remainingAttempts <= 0 ? '已达上限' : '提交作业' }}
+            <button class="btn-submit" @click="submit" :disabled="submitting || uploading || remainingAttempts <= 0">
+              {{ submitting ? '提交中...' : remainingAttempts <= 0 ? '已达上限' : '提交作业' }}
             </button>
           </div>
         </div>

@@ -8,11 +8,12 @@ import com.firedemo.demo.Service.SubmissionService;
 import com.firedemo.demo.common.exception.ErrorCode;
 import com.firedemo.demo.infrastructure.prompt.PromptLoader;
 import com.firedemo.demo.common.result.Result;
-import com.firedemo.demo.utils.JwtUtil;
-import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RBloomFilter;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
@@ -30,7 +31,6 @@ import java.util.Map;
 public class DashboardController {
 
     private final DashboardService dashboardService;
-    private final JwtUtil jwtUtil;
     private final RBloomFilter<String> classIdBloomFilter;
     private final SubmissionService submissionService;
     private final PromptLoader promptLoader;
@@ -38,63 +38,53 @@ public class DashboardController {
     // ======================== 核心数据 ========================
 
     @GetMapping("/metrics")
-    public Result<DashboardMetricsDTO> getMetrics(
-            @RequestParam Long classId, HttpServletRequest request) {
-        Long userId = jwtUtil.getUserIdFromRequest(request);
-        if (userId == null) return Result.error(401, "未登录");
+    @PreAuthorize("@sec.isClassOwner(#classId)")
+    public Result<DashboardMetricsDTO> getMetrics(@RequestParam Long classId) {
         if (!classIdBloomFilter.contains(String.valueOf(classId)))
             return Result.error(ErrorCode.DATA_NOT_FOUND.getCode(), "班级不存在");
         return Result.success(dashboardService.getMetrics(classId));
     }
 
     @GetMapping("/score-distribution")
-    public Result<List<ScoreDistributionDTO>> getScoreDistribution(
-            @RequestParam Long classId, HttpServletRequest request) {
-        Long userId = jwtUtil.getUserIdFromRequest(request);
-        if (userId == null) return Result.error(401, "未登录");
+    @PreAuthorize("@sec.isClassOwner(#classId)")
+    public Result<List<ScoreDistributionDTO>> getScoreDistribution(@RequestParam Long classId) {
         if (!classIdBloomFilter.contains(String.valueOf(classId)))
             return Result.error(ErrorCode.DATA_NOT_FOUND.getCode(), "班级不存在");
         return Result.success(dashboardService.getScoreDistribution(classId));
     }
 
     @GetMapping("/knowledge-mastery")
-    public Result<List<KnowledgeMasteryDTO>> getKnowledgeMastery(
-            @RequestParam Long classId, HttpServletRequest request) {
-        Long userId = jwtUtil.getUserIdFromRequest(request);
-        if (userId == null) return Result.error(401, "未登录");
+    @PreAuthorize("@sec.isClassOwner(#classId)")
+    public Result<List<KnowledgeMasteryDTO>> getKnowledgeMastery(@RequestParam Long classId) {
         if (!classIdBloomFilter.contains(String.valueOf(classId)))
             return Result.error(ErrorCode.DATA_NOT_FOUND.getCode(), "班级不存在");
         return Result.success(dashboardService.getKnowledgeMastery(classId));
     }
 
     @GetMapping("/frequent-errors")
+    @PreAuthorize("@sec.isClassOwner(#classId)")
     public Result<List<FrequentErrorDTO>> getFrequentErrors(
             @RequestParam Long classId,
-            @RequestParam(required = false) String knowledgePoint,
-            HttpServletRequest request) {
-        Long userId = jwtUtil.getUserIdFromRequest(request);
-        if (userId == null) return Result.error(401, "未登录");
+            @RequestParam(required = false) String knowledgePoint) {
         if (!classIdBloomFilter.contains(String.valueOf(classId)))
             return Result.error(ErrorCode.DATA_NOT_FOUND.getCode(), "班级不存在");
         return Result.success(dashboardService.getFrequentErrors(classId, knowledgePoint));
     }
 
     @GetMapping("/students")
+    @PreAuthorize("@sec.isClassOwner(#classId)")
     public Result<List<StudentOverviewDTO>> getStudentOverview(
             @RequestParam Long classId,
             @RequestParam(required = false, defaultValue = "score") String sortBy,
-            @RequestParam(required = false) String keyword,
-            HttpServletRequest request) {
-        Long userId = jwtUtil.getUserIdFromRequest(request);
-        if (userId == null) return Result.error(401, "未登录");
+            @RequestParam(required = false) String keyword) {
         if (!classIdBloomFilter.contains(String.valueOf(classId)))
             return Result.error(ErrorCode.DATA_NOT_FOUND.getCode(), "班级不存在");
         return Result.success(dashboardService.getStudentOverview(classId, sortBy, keyword));
     }
 
     @GetMapping("/classes")
-    public Result<List<ClassInfoDTO>> getClassList(HttpServletRequest request) {
-        Long userId = jwtUtil.getUserIdFromRequest(request);
+    public Result<List<ClassInfoDTO>> getClassList() {
+        Long userId = getCurrentUserId();
         if (userId == null) return Result.error(401, "未登录");
         return Result.success(dashboardService.getClassList(userId));
     }
@@ -102,19 +92,15 @@ public class DashboardController {
     // ======================== 老师知识管理 ========================
 
     @GetMapping("/teacher-knowledge")
-    public Result<List<TeacherKnowledge>> getTeacherKnowledge(
-            @RequestParam Long classId, HttpServletRequest request) {
-        Long userId = jwtUtil.getUserIdFromRequest(request);
-        if (userId == null) return Result.error(401, "未登录");
+    @PreAuthorize("@sec.isClassOwner(#classId)")
+    public Result<List<TeacherKnowledge>> getTeacherKnowledge(@RequestParam Long classId) {
         return Result.success(dashboardService.getTeacherKnowledge(classId));
     }
 
     @PostMapping("/teacher-knowledge/add")
-    public Result<Void> addTeacherKnowledge(
-            @RequestBody TeacherKnowledgeAddRequest body,
-            HttpServletRequest request) {
-        Long userId = jwtUtil.getUserIdFromRequest(request);
-        if (userId == null) return Result.error(401, "未登录");
+    @PreAuthorize("@sec.isClassOwner(#body.classId)")
+    public Result<Void> addTeacherKnowledge(@Valid @RequestBody TeacherKnowledgeAddRequest body) {
+        Long userId = getCurrentUserId();
         if (!classIdBloomFilter.contains(String.valueOf(body.getClassId())))
             return Result.error(ErrorCode.DATA_NOT_FOUND.getCode(), "班级不存在");
         dashboardService.addTeacherKnowledge(body.getClassId(), userId, body.getName(), body.getColor());
@@ -122,11 +108,9 @@ public class DashboardController {
     }
 
     @PostMapping("/teacher-knowledge/batch")
-    public Result<Void> batchSaveTeacherKnowledge(
-            @RequestBody TeacherKnowledgeSaveRequest body,
-            HttpServletRequest request) {
-        Long userId = jwtUtil.getUserIdFromRequest(request);
-        if (userId == null) return Result.error(401, "未登录");
+    @PreAuthorize("@sec.isClassOwner(#body.classId)")
+    public Result<Void> batchSaveTeacherKnowledge(@Valid @RequestBody TeacherKnowledgeSaveRequest body) {
+        Long userId = getCurrentUserId();
         if (!classIdBloomFilter.contains(String.valueOf(body.getClassId())))
             return Result.error(ErrorCode.DATA_NOT_FOUND.getCode(), "班级不存在");
         dashboardService.saveTeacherKnowledge(body.getClassId(), userId, body.getItems());
@@ -134,11 +118,8 @@ public class DashboardController {
     }
 
     @DeleteMapping("/teacher-knowledge/{id}")
-    public Result<Void> deleteTeacherKnowledge(
-            @PathVariable Long id,
-            HttpServletRequest request) {
-        Long userId = jwtUtil.getUserIdFromRequest(request);
-        if (userId == null) return Result.error(401, "未登录");
+    @PreAuthorize("@sec.isTeacherKnowledgeOwner(#id)")
+    public Result<Void> deleteTeacherKnowledge(@PathVariable Long id) {
         dashboardService.deleteTeacherKnowledge(id);
         return Result.success(null);
     }
@@ -146,13 +127,11 @@ public class DashboardController {
     // ======================== 学生成长曲线 ========================
 
     @GetMapping("/student-progress")
+    @PreAuthorize("@sec.isClassOwner(#classId)")
     public Result<Map<String, Object>> getStudentProgress(
             @RequestParam String studentName,
             @RequestParam Long classId,
-            @RequestParam(required = false) String studentId,
-            HttpServletRequest request) {
-        Long userId = jwtUtil.getUserIdFromRequest(request);
-        if (userId == null) return Result.error(401, "未登录");
+            @RequestParam(required = false) String studentId) {
 
         List<Submission> submissions;
         if (studentId != null && !studentId.isEmpty()) {
@@ -194,11 +173,8 @@ public class DashboardController {
     // ======================== 教案生成 ========================
 
     @GetMapping("/weak-points")
-    public Result<List<String>> getWeakKnowledgePoints(
-            @RequestParam Long classId, HttpServletRequest request) {
-        Long userId = jwtUtil.getUserIdFromRequest(request);
-        if (userId == null) return Result.error(401, "未登录");
-        // 改用 SubmissionErrorMapper 统计薄弱知识点
+    @PreAuthorize("@sec.isClassOwner(#classId)")
+    public Result<List<String>> getWeakKnowledgePoints(@RequestParam Long classId) {
         List<Map<String, Object>> weakStats = dashboardService.getFrequentErrors(classId, null).stream()
                 .filter(e -> e.getErrorCount() > 5)
                 .map(e -> {
@@ -216,12 +192,8 @@ public class DashboardController {
     }
 
     @PostMapping("/teaching-plan/generate")
-    public Result<String> generatePlan(
-            @RequestBody TeachingPlanRequestDTO requestDTO,
-            HttpServletRequest request) {
-        Long userId = jwtUtil.getUserIdFromRequest(request);
-        if (userId == null) return Result.error(401, "未登录");
-
+    @PreAuthorize("@sec.isClassOwner(#requestDTO.classId)")
+    public Result<String> generatePlan(@RequestBody TeachingPlanRequestDTO requestDTO) {
         StringBuilder plan = new StringBuilder();
         String template = promptLoader.load("teaching-plan.txt");
 
@@ -250,5 +222,17 @@ public class DashboardController {
                 .replace("{{difficultPoint}}", diffPoint);
         plan.append(result);
         return Result.success(plan.toString());
+    }
+
+    // ======================== 内部工具 ========================
+
+    /**
+     * 从 Spring Security 上下文获取当前登录用户 ID，供 Service 层调用使用。
+     */
+    private Long getCurrentUserId() {
+        var auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated() || auth.getDetails() == null) return null;
+        if (auth.getDetails() instanceof Long uid) return uid;
+        return null;
     }
 }

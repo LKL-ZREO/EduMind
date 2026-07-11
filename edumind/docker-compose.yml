@@ -64,7 +64,7 @@ services:
       postgres:
         condition: service_healthy
 
-  # ======================== MinIO 对象存储（S3 兼容，开发/生产通用） ========================
+  # ======================== MinIO 对象存储 ========================
   minio:
     image: minio/minio:latest
     container_name: firedemo-minio
@@ -74,8 +74,8 @@ services:
       MINIO_ROOT_USER: ${S3_ACCESS_KEY:-minioadmin}
       MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-minioadmin}
     ports:
-      - "9000:9000"   # S3 API
-      - "9001:9001"   # Web 控制台
+      - "9000:9000"
+      - "9001:9001"
     volumes:
       - minio_data:/data
     healthcheck:
@@ -84,33 +84,29 @@ services:
       timeout: 3s
       retries: 10
 
-  # ======================== Spring Boot 应用（可水平扩展） ========================
-  # 注意：不设 container_name、不映射 host 端口，以便 --scale 多副本
+  # ======================== Spring Boot 应用 ========================
   app:
     build: .
     restart: unless-stopped
     expose:
       - "8080"
     environment:
-      # 生产模式，不加载 application-local.properties（避免 baseline 跳过 V1）
       SPRING_PROFILES_ACTIVE: prod
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/postgres
       SPRING_DATASOURCE_USERNAME: ${DB_USER:-postgres}
       SPRING_DATASOURCE_PASSWORD: ${DB_PASS:?请设置 DB_PASS 环境变量或创建 .env 文件}
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: 6379
-      # JWT / MCP（必填，建议在 .env 中配置）
       JWT_SECRET: ${JWT_SECRET:?请设置 JWT_SECRET 环境变量}
+      ENCRYPT_AES_KEY: ${ENCRYPT_AES_KEY:?请设置 ENCRYPT_AES_KEY 环境变量}
       MCP_API_KEY: ${MCP_API_KEY:-change-me}
       LANGCHAIN4J_OPENAI_BASE_URL: http://host.docker.internal:18789/v1
       LANGCHAIN4J_OPENAI_API_KEY: ${OPENCLAW_API_KEY:?请设置 OPENCLAW_API_KEY 环境变量}
       ONEBOT_HTTP_URL: http://host.docker.internal:3000
       ONEBOT_HTTP_TOKEN: ${ONEBOT_TOKEN:-change-me}
-      # Reranker 模型目录（可选，未安装 ONNX 模型时自动回退）
       AI_MODEL_DIR: ${AI_MODEL_DIR:-/app/models}
-      # 日志输出目录
       LOG_DIR: /root/.edumind/logs
-      # S3 对象存储（local=本地磁盘，s3=MinIO/OSS/COS）
+      APP_CORS_ALLOWED_ORIGINS: ${APP_CORS_ALLOWED_ORIGINS:-https://${DOMAIN:-localhost}}
       STORAGE_TYPE: ${STORAGE_TYPE:-local}
       S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
       S3_REGION: ${S3_REGION:-us-east-1}
@@ -138,15 +134,23 @@ services:
       retries: 5
       start_period: 40s
 
-  # ======================== Nginx 反向代理 + 负载均衡 ========================
+  # ======================== Nginx 反向代理（HTTPS 终结） ========================
   nginx:
     image: nginx:1.25-alpine
     container_name: firedemo-nginx
     restart: unless-stopped
     ports:
       - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN:-localhost}
     volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx.conf.template:/etc/nginx/nginx.conf.template:ro
+      - certbot_conf:/etc/letsencrypt:ro
+      - certbot_www:/var/www/certbot:ro
+    # 启动时用 envsubst 将模板中 ${DOMAIN} 替换为实际域名
+    command: >
+      /bin/sh -c "envsubst '$${DOMAIN}' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf && exec nginx -g 'daemon off;'"
     depends_on:
       - app
     healthcheck:
@@ -155,7 +159,25 @@ services:
       timeout: 3s
       retries: 3
 
-  # ======================== Prometheus 指标采集 ========================
+  # ======================== Certbot（SSL 证书自动续期） ========================
+  certbot:
+    image: certbot/certbot
+    container_name: firedemo-certbot
+    restart: unless-stopped
+    volumes:
+      - certbot_conf:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
+    # 每 12 小时检查一次，证书到期前 30 天内自动续期
+    entrypoint: "/bin/sh -c"
+    command:
+      - |
+        trap exit TERM
+        while :; do
+          certbot renew --quiet
+          sleep 12h & wait $${!}
+        done
+
+  # ======================== Prometheus ========================
   prometheus:
     image: prom/prometheus:v2.55.0
     container_name: firedemo-prometheus
@@ -178,7 +200,7 @@ services:
       timeout: 5s
       retries: 3
 
-  # ======================== Grafana 指标可视化 ========================
+  # ======================== Grafana ========================
   grafana:
     image: grafana/grafana:11.2.0
     container_name: firedemo-grafana
@@ -212,3 +234,5 @@ volumes:
   logs:
   prometheus_data:
   grafana_data:
+  certbot_conf:
+  certbot_www:

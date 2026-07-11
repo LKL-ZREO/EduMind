@@ -43,7 +43,12 @@
       "Bash(python *)",
       "Bash(jar tf *)",
       "Bash(grep -E \"Health\\(Indic|Contrib\\).*class$|^.*/Health\\\\.class$|^.*/Status\\\\.class$\")",
-      "Bash(docker compose *)"
+      "Bash(docker compose *)",
+      "Bash(awk '{print $5, $NF}')",
+      "Bash(git -C edumind log --oneline -1 -- src/main/resources/application-local.properties)",
+      "Bash(echo \"EXIT:$?\")",
+      "WebSearch",
+      "Bash(npx vue-tsc *)"
     ]
   }
 }

@@ -15,7 +15,12 @@ public class UserRegisterDTO {
     @Size(min = 6, max = 128, message = "密码长度需在6-128之间")
     private String password;
 
+    @Size(max = 20)
     private String phone;
+
+    @Size(max = 100)
+    @jakarta.validation.constraints.Email(message = "邮箱格式不正确")
     private String email;
+
     private String status;
 }

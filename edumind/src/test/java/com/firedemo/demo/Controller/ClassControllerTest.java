@@ -8,12 +8,14 @@ import com.firedemo.demo.Service.ClassService;
 import com.firedemo.demo.common.exception.BusinessException;
 import com.firedemo.demo.common.exception.ErrorCode;
 import com.firedemo.demo.common.result.Result;
-import com.firedemo.demo.utils.JwtUtil;
-import jakarta.servlet.http.HttpServletRequest;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -26,19 +28,32 @@ import static org.mockito.Mockito.*;
 
 /**
  * ClassController 纯单元测试 — 手动构造 Controller，Mock 依赖。
+ * 权限校验已迁移至 @PreAuthorize（Spring AOP 层，单元测试不触发），
+ * 此处测试 Controller 核心逻辑及未登录边界。
  */
 @DisplayName("ClassController — 班级控制器")
 class ClassControllerTest {
 
     private ClassService classService;
-    private JwtUtil jwtUtil;
     private ClassController controller;
 
     @BeforeEach
     void setUp() {
         classService = mock(ClassService.class);
-        jwtUtil = mock(JwtUtil.class);
-        controller = new ClassController(classService, jwtUtil);
+        controller = new ClassController(classService);
+    }
+
+    @AfterEach
+    void tearDown() {
+        SecurityContextHolder.clearContext();
+    }
+
+    /** 模拟已登录（userId=100） */
+    private void mockLogin(Long userId) {
+        var auth = new UsernamePasswordAuthenticationToken("teacher", null,
+                List.of(new SimpleGrantedAuthority("ROLE_TEACHER")));
+        auth.setDetails(userId);
+        SecurityContextHolder.getContext().setAuthentication(auth);
     }
 
     // ==================== 查询班级列表 ====================
@@ -50,11 +65,10 @@ class ClassControllerTest {
         @Test
         @DisplayName("已认证 → 返回班级列表")
         void shouldReturnClassList() {
-            var request = mock(HttpServletRequest.class);
-            when(jwtUtil.getUserIdFromRequest(request)).thenReturn(100L);
+            mockLogin(100L);
             when(classService.listGroupedByCourse(100L)).thenReturn(new ArrayList<>());
 
-            var result = controller.listClasses(request);
+            var result = controller.listClasses();
 
             assertThat(result.getCode()).isEqualTo(200);
             assertThat(result.getData()).isNotNull();
@@ -63,11 +77,7 @@ class ClassControllerTest {
         @Test
         @DisplayName("未认证 → 401")
         void shouldReturn401() {
-            var request = mock(HttpServletRequest.class);
-            when(jwtUtil.getUserIdFromRequest(request)).thenReturn(null);
-
-            var result = controller.listClasses(request);
-
+            var result = controller.listClasses();
             assertThat(result.getCode()).isEqualTo(401);
         }
     }
@@ -81,8 +91,7 @@ class ClassControllerTest {
         @Test
         @DisplayName("正常创建 → 200")
         void shouldCreateClass() {
-            var request = mock(HttpServletRequest.class);
-            when(jwtUtil.getUserIdFromRequest(request)).thenReturn(100L);
+            mockLogin(100L);
 
             CreateClassDTO dto = new CreateClassDTO();
             dto.setName("计算机一班");
@@ -94,7 +103,7 @@ class ClassControllerTest {
             ci.setStatus("ACTIVE");
             when(classService.createClass(eq(100L), any())).thenReturn(ci);
 
-            Result<?> result = controller.createClass(dto, request);
+            Result<?> result = controller.createClass(dto);
 
             assertThat(result.getCode()).isEqualTo(200);
         }
@@ -102,12 +111,10 @@ class ClassControllerTest {
         @Test
         @DisplayName("未登录 → 401")
         void shouldReturn401WhenNotLoggedIn() {
-            var request = mock(HttpServletRequest.class);
-            when(jwtUtil.getUserIdFromRequest(request)).thenReturn(null);
             CreateClassDTO dto = new CreateClassDTO();
             dto.setName("测试班");
 
-            Result<?> result = controller.createClass(dto, request);
+            Result<?> result = controller.createClass(dto);
 
             assertThat(result.getCode()).isEqualTo(401);
             verify(classService, never()).createClass(anyLong(), any());
@@ -121,10 +128,9 @@ class ClassControllerTest {
     class GetClassDetail {
 
         @Test
-        @DisplayName("本人班级 → 200")
-        void shouldReturnDetailForOwnClass() {
-            var request = mock(HttpServletRequest.class);
-            when(jwtUtil.getUserIdFromRequest(request)).thenReturn(100L);
+        @DisplayName("Service 正常返回 → 200")
+        void shouldReturnDetail() {
+            mockLogin(100L);
 
             ClassInfo ci = new ClassInfo();
             ci.setId(1L);
@@ -133,26 +139,16 @@ class ClassControllerTest {
             when(classService.getClassById(1L)).thenReturn(ci);
             when(classService.listStudentsByClassId(1L)).thenReturn(Collections.emptyList());
 
-            Result<Map<String, Object>> result = controller.getClassDetail(1L, request);
+            Result<Map<String, Object>> result = controller.getClassDetail(1L);
 
             assertThat(result.getCode()).isEqualTo(200);
         }
 
-        @Test
-        @DisplayName("他人班级 → 403")
-        void shouldReturn403ForOthersClass() {
-            var request = mock(HttpServletRequest.class);
-            when(jwtUtil.getUserIdFromRequest(request)).thenReturn(100L);
-
-            ClassInfo ci = new ClassInfo();
-            ci.setId(1L);
-            ci.setTeacherId(999L);
-            when(classService.getClassById(1L)).thenReturn(ci);
-
-            Result<Map<String, Object>> result = controller.getClassDetail(1L, request);
-
-            assertThat(result.getCode()).isEqualTo(403);
-        }
+        /**
+         * 注意：越权校验（403）已迁移至 {@code @PreAuthorize("@sec.isClassOwner(#id)")}，
+         * 纯单元测试不触发 Spring AOP 代理，因此此处仅测试正常流程。
+         * 越权场景应由集成测试（@SpringBootTest + MockMvc）覆盖。
+         */
     }
 
     // ==================== 删除班级 ====================
@@ -164,11 +160,10 @@ class ClassControllerTest {
         @Test
         @DisplayName("删除成功 → 200")
         void shouldDeleteClass() {
-            var request = mock(HttpServletRequest.class);
-            when(jwtUtil.getUserIdFromRequest(request)).thenReturn(100L);
+            mockLogin(100L);
             doNothing().when(classService).deleteClass(1L, 100L);
 
-            Result<Void> result = controller.deleteClass(1L, request);
+            Result<Void> result = controller.deleteClass(1L);
 
             assertThat(result.getCode()).isEqualTo(200);
         }

@@ -2,18 +2,16 @@ package com.firedemo.demo.Controller;
 
 import com.firedemo.demo.agent.workflow.GradingWorkflow;
 import com.firedemo.demo.agent.workflow.WorkflowEngine;
+import com.firedemo.demo.common.result.Result;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
 
 /**
- * Agent 增强接口
- * <p>
- * 暴露 Workflow 工作流端点。
- * 日常对话通过 OpenClaw Gateway 直接处理（含 MCP Tool Calling），
- * 复杂业务流程通过本 Controller 的工作流引擎编排。
+ * Agent 增强接口 — 工作流引擎端点。
  */
 @Slf4j
 @RestController
@@ -24,39 +22,37 @@ public class AgentController {
     private final GradingWorkflow gradingWorkflow;
     private final WorkflowEngine workflowEngine;
 
-    // ==================== Workflow ====================
-
     /**
-     * 执行作业批改工作流
-     * <pre>
-     * POST /api/agent/workflow/grading
-     * {
-     *   "submissionId": "123",
-     *   "studentCode": "#include...",
-     *   "requirement": "用 C 语言实现冒泡排序"
-     * }
-     * </pre>
+     * 执行作业批改工作流（需登录）
      */
     @PostMapping("/workflow/grading")
-    public Map<String, Object> runGradingWorkflow(@RequestBody Map<String, String> request) {
+    public Result<Map<String, Object>> runGradingWorkflow(@RequestBody Map<String, String> request) {
+        Long userId = getCurrentUserId();
+        if (userId == null) return Result.error(401, "未登录");
+
         Long submissionId = Long.parseLong(request.get("submissionId"));
         String studentCode = request.get("studentCode");
         String requirement = request.getOrDefault("requirement", "");
 
-        log.info("启动批改工作流: submissionId={}", submissionId);
+        log.info("启动批改工作流: submissionId={}, userId={}", submissionId, userId);
 
-        //调用批改工作流的执行方法，返回 GradingState 工作流状态实体，该实体存储：流程实例 ID、批改结果、错误分析、建议、异常信息等。
         GradingWorkflow.GradingState state = gradingWorkflow.execute(
                 submissionId, studentCode, requirement);
 
-        return Map.of(
-                "code", 200,
+        return Result.success(Map.of(
                 "instanceId", state.getInstanceId(),
                 "trace", workflowEngine.getTrace(state.getInstanceId()),
                 "gradeResult", state.getStringAttr("gradeResult"),
                 "errorAnalysis", state.getStringAttr("errorAnalysis"),
                 "suggestion", state.getStringAttr("suggestion"),
                 "error", state.getError() != null ? state.getError() : ""
-        );
+        ));
+    }
+
+    private Long getCurrentUserId() {
+        var auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated() || auth.getDetails() == null) return null;
+        if (auth.getDetails() instanceof Long uid) return uid;
+        return null;
     }
 }
