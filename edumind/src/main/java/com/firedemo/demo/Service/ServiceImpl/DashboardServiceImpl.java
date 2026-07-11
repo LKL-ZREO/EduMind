@@ -194,6 +194,7 @@ public class DashboardServiceImpl implements DashboardService {
     // ======================== Frequent Errors ========================
 
     @Override
+    @Cacheable(key = "'errors:' + #classId", sync = true)
     public List<FrequentErrorDTO> getFrequentErrors(Long classId, String knowledgePoint) {
         List<SubmissionError> errors;
         if (knowledgePoint != null && !knowledgePoint.isEmpty() && !"全部".equals(knowledgePoint)) {
@@ -244,6 +245,7 @@ public class DashboardServiceImpl implements DashboardService {
     // ======================== Student Overview ========================
 
     @Override
+    @Cacheable(key = "'students:' + #classId", sync = true)
     public List<StudentOverviewDTO> getStudentOverview(Long classId, String sortBy, String keyword) {
         List<User> students = userMapper.selectStudentsByClassId(classId);
         List<Map<String, Object>> submissionStudents = submissionMapper.selectStudentOverviewByClassId(classId);
@@ -310,6 +312,7 @@ public class DashboardServiceImpl implements DashboardService {
     // ======================== Class List ========================
 
     @Override
+    @Cacheable(key = "'classList:' + #teacherId", sync = true)
     public List<ClassInfoDTO> getClassList(Long teacherId) {
         List<Map<String, Object>> rows = classInfoMapper.selectByTeacherIdWithStudentCount(teacherId);
         List<ClassInfoDTO> result = new ArrayList<>();
@@ -336,7 +339,9 @@ public class DashboardServiceImpl implements DashboardService {
     @Caching(evict = {
         @CacheEvict(key = "'knowledge:' + #classId"),
         @CacheEvict(key = "'metrics:' + #classId"),
-        @CacheEvict(key = "'scoreDist:' + #classId")
+        @CacheEvict(key = "'scoreDist:' + #classId"),
+        @CacheEvict(key = "'errors:' + #classId"),
+        @CacheEvict(key = "'students:' + #classId")
     })
     public void saveTeacherKnowledge(Long classId, Long userId, List<TeacherKnowledgeDTO> items) {
         teacherKnowledgeMapper.delete(
@@ -366,7 +371,9 @@ public class DashboardServiceImpl implements DashboardService {
     @Caching(evict = {
         @CacheEvict(key = "'knowledge:' + #classId"),
         @CacheEvict(key = "'metrics:' + #classId"),
-        @CacheEvict(key = "'scoreDist:' + #classId")
+        @CacheEvict(key = "'scoreDist:' + #classId"),
+        @CacheEvict(key = "'errors:' + #classId"),
+        @CacheEvict(key = "'students:' + #classId")
     })
     public void addTeacherKnowledge(Long classId, Long userId, String name, String color) {
         TeacherKnowledge tk = new TeacherKnowledge();
@@ -572,6 +579,8 @@ public class DashboardServiceImpl implements DashboardService {
             cache.evict("knowledge:" + classId);
             cache.evict("metrics:" + classId);
             cache.evict("scoreDist:" + classId);
+            cache.evict("errors:" + classId);
+            cache.evict("students:" + classId);
         }
     }
 

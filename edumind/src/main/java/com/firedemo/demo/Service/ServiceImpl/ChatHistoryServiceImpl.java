@@ -3,13 +3,16 @@ package com.firedemo.demo.Service.ServiceImpl;
 
 import com.firedemo.demo.Entity.ChatHistory;
 import com.firedemo.demo.Service.ChatHistoryService;
+import com.firedemo.demo.infrastructure.cache.CacheThroughService;
 import com.firedemo.demo.mapper.ChatHistoryMapper;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.CacheManager;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -24,11 +27,20 @@ import java.util.stream.Collectors;
 public class ChatHistoryServiceImpl implements ChatHistoryService {
 
     private final ChatHistoryMapper chatHistoryMapper;
+    private final CacheThroughService cacheThroughService;
+    private final CacheManager cacheManager;
+
+    private static final String CACHE_NAME = "chatHistory";
+    private static final Duration CACHE_TTL = Duration.ofMinutes(5);
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public boolean save(ChatHistory history) {
-        return chatHistoryMapper.insert(history) > 0;
+        boolean result = chatHistoryMapper.insert(history) > 0;
+        if (result && history.getUserId() != null) {
+            evictHistoryCache(history.getUserId());
+        }
+        return result;
     }
 
     @Override
@@ -57,7 +69,8 @@ public class ChatHistoryServiceImpl implements ChatHistoryService {
 
     @Override
     public List<ChatHistory> getUserHistory(Long userId) {
-        return chatHistoryMapper.selectByUserId(userId);
+        return cacheThroughService.getOrLoad(CACHE_NAME, "history:" + userId,
+                () -> chatHistoryMapper.selectByUserId(userId), CACHE_TTL);
     }
 
     @Override
@@ -76,7 +89,15 @@ public class ChatHistoryServiceImpl implements ChatHistoryService {
     @Transactional(rollbackFor = Exception.class)
     public boolean deleteByUserId(Long userId) {
         int deleted = chatHistoryMapper.deleteByUserId(userId);
+        evictHistoryCache(userId);
         log.info("已删除用户 {} 的 {} 条对话记录", userId, deleted);
         return deleted >= 0;
+    }
+
+    private void evictHistoryCache(Long userId) {
+        var cache = cacheManager.getCache(CACHE_NAME);
+        if (cache != null) {
+            cache.evict("history:" + userId);
+        }
     }
 }

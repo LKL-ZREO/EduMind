@@ -7,6 +7,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RBucket;
 import org.redisson.api.RedissonClient;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -62,6 +64,7 @@ public class CourseServiceImpl implements CourseService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    @CacheEvict(value = "teacherCourses", key = "#teacherId")
     public Course create(Long teacherId, String name, String systemPrompt, String knowledgeScope) {
         Course course = new Course();
         course.setTeacherId(teacherId);
@@ -74,6 +77,7 @@ public class CourseServiceImpl implements CourseService {
     }
 
     @Override
+    @Cacheable(value = "teacherCourses", key = "#teacherId", sync = true)
     public List<Course> listByTeacherId(Long teacherId) {
         if (teacherId == null) return List.of();
         return courseMapper.selectByTeacherId(teacherId);
@@ -81,6 +85,7 @@ public class CourseServiceImpl implements CourseService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    @CacheEvict(value = "teacherCourses", key = "#teacherId")
     public void update(Long courseId, Long teacherId, String name,
                        String systemPrompt, String knowledgeScope) {
         Course course = courseMapper.selectById(courseId);
@@ -97,6 +102,7 @@ public class CourseServiceImpl implements CourseService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    @CacheEvict(value = "teacherCourses", key = "#teacherId")
     public void delete(Long courseId, Long teacherId) {
         Course course = courseMapper.selectById(courseId);
         if (course == null) throw new IllegalArgumentException("课程不存在: " + courseId);

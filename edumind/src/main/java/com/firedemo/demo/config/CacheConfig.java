@@ -11,6 +11,7 @@ import org.springframework.cache.caffeine.CaffeineCacheManager;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -36,8 +37,8 @@ public class CacheConfig {
     public CacheManager cacheManager() {
         CaffeineCacheManager manager = new CaffeineCacheManager();
         manager.setCaffeine(Caffeine.newBuilder()
-                .maximumSize(500)
-                .expireAfterWrite(30, TimeUnit.MINUTES)
+                .maximumSize(2000)
+                .expireAfterWrite(5 + ThreadLocalRandom.current().nextInt(3), TimeUnit.MINUTES)
                 .recordStats());
         return manager;
     }
