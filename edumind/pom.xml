@@ -73,7 +73,7 @@
         <dependency>
             <groupId>com.baomidou</groupId>
             <artifactId>mybatis-plus-spring-boot4-starter</artifactId>
-            <version>3.5.15</version>
+            <version>3.5.17</version>
         </dependency>
         <!-- PostgreSQL 驱动 -->
         <dependency>
