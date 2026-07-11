@@ -94,11 +94,9 @@ jobs:
         run: cd vue-project && npm ci
 
       - name: Type check
-        continue-on-error: true  # TODO: 修复预存 TS 错误后移除此行
         run: cd vue-project && npx vue-tsc --build
 
       - name: Lint
-        continue-on-error: true  # TODO: 修复预存 54 个 eslint 错误后移除此行
         run: cd vue-project && npm run lint
 
       - name: Run tests

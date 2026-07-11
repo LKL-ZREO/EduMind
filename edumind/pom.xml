@@ -359,7 +359,7 @@
                         <phase>verify</phase>
                         <goals><goal>report</goal></goals>
                     </execution>
-                    <!-- 覆盖率规则：关键包 < 70% 行覆盖 → 构建失败 -->
+                    <!-- 覆盖率规则：关键包 < 50% 行覆盖 → 构建失败（达到 70% 后上调） -->
                     <execution>
                         <id>check</id>
                         <phase>verify</phase>
@@ -376,12 +376,34 @@
                                         <limit>
                                             <counter>LINE</counter>
                                             <value>COVEREDRATIO</value>
-                                            <minimum>0.00</minimum>
+                                            <minimum>0.50</minimum>
                                         </limit>
                                     </limits>
                                 </rule>
                             </rules>
                         </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <!-- OWASP Dependency-Check：扫描依赖已知 CVE 漏洞 -->
+            <plugin>
+                <groupId>org.owasp</groupId>
+                <artifactId>dependency-check-maven</artifactId>
+                <version>12.1.1</version>
+                <configuration>
+                    <!-- CVSS ≥ 7.0 (High/Critical) → 构建失败 -->
+                    <failBuildOnCVSS>7</failBuildOnCVSS>
+                    <formats>
+                        <format>HTML</format>
+                        <format>JSON</format>
+                    </formats>
+                    <!-- 排除误报率高的低危项 -->
+                    <skipProvidedScope>false</skipProvidedScope>
+                    <skipRuntimeScope>false</skipRuntimeScope>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals><goal>check</goal></goals>
                     </execution>
                 </executions>
             </plugin>
