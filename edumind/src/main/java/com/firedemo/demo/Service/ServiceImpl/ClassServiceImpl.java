@@ -16,6 +16,8 @@ import com.firedemo.demo.mapper.StudentQqBindingMapper;
 import org.redisson.api.RBloomFilter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -70,6 +72,7 @@ public class ClassServiceImpl implements ClassService {
     }
 
     @Override
+    @Cacheable(value = "teacherClasses", key = "#teacherId", sync = true)
     public List<ClassGroupDTO> listGroupedByCourse(Long teacherId) {
         List<ClassInfo> classes = classInfoMapper.selectByTeacherId(teacherId);
 
@@ -143,6 +146,7 @@ public class ClassServiceImpl implements ClassService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    @CacheEvict(value = "teacherClasses", key = "#teacherId")
     public ClassInfo createClass(Long teacherId, CreateClassDTO dto) {
         ClassInfo ci = new ClassInfo();
         ci.setName(dto.getName());
@@ -161,6 +165,7 @@ public class ClassServiceImpl implements ClassService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    @CacheEvict(value = "teacherClasses", key = "#teacherId")
     public void updateClass(Long classId, Long teacherId, UpdateClassDTO dto) {
         ClassInfo ci = getClassById(classId);
         if (!ci.getTeacherId().equals(teacherId)) {
@@ -178,6 +183,7 @@ public class ClassServiceImpl implements ClassService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    @CacheEvict(value = "teacherClasses", key = "#teacherId")
     public void deleteClass(Long classId, Long teacherId) {
         ClassInfo ci = getClassById(classId);
         if (!ci.getTeacherId().equals(teacherId)) {
@@ -193,6 +199,7 @@ public class ClassServiceImpl implements ClassService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    @CacheEvict(value = "teacherClasses", key = "#teacherId")
     public void toggleArchive(Long classId, Long teacherId) {
         ClassInfo ci = getClassById(classId);
         if (!ci.getTeacherId().equals(teacherId)) {

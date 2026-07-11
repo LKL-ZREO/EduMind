@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ref, nextTick, onMounted } from 'vue'
+import { ref, nextTick, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { marked } from 'marked'
 import { markedHighlight } from 'marked-highlight'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github-dark.css'
 import request from '@/api/request'
+import { useChatStore } from '@/stores/chat'
 
 /* ====== Markdown Setup ====== */
 marked.use(markedHighlight({
@@ -45,6 +46,11 @@ const selectedFile = ref<File | null>(null)
 const messageContainer = ref<HTMLElement | null>(null)
 const textarea = ref<HTMLTextAreaElement | null>(null)
 
+// SSE 流控 & 路由守卫
+const chatStore = useChatStore()
+const abortController = ref<AbortController | null>(null)
+const streamingIdx = ref(-1) // 当前正在流式接收的消息索引，-1 表示无
+
 const QUICK = [
   '帮我写一段 C 语言代码',
   '解释一下指针和内存管理',
@@ -60,6 +66,11 @@ onMounted(async () => {
   checkConnection()
   await loadHistory()
   nextTick(autoResize)
+})
+
+onUnmounted(() => {
+  // 中止正在进行的 SSE 流，防止僵尸连接堆积
+  abortController.value?.abort()
 })
 
 async function checkConnection() {
@@ -111,44 +122,97 @@ async function sendMessage() {
   autoResize()
   scrollBottom()
   isLoading.value = isTyping.value = true
-  await streamChat(msg)
-  isLoading.value = isTyping.value = false
+  chatStore.setResponding(true)
+  try {
+    await streamChat(msg)
+  } finally {
+    isLoading.value = isTyping.value = false
+    chatStore.setResponding(false)
+  }
 }
 
 async function streamChat(userMsg: string) {
+  // 先中止上一个流（如果有），防止僵尸连接堆积
+  abortController.value?.abort()
+
   const ai = addMsg('assistant', '')
   messages.value.push(ai)
   const idx = messages.value.length - 1
+  streamingIdx.value = idx // 标记正在流式接收的消息索引
+
+  const controller = new AbortController()
+  abortController.value = controller
+
   const url = `/api/chat/stream?message=${encodeURIComponent(userMsg)}&sessionId=${sessionId.value}`
+
+  // 节流 Markdown 渲染：流式期间最多每 100ms 重新解析一次
+  let throttleTimer: ReturnType<typeof setTimeout> | null = null
+  let pending = false
+
+  const flushHtml = () => {
+    if (pending && messages.value[idx]) {
+      messages.value[idx].html = md2html(messages.value[idx].content)
+      pending = false
+    }
+    throttleTimer = null
+  }
+
   try {
     const r = await fetch(url, {
-      headers: { Accept: 'text/event-stream', Authorization: token() ? `Bearer ${token()}` : '' }
+      headers: { Accept: 'text/event-stream', Authorization: token() ? `Bearer ${token()}` : '' },
+      signal: controller.signal
     })
     if (!r.ok) throw new Error(`HTTP ${r.status}`)
     isConnected.value = true
+
     const reader = r.body!.getReader()
     const dec = new TextDecoder()
     let buf = ''
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buf += dec.decode(value, { stream: true })
-      const lines = buf.split('\n')
-      buf = lines.pop() || ''
-      for (const line of lines) {
-        const t = line.trim()
-        if (t.startsWith('data: ')) {
-          const d = t.slice(6)
-          if (d === '[DONE]') return
-          try { messages.value[idx].content += JSON.parse(d).content || '' }
-          catch { messages.value[idx].content += d }
-          scrollBottom()
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buf += dec.decode(value, { stream: true })
+        const lines = buf.split('\n')
+        buf = lines.pop() || ''
+        for (const line of lines) {
+          const t = line.trim()
+          if (t.startsWith('data: ')) {
+            const d = t.slice(6)
+            if (d === '[DONE]') {
+              if (throttleTimer) clearTimeout(throttleTimer)
+              messages.value[idx].html = md2html(messages.value[idx].content)
+              return
+            }
+            try { messages.value[idx].content += JSON.parse(d).content || '' }
+            catch { messages.value[idx].content += d }
+
+            // 节流：标记需更新，100ms 后批量刷新 HTML
+            pending = true
+            if (!throttleTimer) throttleTimer = setTimeout(flushHtml, 100)
+
+            scrollBottom()
+          }
         }
       }
+    } finally {
+      reader.releaseLock()
+      if (throttleTimer) clearTimeout(throttleTimer)
     }
+
+    // 流自然结束（没有 [DONE] 标记的降级路径）
+    messages.value[idx].html = md2html(messages.value[idx].content)
   } catch (e: any) {
-    if (!messages.value[idx].content) messages.value[idx].content = 'AI 服务暂时不可用，请稍后重试。'
+    if (e.name === 'AbortError') return // 组件卸载时正常取消，不弹错误
+    if (!messages.value[idx].content) {
+      messages.value[idx].content = 'AI 服务暂时不可用，请稍后重试。'
+    }
+    messages.value[idx].html = md2html(messages.value[idx].content)
     ElMessage.error(e.message || '连接失败')
+  } finally {
+    streamingIdx.value = -1
+    abortController.value = null
   }
 }
 
@@ -244,8 +308,10 @@ function copyText(text: string) { navigator.clipboard.writeText(text).then(() =>
               <div class="plain">{{ msg.content }}</div>
             </template>
             <template v-else>
-              <!-- Render on every update: recompute html -->
-              <div v-html="md2html(msg.content)" class="md-body" />
+              <!-- 流式接收中：纯文本，避免频繁 Markdown 解析阻塞主线程 -->
+              <div v-if="i === streamingIdx" class="plain">{{ msg.content }}</div>
+              <!-- 已完成的消息：使用预计算 HTML -->
+              <div v-else v-html="msg.html || md2html(msg.content)" class="md-body" />
             </template>
           </div>
           <div class="meta">

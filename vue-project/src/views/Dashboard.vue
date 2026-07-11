@@ -477,7 +477,7 @@ export default {
     this.loadClassList()
   },
 
-  beforeDestroy() {
+  beforeUnmount() {
     this.disposeChart()
   },
 
