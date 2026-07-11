@@ -121,7 +121,7 @@
         <dependency>
             <groupId>org.redisson</groupId>
             <artifactId>redisson</artifactId>
-            <version>3.29.0</version>
+            <version>4.6.1</version>
         </dependency>
 
         <!-- Bucket4j-Redis 分布式令牌桶限流（网关层，基于 Redisson） -->
