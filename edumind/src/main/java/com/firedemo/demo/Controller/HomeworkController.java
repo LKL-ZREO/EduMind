@@ -15,9 +15,13 @@ import com.firedemo.demo.Service.ClassService;import com.firedemo.demo.Service.S
 import com.firedemo.demo.common.annotation.RateLimit;
 import com.firedemo.demo.common.exception.ErrorCode;
 import com.firedemo.demo.common.result.Result;
+import com.firedemo.demo.utils.JwtUtil;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.constraints.NotNull;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.redisson.api.RBucket;
+import org.redisson.api.RedissonClient;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -46,13 +50,14 @@ public class HomeworkController {
     private final GradingStreamProducer gradingStreamProducer;
     private final com.firedemo.demo.Service.OneBotHttpService oneBotHttpService;
     private final SubmissionService submissionService;
-    
     private final HomeworkResultService homeworkResultService;
     private final HomeworkTaskService taskService;
     private final ClassService classService;
+    private final RedissonClient redisson;
 private final TaskReminderService taskReminderService;
     private final CacheManager cacheManager;
     private final ObjectMapper objectMapper;
+    private final JwtUtil jwtUtil;
 
     /** 文件名正则：学号_姓名_班级_作业名称.扩展名 */
     private static final Pattern FILE_NAME_PATTERN =
@@ -161,7 +166,16 @@ private final TaskReminderService taskReminderService;
                     Map.of("needBind", true, "studentId", studentId, "studentName", studentName)));
         }
 
-        // 1.6 检查提交次数限制
+        // 1.6 幂等性检查：10 秒内相同学生+相同作业+相同文件的重复提交直接拦截
+        String idemKey = "submit:idem:" + studentId + ":" + expectedTaskId + ":" + file.getSize();
+        RBucket<String> idemBucket = redisson.getBucket(idemKey);
+        if (!idemBucket.setIfAbsent("1", java.time.Duration.ofSeconds(10))) {
+            log.warn("重复提交拦截: studentId={}, taskId={}, fileSize={}", studentId, expectedTaskId, file.getSize());
+            return ResponseEntity.status(429).body(Result.error(ErrorCode.RATE_LIMIT_EXCEEDED.getCode(),
+                    "请勿重复提交，如确认需要重新提交请稍等10秒后再试"));
+        }
+
+        // 1.7 检查提交次数限制
         if (expectedTaskId != null) {
             Integer existingCount = submissionService.countByStudentIdAndTaskId(studentId, expectedTaskId);
             if (existingCount == null) existingCount = 0;
@@ -353,10 +367,19 @@ private final TaskReminderService taskReminderService;
     }
 
     /**
-     * OpenClaw cron 触发：对所有活跃作业发送完成情况播报
+     * 对所有活跃作业发送完成情况播报 — 需认证 + 限流
      */
+    @RateLimit(dimensions = {RateLimit.Dimension.GLOBAL, RateLimit.Dimension.IP},
+               count = 1, interval = 300, timeUnit = RateLimit.TimeUnit.SECONDS)
     @GetMapping("/tasks/remind-all")
-    public ResponseEntity<?> remindAllTasks() {
+    public ResponseEntity<?> remindAllTasks(HttpServletRequest request) {
+        // 认证检查
+        Long userId = jwtUtil.getUserIdFromRequest(request);
+        if (userId == null) {
+            return ResponseEntity.status(401).body(Result.error(ErrorCode.UNAUTHORIZED.getCode(),
+                    "请先登录"));
+        }
+
         List<HomeworkTask> activeTasks = taskService.listActiveWithDeadline();
         if (activeTasks.isEmpty()) {
             Result<Void> r = Result.success();

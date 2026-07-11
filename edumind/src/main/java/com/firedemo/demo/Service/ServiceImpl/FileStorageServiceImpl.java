@@ -25,6 +25,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.util.Set;
 import java.util.UUID;
 
 @Slf4j
@@ -35,15 +36,66 @@ public class FileStorageServiceImpl implements FileStorageService {
     @Value("${storage.upload-dir}")
     private String uploadDir;
 
+    /** 允许上传的文件扩展名 */
+    private static final Set<String> ALLOWED_EXTENSIONS = Set.of(
+            "txt", "md", "pdf", "doc", "docx", "ppt", "pptx", "xls", "xlsx",
+            "c", "cpp", "h", "java", "py", "js", "ts", "html", "css",
+            "png", "jpg", "jpeg", "gif", "svg", "bmp"
+    );
+
+    /** 允许上传的 MIME 类型前缀 */
+    private static final Set<String> ALLOWED_MIME_PREFIXES = Set.of(
+            "text/", "application/pdf",
+            "application/msword",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml",
+            "application/vnd.ms-powerpoint",
+            "application/vnd.openxmlformats-officedocument.presentationml",
+            "application/vnd.ms-excel",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml",
+            "image/png", "image/jpeg", "image/gif", "image/svg", "image/bmp"
+    );
+
+    /** 最大文件大小: 50MB */
+    private static final long MAX_FILE_SIZE = 50 * 1024 * 1024;
+
+    /**
+     * 校检路径是否在 uploadDir 内，防止路径穿越攻击
+     */
+    private Path validatePath(String filePath) {
+        try {
+            Path uploadRoot = Paths.get(uploadDir).toRealPath();
+            Path resolved = uploadRoot.resolve(Paths.get(filePath)).normalize().toRealPath();
+            if (!resolved.startsWith(uploadRoot)) {
+                log.warn("路径穿越尝试: {} -> {}", filePath, resolved);
+                throw new SecurityException("Path traversal attempt detected");
+            }
+            return resolved;
+        } catch (SecurityException e) {
+            throw e;
+        } catch (IOException e) {
+            log.error("路径校验失败: {}", filePath, e);
+            throw new BusinessException(ErrorCode.FILE_NOT_FOUND);
+        }
+    }
+
     @Override
+    @io.micrometer.core.annotation.Timed(value = "file.upload", histogram = true)
     public String storeFile(MultipartFile file) {
+        // 文件类型白名单校验
+        validateFileType(file);
+
         try {
             Path uploadPath = Paths.get(uploadDir);
             if (!Files.exists(uploadPath)) {
                 Files.createDirectories(uploadPath);
             }
 
-            String fileName = UUID.randomUUID() + "_" + file.getOriginalFilename();
+            // 清理文件名中的路径分隔符，防穿越
+            String originalName = file.getOriginalFilename();
+            if (originalName != null) {
+                originalName = originalName.replaceAll("[/\\\\]", "_");
+            }
+            String fileName = UUID.randomUUID() + "_" + originalName;
             Path targetPath = uploadPath.resolve(fileName);
 
             Files.copy(file.getInputStream(), targetPath, StandardCopyOption.REPLACE_EXISTING);
@@ -59,8 +111,9 @@ public class FileStorageServiceImpl implements FileStorageService {
     @Override
     public void deleteFile(String filePath) {
         try {
-            Files.deleteIfExists(Paths.get(filePath));
-            log.info("文件删除成功: {}", filePath);
+            Path path = validatePath(filePath);
+            Files.deleteIfExists(path);
+            log.info("文件删除成功: {}", path);
         } catch (IOException e) {
             log.error("文件删除失败: {}", filePath, e);
         }
@@ -69,7 +122,8 @@ public class FileStorageServiceImpl implements FileStorageService {
     @Override
     public String readFileContent(String filePath) {
         try {
-            Path path = Paths.get(filePath);
+            // 路径穿越防护：校检文件在 uploadDir 内
+            Path path = validatePath(filePath);
 
             // 先用 Tika 尝试解析所有格式
             String parsedContent = parseWithTika(path);
@@ -95,6 +149,40 @@ public class FileStorageServiceImpl implements FileStorageService {
         } catch (IOException e) {
             log.error("读取文件失败: {}", filePath, e);
             throw new BusinessException(ErrorCode.FILE_READ_ERROR);
+        }
+    }
+
+    /**
+     * 校验文件类型（扩展名 + MIME 双重校验）
+     */
+    private void validateFileType(MultipartFile file) {
+        String originalName = file.getOriginalFilename();
+
+        // 1. 文件大小校验
+        if (file.getSize() > MAX_FILE_SIZE) {
+            throw new BusinessException(ErrorCode.FILE_UPLOAD_ERROR.getCode(),
+                    "文件大小超过限制（最大 50MB）");
+        }
+
+        // 2. 扩展名校验
+        if (originalName != null && originalName.contains(".")) {
+            String ext = originalName.substring(originalName.lastIndexOf('.') + 1).toLowerCase();
+            if (!ALLOWED_EXTENSIONS.contains(ext)) {
+                log.warn("不允许的文件类型: {}", ext);
+                throw new BusinessException(ErrorCode.FILE_UPLOAD_ERROR.getCode(),
+                        "不支持的文件类型: ." + ext);
+            }
+        }
+
+        // 3. MIME 类型校验
+        String contentType = file.getContentType();
+        if (contentType != null) {
+            boolean mimeAllowed = ALLOWED_MIME_PREFIXES.stream().anyMatch(contentType::startsWith);
+            if (!mimeAllowed) {
+                log.warn("不允许的 MIME 类型: {}", contentType);
+                throw new BusinessException(ErrorCode.FILE_UPLOAD_ERROR.getCode(),
+                        "不支持的文件类型: " + contentType);
+            }
         }
     }
 

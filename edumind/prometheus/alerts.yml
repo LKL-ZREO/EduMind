@@ -51,3 +51,33 @@ groups:
         annotations:
           summary: "JVM 堆内存使用率超过 90%"
           description: "当前: {{ $value | humanizePercentage }}"
+
+      # === AI 对话慢 ===
+      - alert: AIChatSlow
+        expr: histogram_quantile(0.95, sum(rate(openclaw_chat_seconds_bucket[5m])) by (le)) > 30
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "AI 对话 p95 延迟超过 30 秒"
+          description: "p95: {{ $value }}s — OpenClaw 可能过载或模型响应变慢"
+
+      # === Embedding 推理慢 ===
+      - alert: EmbeddingSlow
+        expr: histogram_quantile(0.95, sum(rate(embedding_document_seconds_bucket[5m])) by (le)) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Embedding 推理 p95 超过 10 秒"
+          description: "p95: {{ $value }}s — ONNX 模型或 CPU 可能异常"
+
+      # === 文件上传慢 ===
+      - alert: FileUploadSlow
+        expr: histogram_quantile(0.95, sum(rate(file_upload_seconds_bucket[5m])) by (le)) > 20
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "文件上传 p95 超过 20 秒"
+          description: "p95: {{ $value }}s — 存储后端（磁盘/S3）可能 I/O 异常"

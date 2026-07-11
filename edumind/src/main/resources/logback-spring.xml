@@ -1,98 +1,99 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
-    <!-- ==================== 默认属性 ==================== -->
-    <property name="LOG_PATTERN" value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] [%X{requestId:-}] %-5level %logger{36} - %msg%n"/>
     <property name="LOG_DIR" value="${LOG_DIR:-${user.home}/.edumind/logs}"/>
     <property name="MAX_HISTORY" value="30"/>
     <property name="MAX_FILE_SIZE" value="100MB"/>
     <property name="TOTAL_SIZE_CAP" value="3GB"/>
 
-    <!-- ==================== Console Appender（所有环境） ==================== -->
+    <!-- 脱敏版日志格式：手机号中间4位→****，邮箱用户名→*** -->
+    <property name="LOG_PATTERN_MASKED"
+              value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] [%X{requestId:-}] %-5level %logger{36} - %replace(%replace(%msg){'(1[3-9]\d)\d{4}(\d{4})','$1****$2'}){'([\w\-.]{2})[\w\-.]*(@[\w]+\.[\w]+)','$1***$2'}%n"/>
+
+    <!-- 开发/测试用普通格式 -->
+    <property name="LOG_PATTERN"
+              value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] [%X{requestId:-}] %-5level %logger{36} - %msg%n"/>
+
+    <!-- ==================== Console（dev/local：脱敏版） ==================== -->
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
-            <pattern>${LOG_PATTERN}</pattern>
+            <pattern>${LOG_PATTERN_MASKED}</pattern>
             <charset>UTF-8</charset>
         </encoder>
     </appender>
 
-    <!-- ==================== 生产环境专用 Appenders ==================== -->
+    <!-- ==================== prod：JSON 结构日志 + 文件 ==================== -->
     <springProfile name="prod">
 
-    <!-- JSON Console Appender -->
-    <appender name="JSON_CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
-        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
-            <customFields>{"application":"edumind"}</customFields>
-            <includeMdcKeyName>requestId</includeMdcKeyName>
-            <includeMdcKeyName>userId</includeMdcKeyName>
-            <includeMdcKeyName>username</includeMdcKeyName>
-            <includeContext>false</includeContext>
-            <fieldNames>
-                <timestamp>@timestamp</timestamp>
-                <version>@version</version>
-                <message>message</message>
-                <logger>logger_name</logger>
-                <thread>thread_name</thread>
-                <level>level</level>
-                <levelValue>level_value</levelValue>
-            </fieldNames>
-        </encoder>
-    </appender>
+        <appender name="JSON_CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+                <customFields>{"application":"edumind"}</customFields>
+                <includeMdcKeyName>requestId</includeMdcKeyName>
+                <includeMdcKeyName>userId</includeMdcKeyName>
+                <includeMdcKeyName>username</includeMdcKeyName>
+                <includeContext>false</includeContext>
+                <fieldNames>
+                    <timestamp>@timestamp</timestamp>
+                    <version>@version</version>
+                    <message>message</message>
+                    <logger>logger_name</logger>
+                    <thread>thread_name</thread>
+                    <level>level</level>
+                    <levelValue>level_value</levelValue>
+                </fieldNames>
+            </encoder>
+        </appender>
 
-    <!-- ==================== 异步 JSON Appender（生产推荐） ==================== -->
-    <appender name="ASYNC_JSON" class="ch.qos.logback.classic.AsyncAppender">
-        <appender-ref ref="JSON_CONSOLE"/>
-        <queueSize>512</queueSize>
-        <discardingThreshold>0</discardingThreshold>
-        <neverBlock>true</neverBlock>
-        <includeCallerData>false</includeCallerData>
-    </appender>
+        <appender name="ASYNC_JSON" class="ch.qos.logback.classic.AsyncAppender">
+            <appender-ref ref="JSON_CONSOLE"/>
+            <queueSize>512</queueSize>
+            <discardingThreshold>0</discardingThreshold>
+            <neverBlock>true</neverBlock>
+            <includeCallerData>false</includeCallerData>
+        </appender>
 
-    <!-- ==================== 文件滚动 Appender ==================== -->
-    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
-        <file>${LOG_DIR}/edumind.log</file>
-        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
-            <customFields>{"application":"edumind"}</customFields>
-            <includeMdcKeyName>requestId</includeMdcKeyName>
-            <includeMdcKeyName>userId</includeMdcKeyName>
-            <includeMdcKeyName>username</includeMdcKeyName>
-        </encoder>
-        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
-            <fileNamePattern>${LOG_DIR}/edumind.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
-            <maxFileSize>${MAX_FILE_SIZE}</maxFileSize>
-            <maxHistory>${MAX_HISTORY}</maxHistory>
-            <totalSizeCap>${TOTAL_SIZE_CAP}</totalSizeCap>
-        </rollingPolicy>
-    </appender>
+        <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+            <file>${LOG_DIR}/edumind.log</file>
+            <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+                <customFields>{"application":"edumind"}</customFields>
+                <includeMdcKeyName>requestId</includeMdcKeyName>
+                <includeMdcKeyName>userId</includeMdcKeyName>
+                <includeMdcKeyName>username</includeMdcKeyName>
+            </encoder>
+            <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+                <fileNamePattern>${LOG_DIR}/edumind.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+                <maxFileSize>${MAX_FILE_SIZE}</maxFileSize>
+                <maxHistory>${MAX_HISTORY}</maxHistory>
+                <totalSizeCap>${TOTAL_SIZE_CAP}</totalSizeCap>
+            </rollingPolicy>
+        </appender>
 
-    <appender name="ASYNC_FILE" class="ch.qos.logback.classic.AsyncAppender">
-        <appender-ref ref="FILE"/>
-        <queueSize>512</queueSize>
-        <discardingThreshold>0</discardingThreshold>
-        <neverBlock>true</neverBlock>
-    </appender>
+        <appender name="ASYNC_FILE" class="ch.qos.logback.classic.AsyncAppender">
+            <appender-ref ref="FILE"/>
+            <queueSize>512</queueSize>
+            <discardingThreshold>0</discardingThreshold>
+            <neverBlock>true</neverBlock>
+        </appender>
 
-    <!-- ==================== 错误日志单独输出 ==================== -->
-    <appender name="ERROR_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
-        <file>${LOG_DIR}/edumind-error.log</file>
-        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
-            <level>ERROR</level>
-        </filter>
-        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
-            <customFields>{"application":"edumind"}</customFields>
-            <includeMdcKeyName>requestId</includeMdcKeyName>
-            <includeMdcKeyName>userId</includeMdcKeyName>
-        </encoder>
-        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
-            <fileNamePattern>${LOG_DIR}/edumind-error.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
-            <maxFileSize>50MB</maxFileSize>
-            <maxHistory>90</maxHistory>
-        </rollingPolicy>
-    </appender>
+        <appender name="ERROR_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+            <file>${LOG_DIR}/edumind-error.log</file>
+            <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+                <level>ERROR</level>
+            </filter>
+            <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+                <customFields>{"application":"edumind"}</customFields>
+                <includeMdcKeyName>requestId</includeMdcKeyName>
+                <includeMdcKeyName>userId</includeMdcKeyName>
+            </encoder>
+            <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+                <fileNamePattern>${LOG_DIR}/edumind-error.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+                <maxFileSize>50MB</maxFileSize>
+                <maxHistory>90</maxHistory>
+            </rollingPolicy>
+        </appender>
 
     </springProfile>
-    <!-- ==================== 生产环境 Appenders 结束 ==================== -->
 
-    <!-- ==================== Profile: dev / local ==================== -->
+    <!-- ==================== dev / local ==================== -->
     <springProfile name="dev | local">
         <root level="INFO">
             <appender-ref ref="CONSOLE"/>
@@ -100,22 +101,20 @@
         <logger name="com.firedemo.demo" level="DEBUG"/>
         <logger name="org.springframework.security" level="DEBUG"/>
         <logger name="org.springframework.web" level="INFO"/>
-        <!-- 抑制健康检查日志噪音 -->
         <logger name="org.springframework.boot.actuate.health" level="WARN"/>
     </springProfile>
 
-    <!-- ==================== Profile: test ==================== -->
+    <!-- ==================== test ==================== -->
     <springProfile name="test">
         <root level="INFO">
             <appender-ref ref="CONSOLE"/>
         </root>
         <logger name="com.firedemo.demo" level="DEBUG"/>
-        <!-- 测试：抑制噪音 -->
         <logger name="org.testcontainers" level="INFO"/>
         <logger name="tc.postgres" level="WARN"/>
     </springProfile>
 
-    <!-- ==================== Profile: prod ==================== -->
+    <!-- ==================== prod ==================== -->
     <springProfile name="prod">
         <root level="INFO">
             <appender-ref ref="ASYNC_JSON"/>

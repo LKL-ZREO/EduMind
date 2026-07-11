@@ -1,16 +1,21 @@
 package com.firedemo.demo.Controller;
 
+import com.firedemo.demo.Entity.ClassInfo;
 import com.firedemo.demo.Entity.HomeworkTask;
 import com.firedemo.demo.Entity.Submission;
-
-import com.firedemo.demo.Service.ClassService;import com.firedemo.demo.Service.HomeworkTaskService;
+import com.firedemo.demo.Service.ClassService;
+import com.firedemo.demo.Service.HomeworkTaskService;
 import com.firedemo.demo.Service.SubmissionService;
+import com.firedemo.demo.Service.TaskReminderService;
 import com.firedemo.demo.common.result.Result;
-import com.firedemo.demo.utils.JwtUtil;
-import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
@@ -28,15 +33,15 @@ public class TaskController {
     private final HomeworkTaskService taskService;
     private final SubmissionService submissionService;
     private final ClassService classService;
-private final com.firedemo.demo.Service.TaskReminderService taskReminderService;
-    private final JwtUtil jwtUtil;
+    private final TaskReminderService taskReminderService;
 
     /**
-     * 创建作业
+     * 创建作业 — 需是该班级的教师
      */
     @PostMapping
-    public Result createTask(@RequestBody CreateTaskRequest req, HttpServletRequest request) {
-        Long userId = jwtUtil.getUserIdFromRequest(request);
+    @PreAuthorize("@sec.isClassOwner(#req.classId)")
+    public Result<HomeworkTask> createTask(@Valid @RequestBody CreateTaskRequest req) {
+        Long userId = getCurrentUserId();
 
         HomeworkTask task = new HomeworkTask();
         task.setClassId(req.getClassId());
@@ -53,25 +58,16 @@ private final com.firedemo.demo.Service.TaskReminderService taskReminderService;
         taskService.create(task);
         log.info("创建作业: taskId={}, taskName={}, classId={}", task.getId(), req.getTaskName(), req.getClassId());
 
-        // 发送作业发布通知
-        taskReminderService.sendTaskPublishedNotification(
-                req.getClassId(), req.getTaskName(), req.getDeadline());
-
-        // 注册截止提醒定时任务
+        taskReminderService.sendTaskPublishedNotification(req.getClassId(), req.getTaskName(), req.getDeadline());
         taskReminderService.scheduleReminders(task.getId());
 
         return Result.success(task);
     }
 
-    /**
-     * 编辑作业
-     */
     @PutMapping("/{id}")
-    public Result updateTask(@PathVariable Long id, @RequestBody CreateTaskRequest req) {
+    @PreAuthorize("@sec.isTaskOwner(#id)")
+    public Result<HomeworkTask> updateTask(@PathVariable Long id, @RequestBody CreateTaskRequest req) {
         HomeworkTask task = taskService.getById(id);
-        if (task == null) {
-            return Result.error(404, "作业不存在");
-        }
 
         task.setTaskName(req.getTaskName());
         task.setDescription(req.getDescription());
@@ -82,34 +78,22 @@ private final com.firedemo.demo.Service.TaskReminderService taskReminderService;
 
         taskService.update(task);
         log.info("编辑作业: taskId={}", id);
-
         return Result.success(task);
     }
 
-    /**
-     * 删除作业
-     */
     @DeleteMapping("/{id}")
-    public Result deleteTask(@PathVariable Long id) {
-        HomeworkTask task = taskService.getById(id);
-        if (task == null) {
-            return Result.error(404, "作业不存在");
-        }
-
+    @PreAuthorize("@sec.isTaskOwner(#id)")
+    public Result<Void> deleteTask(@PathVariable Long id) {
         taskService.delete(id);
         log.info("删除作业: taskId={}", id);
-
         return Result.success(null);
     }
 
-    /**
-     * 获取作业列表（含统计信息）
-     */
     @GetMapping
-    public Result getTasks(@RequestParam Long classId) {
+    @PreAuthorize("@sec.isClassOwner(#classId)")
+    public Result<List<Map<String, Object>>> getTasks(@RequestParam Long classId) {
         List<HomeworkTask> tasks = taskService.listByClassId(classId);
 
-        // 批量查询当前班级所有作业的统计（一条SQL替代N条）
         List<Map<String, Object>> taskStats = submissionService.listTaskStatsByClassId(classId);
         Map<Long, Map<String, Object>> statsMap = new HashMap<>();
         for (Map<String, Object> row : taskStats) {
@@ -130,7 +114,6 @@ private final com.firedemo.demo.Service.TaskReminderService taskReminderService;
             item.put("status", task.getStatus());
             item.put("createdAt", task.getCreatedAt());
 
-            // 从批量统计中取值
             Map<String, Object> stats = statsMap.get(task.getId());
             if (stats != null) {
                 Number count = (Number) stats.get("submitted_count");
@@ -142,25 +125,18 @@ private final com.firedemo.demo.Service.TaskReminderService taskReminderService;
                 item.put("avgScore", 0.0);
             }
             item.put("totalSubmissions", item.get("submittedCount"));
-
-            boolean expired = task.getDeadline() != null && task.getDeadline().isBefore(LocalDateTime.now());
-            item.put("expired", expired);
+            item.put("expired", task.getDeadline() != null && task.getDeadline().isBefore(LocalDateTime.now()));
 
             result.add(item);
         }
-
         return Result.success(result);
     }
 
-    /**
-     * 获取单个作业详情（含成绩分布和提交列表）
-     */
     @GetMapping("/{id}")
-    public Result getTaskDetail(@PathVariable Long id) {
+    @PreAuthorize("@sec.isTaskOwner(#id)")
+    public Result<Map<String, Object>> getTaskDetail(@PathVariable Long id) {
         HomeworkTask task = taskService.getById(id);
-        if (task == null) {
-            return Result.error(404, "作业不存在");
-        }
+        if (task == null) return Result.error(404, "作业不存在");
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("id", task.getId());
@@ -172,10 +148,7 @@ private final com.firedemo.demo.Service.TaskReminderService taskReminderService;
         result.put("latePenalty", task.getLatePenalty());
         result.put("status", task.getStatus());
 
-        // 提交列表（每个学生只取最新）
         List<Submission> submissions = submissionService.listByTaskId(task.getId());
-
-        // 按学号去重，只保留最新提交
         Map<String, Submission> latestByStudent = new LinkedHashMap<>();
         for (Submission s : submissions) {
             String key = s.getStudentId() != null ? s.getStudentId() : s.getStudentName();
@@ -185,16 +158,11 @@ private final com.firedemo.demo.Service.TaskReminderService taskReminderService;
         }
         List<Submission> latestSubmissions = new ArrayList<>(latestByStudent.values());
 
-        // 成绩分布
         Map<String, Integer> dist = new LinkedHashMap<>();
-        dist.put("excellent", 0); // 90-100
-        dist.put("good", 0);      // 80-89
-        dist.put("medium", 0);    // 70-79
-        dist.put("pass", 0);      // 60-69
-        dist.put("fail", 0);      // <60
+        dist.put("excellent", 0); dist.put("good", 0); dist.put("medium", 0);
+        dist.put("pass", 0); dist.put("fail", 0);
 
         List<Map<String, Object>> studentList = new ArrayList<>();
-
         for (Submission s : latestSubmissions) {
             if (s.getTotalScore() != null) {
                 if (s.getTotalScore() >= 90) dist.merge("excellent", 1, Integer::sum);
@@ -203,7 +171,6 @@ private final com.firedemo.demo.Service.TaskReminderService taskReminderService;
                 else if (s.getTotalScore() >= 60) dist.merge("pass", 1, Integer::sum);
                 else dist.merge("fail", 1, Integer::sum);
             }
-
             Map<String, Object> si = new LinkedHashMap<>();
             si.put("submissionId", s.getId());
             si.put("studentName", s.getStudentName());
@@ -216,66 +183,48 @@ private final com.firedemo.demo.Service.TaskReminderService taskReminderService;
             studentList.add(si);
         }
 
-        // 统计
         double avgScore = latestSubmissions.stream()
                 .filter(s -> s.getTotalScore() != null)
-                .mapToInt(Submission::getTotalScore)
-                .average()
-                .orElse(0);
+                .mapToInt(Submission::getTotalScore).average().orElse(0);
 
         result.put("distribution", dist);
         result.put("submittedCount", latestByStudent.size());
         result.put("totalSubmissions", latestSubmissions.size());
         result.put("avgScore", Math.round(avgScore * 10.0) / 10.0);
         result.put("submissions", studentList);
-
         return Result.success(result);
     }
 
-    /**
-     * 关闭作业
-     */
     @PutMapping("/{id}/close")
-    public Result closeTask(@PathVariable Long id) {
+    @PreAuthorize("@sec.isTaskOwner(#id)")
+    public Result<Void> closeTask(@PathVariable Long id) {
         HomeworkTask task = taskService.getById(id);
-        if (task == null) {
-            return Result.error(404, "作业不存在");
-        }
-
         task.setStatus("closed");
         task.setUpdatedAt(LocalDateTime.now());
         taskService.update(task);
-
         return Result.success(null);
     }
 
-    /**
-     * 测试提醒功能（立即发送）
-     */
     @PostMapping("/{id}/test-reminder")
-    public Result testReminder(@PathVariable Long id) {
+    @PreAuthorize("@sec.isTaskOwner(#id)")
+    public Result<Map<String, Object>> testReminder(@PathVariable Long id) {
         HomeworkTask task = taskService.getById(id);
-        if (task == null) {
-            return Result.error(404, "作业不存在");
-        }
 
         String groupId = classService.getQqGroupId(task.getClassId());
         if (groupId == null || groupId.isEmpty()) {
             return Result.error(400, "班级未配置QQ群号");
         }
 
-        // 查询班级学生总数和已提交数
         Integer totalStudents = classService.countStudentsByClassId(task.getClassId());
         Integer submittedCount = classService.countSubmittedByTaskId(task.getClassId(), task.getId());
         if (totalStudents == null) totalStudents = 0;
         if (submittedCount == null) submittedCount = 0;
         int unsubmittedCount = totalStudents - submittedCount;
 
-        // 立即发送1小时前提醒（测试）
         taskReminderService.sendDeadlineReminder1h(task.getId());
 
         return Result.success(Map.of(
-                "message", String.format("测试提醒已发送！班级共%d人，已交%d人，未交%d人", 
+                "message", String.format("测试提醒已发送！班级共%d人，已交%d人，未交%d人",
                         totalStudents, submittedCount, unsubmittedCount)
         ));
     }
@@ -284,11 +233,24 @@ private final com.firedemo.demo.Service.TaskReminderService taskReminderService;
 
     @Data
     public static class CreateTaskRequest {
+        @NotNull(message = "班级ID不能为空")
         private Long classId;
+
+        @NotBlank(message = "作业名称不能为空")
         private String taskName;
+
         private String description;
         private LocalDateTime deadline;
         private Boolean allowLate;
         private Integer latePenalty;
+    }
+
+    // ========== 内部工具 ==========
+
+    private Long getCurrentUserId() {
+        var auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated() || auth.getDetails() == null) return null;
+        if (auth.getDetails() instanceof Long uid) return uid;
+        return null;
     }
 }

@@ -6,6 +6,7 @@ import com.firedemo.demo.Service.SubmissionService;
 import com.firedemo.demo.common.result.Result;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.LinkedHashMap;
@@ -27,7 +28,8 @@ public class SubmissionController {
      * 获取提交文件原内容（供新页签查看）
      */
     @GetMapping("/{id}/content")
-    public Result getContent(@PathVariable Long id) {
+    @PreAuthorize("@sec.isSubmissionOwner(#id)")
+    public Result<Map<String, Object>> getContent(@PathVariable Long id) {
         Submission sub = submissionService.getById(id);
         if (sub == null) {
             return Result.error(404, "提交记录不存在");

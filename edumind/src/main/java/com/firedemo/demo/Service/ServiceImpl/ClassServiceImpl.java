@@ -142,7 +142,7 @@ public class ClassServiceImpl implements ClassService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ClassInfo createClass(Long teacherId, CreateClassDTO dto) {
         ClassInfo ci = new ClassInfo();
         ci.setName(dto.getName());
@@ -160,7 +160,7 @@ public class ClassServiceImpl implements ClassService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void updateClass(Long classId, Long teacherId, UpdateClassDTO dto) {
         ClassInfo ci = getClassById(classId);
         if (!ci.getTeacherId().equals(teacherId)) {
@@ -177,7 +177,7 @@ public class ClassServiceImpl implements ClassService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void deleteClass(Long classId, Long teacherId) {
         ClassInfo ci = getClassById(classId);
         if (!ci.getTeacherId().equals(teacherId)) {
@@ -192,7 +192,7 @@ public class ClassServiceImpl implements ClassService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void toggleArchive(Long classId, Long teacherId) {
         ClassInfo ci = getClassById(classId);
         if (!ci.getTeacherId().equals(teacherId)) {
@@ -229,7 +229,7 @@ public class ClassServiceImpl implements ClassService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void removeStudent(Long classId, String studentId, Long teacherId) {
         ClassInfo ci = getClassById(classId);
         if (!ci.getTeacherId().equals(teacherId)) {
@@ -245,7 +245,7 @@ public class ClassServiceImpl implements ClassService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public Map<String, Integer> importStudents(Long classId, Long teacherId, List<ImportStudentsDTO.StudentItem> items) {
         ClassInfo ci = getClassById(classId);
         if (!ci.getTeacherId().equals(teacherId)) {
@@ -271,7 +271,7 @@ public class ClassServiceImpl implements ClassService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public String joinByInviteCode(String inviteCode, String studentId, String studentName) {
         ClassInfo ci = classInfoMapper.selectOne(
                 new LambdaQueryWrapper<ClassInfo>()

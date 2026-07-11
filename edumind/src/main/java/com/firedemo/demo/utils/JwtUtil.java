@@ -21,7 +21,8 @@ import java.util.Date;
 @Component
 public class JwtUtil {
 
-    private static final long EXPIRATION = 86400000; // 24小时
+    public static final long EXPIRATION = 86400000; // 24小时
+    public static final long EXPIRATION_SECONDS = EXPIRATION / 1000;
 
     private final SecretKey key;
 
@@ -31,24 +32,30 @@ public class JwtUtil {
 
     // 生成 Token
     public String generateToken(Long userId, String username) {
-        return generateToken(userId, username, null);
+        return generateToken(userId, username, null, null);
     }
 
     // 生成 Token（带 status）
     public String generateToken(Long userId, String username, Integer status) {
+        return generateToken(userId, username, status, null);
+    }
+
+    // 生成 Token（带 status + role）
+    public String generateToken(Long userId, String username, Integer status, String role) {
         Date now = new Date();
         Date expiry = new Date(now.getTime() + EXPIRATION);
 
         var builder = Jwts.builder()
                 .setSubject(String.valueOf(userId))
                 .claim("username", username)
+                .claim("role", role != null ? role : "TEACHER")
                 .setIssuedAt(now)
                 .setExpiration(expiry);
-        
+
         if (status != null) {
             builder.claim("status", status);
         }
-        
+
         return builder.signWith(key, SignatureAlgorithm.HS256).compact();
     }
 
@@ -73,10 +80,27 @@ public class JwtUtil {
         return Long.valueOf(claims.getSubject());
     }
 
+    // 从 Token 获取角色
+    public String getRoleFromToken(String token) {
+        Claims claims = parseToken(token);
+        return claims.get("role", String.class);
+    }
+
     // 从 Token 获取用户名
     public String getUsernameFromToken(String token) {
         Claims claims = parseToken(token);
         return claims.get("username", String.class);
+    }
+
+    /** 获取 token 剩余有效秒数（用于黑名单 TTL）；已过期返回 0 */
+    public long getRemainingSeconds(String token) {
+        try {
+            Claims claims = parseToken(token);
+            long remaining = (claims.getExpiration().getTime() - System.currentTimeMillis()) / 1000;
+            return Math.max(remaining, 0);
+        } catch (Exception e) {
+            return 0;
+        }
     }
 
     // 验证 Token 是否有效

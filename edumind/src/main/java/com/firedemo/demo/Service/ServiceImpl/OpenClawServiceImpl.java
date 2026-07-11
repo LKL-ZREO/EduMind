@@ -1,6 +1,7 @@
 package com.firedemo.demo.Service.ServiceImpl;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import io.micrometer.core.annotation.Timed;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.firedemo.demo.Entity.Course;
 import com.firedemo.demo.Service.CourseService;
@@ -101,6 +102,7 @@ public class OpenClawServiceImpl implements OpenClawService {
 
     @Override
     @SuppressWarnings("unchecked")
+    @Timed(value = "openclaw.chat", histogram = true)
     @CircuitBreaker(name = "openclaw", fallbackMethod = "chatFallback")
     public String chat(String message, String sessionId, String status) {
         String agent = resolveAgent(status);
@@ -151,6 +153,7 @@ public class OpenClawServiceImpl implements OpenClawService {
      * 流式对话（带历史消息）
      */
     @Override
+    @Timed(value = "openclaw.stream", histogram = true)
     @CircuitBreaker(name = "openclaw", fallbackMethod = "streamChatFallback")
     public Flux<String> streamChat(String message, List<Map<String, Object>> history, String sessionId) {
         String agent = resolveAgent(null);

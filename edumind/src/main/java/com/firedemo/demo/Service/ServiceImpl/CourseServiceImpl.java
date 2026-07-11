@@ -61,7 +61,7 @@ public class CourseServiceImpl implements CourseService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public Course create(Long teacherId, String name, String systemPrompt, String knowledgeScope) {
         Course course = new Course();
         course.setTeacherId(teacherId);
@@ -80,7 +80,7 @@ public class CourseServiceImpl implements CourseService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void update(Long courseId, Long teacherId, String name,
                        String systemPrompt, String knowledgeScope) {
         Course course = courseMapper.selectById(courseId);
@@ -96,7 +96,7 @@ public class CourseServiceImpl implements CourseService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void delete(Long courseId, Long teacherId) {
         Course course = courseMapper.selectById(courseId);
         if (course == null) throw new IllegalArgumentException("课程不存在: " + courseId);
@@ -107,7 +107,7 @@ public class CourseServiceImpl implements CourseService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void updatePrompt(Long courseId, String systemPrompt, String knowledgeScope) {
         Course course = courseMapper.selectById(courseId);
         if (course == null) {

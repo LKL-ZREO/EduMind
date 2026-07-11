@@ -2,11 +2,15 @@ package com.firedemo.demo.Controller;
 
 import com.firedemo.demo.DTO.UserLoginDTO;
 import com.firedemo.demo.DTO.UserRegisterDTO;
+import com.firedemo.demo.Service.TokenService;
 import com.firedemo.demo.Service.UserService;
 import com.firedemo.demo.VO.UserLoginVO;
 import com.firedemo.demo.common.exception.BusinessException;
 import com.firedemo.demo.common.exception.ErrorCode;
 import com.firedemo.demo.common.result.Result;
+import com.firedemo.demo.utils.JwtUtil;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -16,19 +20,22 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
-/**
- * AuthController 纯单元测试 — 手动构造 Controller，Mock Service 层。
- */
 @DisplayName("AuthController — 认证控制器")
 class AuthControllerTest {
 
     private UserService userService;
+    private TokenService tokenService;
+    private JwtUtil jwtUtil;
     private AuthController controller;
+    private HttpServletResponse mockResponse;
 
     @BeforeEach
     void setUp() {
         userService = mock(UserService.class);
-        controller = new AuthController(userService);
+        tokenService = mock(TokenService.class);
+        jwtUtil = mock(JwtUtil.class);
+        mockResponse = mock(HttpServletResponse.class);
+        controller = new AuthController(userService, tokenService, jwtUtil);
     }
 
     @Nested
@@ -73,7 +80,7 @@ class AuthControllerTest {
     class Login {
 
         @Test
-        @DisplayName("正常登录 → 200 返回 JWT")
+        @DisplayName("正常登录 → 200 返回 JWT + 刷新令牌 + Cookie")
         void shouldLoginSuccessfully() {
             UserLoginDTO dto = new UserLoginDTO();
             dto.setUsername("teacher1");
@@ -84,17 +91,19 @@ class AuthControllerTest {
                     .username("teacher1")
                     .email("t1@school.edu")
                     .token("jwt-token-abc")
+                    .refreshToken("refresh-token-abc")
+                    .expiresIn(JwtUtil.EXPIRATION_SECONDS)
                     .sessionId("session-xyz")
                     .build();
 
             when(userService.login(any())).thenReturn(vo);
 
-            Result<UserLoginVO> result = controller.login(dto);
+            Result<UserLoginVO> result = controller.login(dto, mockResponse);
 
             assertThat(result.getCode()).isEqualTo(200);
             assertThat(result.getData().getToken()).isEqualTo("jwt-token-abc");
+            assertThat(result.getData().getRefreshToken()).isEqualTo("refresh-token-abc");
             assertThat(result.getData().getUsername()).isEqualTo("teacher1");
-            assertThat(result.getData().getSessionId()).isEqualTo("session-xyz");
         }
 
         @Test
@@ -107,7 +116,7 @@ class AuthControllerTest {
             when(userService.login(any()))
                     .thenThrow(new BusinessException(ErrorCode.USER_NOT_FOUND));
 
-            assertThatThrownBy(() -> controller.login(dto))
+            assertThatThrownBy(() -> controller.login(dto, mockResponse))
                     .isInstanceOf(BusinessException.class);
         }
 
@@ -121,7 +130,7 @@ class AuthControllerTest {
             when(userService.login(any()))
                     .thenThrow(new BusinessException(ErrorCode.PASSWORD_ERROR));
 
-            assertThatThrownBy(() -> controller.login(dto))
+            assertThatThrownBy(() -> controller.login(dto, mockResponse))
                     .isInstanceOf(BusinessException.class);
         }
     }

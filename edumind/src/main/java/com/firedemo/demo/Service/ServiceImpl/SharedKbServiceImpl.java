@@ -22,7 +22,7 @@ public class SharedKbServiceImpl implements SharedKbService {
     private final SharedKbMemberMapper memberMapper;
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public SharedKb create(Long userId, String name, String description) {
         // 生成邀请 token
         String token = UUID.randomUUID().toString().replace("-", "");
@@ -63,7 +63,7 @@ public class SharedKbServiceImpl implements SharedKbService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void update(Long userId, Long kbId, String name, String description) {
         SharedKb kb = sharedKbMapper.selectById(kbId);
         checkOwner(kb, userId);
@@ -73,7 +73,7 @@ public class SharedKbServiceImpl implements SharedKbService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void delete(Long userId, Long kbId) {
         SharedKb kb = sharedKbMapper.selectById(kbId);
         checkOwner(kb, userId);
@@ -86,7 +86,7 @@ public class SharedKbServiceImpl implements SharedKbService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public String generateInvite(Long userId, Long kbId, Integer maxUses, Integer expireHours) {
         hasAccess(kbId, userId);
         SharedKb kb = sharedKbMapper.selectById(kbId);
@@ -100,7 +100,7 @@ public class SharedKbServiceImpl implements SharedKbService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void joinByToken(Long userId, String token) {
         SharedKb kb = sharedKbMapper.selectByInviteToken(token);
         if (kb == null) throw new IllegalArgumentException("邀请链接无效");
@@ -146,7 +146,7 @@ public class SharedKbServiceImpl implements SharedKbService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void removeMember(Long userId, Long kbId, Long targetUserId) {
         SharedKb kb = sharedKbMapper.selectById(kbId);
         if (kb == null) throw new IllegalArgumentException("知识库不存在");
@@ -168,7 +168,7 @@ public class SharedKbServiceImpl implements SharedKbService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void changeRole(Long userId, Long kbId, Long targetUserId, String role) {
         SharedKb kb = sharedKbMapper.selectById(kbId);
         checkOwner(kb, userId);

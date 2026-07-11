@@ -181,6 +181,7 @@ public class EmbeddingService {
      * 文档嵌入 —— 不加前缀，用于文档入库时。
      * 模型未就绪或推理失败时直接抛异常，调用方自行决定是否重试或跳过。
      */
+    @io.micrometer.core.annotation.Timed(value = "embedding.document", histogram = true)
     public float[] embedDocument(String text) {
         if (!modelReady) {
             throw new IllegalStateException("Embedding model not ready");
@@ -206,6 +207,7 @@ public class EmbeddingService {
      * TODO: 改为真正的 stacked-batch 推理 + Predictor 池（需改造 OnnxEmbeddingTranslator
      * 为 BatchTranslator，将所有输入 padded 后拼成 [batch, max_len] 张量一次性推理）
      */
+    @io.micrometer.core.annotation.Timed(value = "embedding.batch", histogram = true)
     public List<float[]> embedBatch(List<String> texts) {
         if (texts == null || texts.isEmpty()) {
             return java.util.Collections.emptyList();
