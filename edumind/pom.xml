@@ -209,7 +209,7 @@
         <dependency>
             <groupId>ai.djl.pytorch</groupId>
             <artifactId>pytorch-engine</artifactId>
-            <version>0.28.0</version>
+            <version>0.36.0</version>
         </dependency>
         <dependency>
             <groupId>ai.djl.huggingface</groupId>
