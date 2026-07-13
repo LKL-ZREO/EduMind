@@ -22,7 +22,7 @@
     "@tiptap/extension-placeholder": "^3.25.0",
     "@tiptap/pm": "^3.25.0",
     "@tiptap/starter-kit": "^3.25.0",
-    "@tiptap/vue-3": "^3.25.0",
+    "@tiptap/vue-3": "^3.27.3",
     "axios": "^1.13.6",
     "echarts": "^6.0.0",
     "element-plus": "^2.13.6",
