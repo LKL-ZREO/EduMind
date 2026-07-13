@@ -33,7 +33,7 @@ export const useClassStore = defineStore('class', () => {
       lastFetchTime.value = Date.now()
       // 自动选中第一个
       if (!currentClassId.value && classList.value.length > 0) {
-        currentClassId.value = classList.value[0].id
+        currentClassId.value = classList.value[0]?.id ?? currentClassId.value
       }
       return classList.value
     } catch (e) {

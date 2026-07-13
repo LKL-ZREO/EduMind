@@ -56,7 +56,6 @@ watch(renderedDescription, async () => {
 // 提交状态（提交后从后端返回获取）
 const submitCount = ref(0)
 const remainingAttempts = ref(3)
-const maxAttempts = 3
 const submittedStudentId = ref('')
 
 // QQ绑定弹窗
@@ -183,10 +182,10 @@ function parseFileName(name: string): { studentId: string; studentName: string; 
   const match = name.match(/^(.+)_(.+)_(.+)_(.+)\.\w+$/)
   if (!match) return null
   return {
-    studentId: match[1].trim(),
-    studentName: match[2].trim(),
-    className: match[3].trim(),
-    assignmentName: match[4].trim()
+    studentId: match[1]!.trim(),
+    studentName: match[2]!.trim(),
+    className: match[3]!.trim(),
+    assignmentName: match[4]!.trim()
   }
 }
 
@@ -226,7 +225,7 @@ function onFileSelected(e: Event) {
   const input = e.target as HTMLInputElement
   if (!input.files?.length) return
 
-  const f = input.files[0]
+  const f = input.files[0]!
   error.value = ''
   uploaded.value = false
   showConfirmSubmit.value = false
@@ -256,7 +255,7 @@ function dropHandler(e: DragEvent) {
   const dt = e.dataTransfer
   if (!dt?.files.length) return
 
-  const f = dt.files[0]
+  const f = dt.files[0]!
   error.value = ''
   uploaded.value = false
   showConfirmSubmit.value = false
@@ -438,7 +437,7 @@ async function bindQq() {
     } else {
       alert(res.data.message || '绑定失败')
     }
-  } catch (e) {
+  } catch {
     alert('绑定失败，请检查网络')
   } finally {
     bindLoading.value = false

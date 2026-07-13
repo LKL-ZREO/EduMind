@@ -496,7 +496,7 @@ public class DashboardServiceImpl implements DashboardService {
             if (reclassified > 0) {
                 log.info("AI reclassify done: classId={}, reclassified={}", classId, reclassified);
             }
-        } catch (RuntimeException e) {
+        } catch (Exception e) {
             log.warn("AI reclassify failed for classId={}: {}", classId, e.getMessage());
         }
     }

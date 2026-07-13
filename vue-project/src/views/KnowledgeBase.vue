@@ -159,7 +159,7 @@
         </el-tab-pane>
         <el-tab-pane label="邀请">
           <p style="color:#888;font-size:13px;margin-bottom:8px;">分享下面的链接，其他人可以加入此知识库</p>
-          <el-input v-model="inviteLink" readonly :model-value="inviteLink">
+          <el-input v-model="inviteLink" readonly>
             <template #append><el-button @click="copyInviteLink">复制</el-button></template>
           </el-input>
           <el-button size="small" style="margin-top:8px" @click="regenerateInvite">重新生成链接</el-button>
@@ -169,7 +169,7 @@
           <div v-for="m in members" :key="m.userId || m.user_id" class="member-row">
             <div class="member-info">
               <span class="member-name">{{ m.username }}</span>
-              <el-tag size="small" :type="m.role === 'owner' ? 'warning' : m.role === 'admin' ? 'primary' : 'info'">{{ {owner:'创建者',admin:'管理员',member:'成员'}[m.role] || m.role }}</el-tag>
+              <el-tag size="small" :type="m.role === 'owner' ? 'warning' : m.role === 'admin' ? 'primary' : 'info'">{{ roleLabels[m.role] || m.role }}</el-tag>
             </div>
             <el-button v-if="m.role !== 'owner'" link type="danger" size="small" @click="removeMember(m.userId || m.user_id)">移除</el-button>
           </div>
@@ -193,7 +193,7 @@
           <el-option v-for="kb in [...myKbs, ...joinedKbs]" :key="kb.id" :value="kb.id" :label="kb.name" />
         </el-select>
       </div>
-      <el-upload ref="uploadRef" v-model:file-list="uploadFileList" :auto-upload="false" drag multiple accept=".txt,.md,.pdf,.doc,.docx,.ppt,.pptx" :on-change="(_, files) => uploadFileList = files" class="kb-upload">
+      <el-upload ref="uploadRef" v-model:file-list="uploadFileList" :auto-upload="false" drag multiple accept=".txt,.md,.pdf,.doc,.docx,.ppt,.pptx" :on-change="(_file: any, files: any) => uploadFileList = files" class="kb-upload">
         <el-icon class="el-icon--upload" :size="40"><UploadFilled /></el-icon>
         <div class="el-upload__text">拖拽文件到此处，或 <em>点击选择</em></div>
         <template #tip><div class="el-upload__tip">支持 .txt .md .pdf .doc .docx .ppt .pptx</div></template>
@@ -204,12 +204,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { FolderOpened, Document, FolderAdd, Upload, UploadFilled, Edit, Delete, Tickets, Loading, Share, Link, Setting, Star, ArrowRight } from '@element-plus/icons-vue'
 import type { ElTree, UploadUserFile } from 'element-plus'
-import type { DropType } from 'element-plus/es/components/tree/src/tree.type'
 import request from '@/api/request'
+
+/* ===== Constants ===== */
+const roleLabels: Record<string, string> = { owner: '创建者', admin: '管理员', member: '成员' }
 
 /* ===== Types ===== */
 interface FlatNode { id: number; userId: number; parentId: number | null; label: string; nodeType: 'folder' | 'file'; docId: string | null; sortOrder: number; createdAt: string; updatedAt: string; kbId?: number }
@@ -288,7 +290,7 @@ onMounted(async () => {
 const renamingNode = ref<TreeNode | null>(null)
 const renameValue = ref('')
 function handleDoubleClick(data: TreeNode) { if (data.type !== 'folder') return; startRename(data) }
-function startRename(node: TreeNode) { renamingNode.value = node; renameValue.value = node.label; nextTick(() => { (document.querySelector('.custom-tree-node .el-input__inner') as HTMLInputElement)?.focus()?.select() }) }
+function startRename(node: TreeNode) { renamingNode.value = node; renameValue.value = node.label; nextTick(() => { const el = document.querySelector('.custom-tree-node .el-input__inner') as HTMLInputElement; el?.focus(); el?.select() }) }
 async function confirmRename(data: TreeNode) { const name = renameValue.value.trim(); renamingNode.value = null; if (!name || name === data.label) return; try { await request.put(`/documents/directory/${data.id}/rename`, { label: name }); data.label = name } catch (e: any) { ElMessage.error(e.message); await fetchTree() } }
 function cancelRename() { renamingNode.value = null }
 
@@ -386,7 +388,7 @@ async function confirmJoin() {
   if (!token) { ElMessage.warning('请输入邀请链接或token'); return }
   // 提取 token：如果贴的是完整链接，从 ?token= 后面取
   const m = token.match(/[?&]token=([^&]+)/)
-  if (m) token = m[1]
+  if (m) token = m[1] ?? token
   joinLoading.value = true
   try {
     await request.post(`/shared-kb/join?token=${encodeURIComponent(token)}`)
@@ -409,7 +411,7 @@ async function submitUpload() {
       if (!f.raw) continue; const fd = new FormData(); fd.append('file', f.raw)
       if (uploadParentNode.value) fd.append('parentNodeId', String(uploadParentNode.value.id))
       if (uploadKbId.value != null) fd.append('kbId', String(uploadKbId.value))
-      const r = await request.post(`/documents/upload`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+      await request.post(`/documents/upload`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
       ok++
     }
     await fetchTree()
@@ -419,8 +421,8 @@ async function submitUpload() {
 }
 
 /* ===== Drag ===== */
-function allowDrop(_: any, dropNode: { data: TreeNode }, type: DropType) { if (type === 'inner') return dropNode.data.type === 'folder'; return true }
-async function handleNodeDrop(draggingNode: { data: TreeNode }, dropNode: { data: TreeNode }, type: DropType, _: Event) {
+function allowDrop(_: any, dropNode: { data: TreeNode }, type: string) { if (type === 'inner') return dropNode.data.type === 'folder'; return true }
+async function handleNodeDrop(draggingNode: { data: TreeNode }, dropNode: { data: TreeNode }, type: string, _event?: Event) {
   const targetParentId = type === 'inner' ? dropNode.data.id : null
   try { await request.put(`/documents/directory/${draggingNode.data.id}/move`, { targetParentId }); await fetchTree() }
   catch (e: any) { ElMessage.error(e.message); await fetchTree() }

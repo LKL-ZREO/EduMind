@@ -8,7 +8,7 @@ import * as XLSX from 'xlsx'
 const route = useRoute()
 const classId = Number(route.params.id)
 
-const props = defineProps<{
+defineProps<{
   visible: boolean
 }>()
 
@@ -51,7 +51,7 @@ function handleFile(file: File) {
     try {
       const data = new Uint8Array(e.target!.result as ArrayBuffer)
       const workbook = XLSX.read(data, { type: 'array' })
-      const sheet = workbook.Sheets[workbook.SheetNames[0]]
+      const sheet = workbook.Sheets[workbook.SheetNames[0]!]!
       const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 })
 
       if (rows.length < 2) {
@@ -60,7 +60,7 @@ function handleFile(file: File) {
       }
 
       // 智能识别列：找"学号"和"姓名"列
-      const header = rows[0].map((h: any) => String(h || '').trim())
+      const header = rows[0]!.map((h: any) => String(h || '').trim())
       const idColIdx = header.findIndex((h: string) =>
         ['学号', 'studentid', 'student_id', 'student id', 'id', '编号'].includes(h.toLowerCase())
       )
@@ -117,7 +117,7 @@ function handleFile(file: File) {
 function onFileInput(e: Event) {
   const input = e.target as HTMLInputElement
   if (!input.files?.length) return
-  handleFile(input.files[0])
+  handleFile(input.files[0]!)
   input.value = ''
 }
 

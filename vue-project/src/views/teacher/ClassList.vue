@@ -3,7 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import request from '@/api/request'
-import { getPresets, createCourse as apiCreateCourse, updateCourse, deleteCourse, type Course, type PresetTemplate } from '@/api/course'
+import { createCourse as apiCreateCourse, updateCourse, deleteCourse, type Course, type PresetTemplate } from '@/api/course'
 import InviteDialog from './InviteDialog.vue'
 
 const router = useRouter()

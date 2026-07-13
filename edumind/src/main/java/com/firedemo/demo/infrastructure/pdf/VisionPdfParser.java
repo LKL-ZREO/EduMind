@@ -14,6 +14,7 @@ import jakarta.annotation.PreDestroy;
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
+import java.util.Base64;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
