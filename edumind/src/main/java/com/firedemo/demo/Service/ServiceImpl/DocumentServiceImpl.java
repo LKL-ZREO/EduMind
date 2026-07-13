@@ -28,7 +28,11 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.*;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.UUID;
 
 /**
  * 文档服务实现
@@ -104,14 +108,14 @@ public class DocumentServiceImpl implements DocumentService {
     @Transactional(rollbackFor = Exception.class)
     public boolean deleteDocument(String docId, Long userId) {
         Document document = documentMapper.selectByDocId(docId);
-        if (document == null || !document.getUserId().equals(userId)) {
+        if (document == null || !Objects.equals(document.getUserId(), userId)) {
             return false;
         }
 
         // 删除向量库中的 chunk
         try {
             vectorStoreService.deleteDocument(docId);
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             log.warn("Failed to delete chunks for document: {}", docId, e);
         }
 
@@ -176,8 +180,8 @@ public class DocumentServiceImpl implements DocumentService {
 
             log.info("Document processed successfully: {}, chunks: {}", docId, chunks.size());
 
-        } catch (Exception e) {
-            log.error("Failed to process document: " + docId, e);
+        } catch (RuntimeException e) {
+            log.error("Failed to process document: {}", docId, e);
             updateStatus(docId, 2, null); // 失败
         }
     }
@@ -240,7 +244,7 @@ public class DocumentServiceImpl implements DocumentService {
                 throw new IllegalArgumentException("父节点不存在");
             }
             // 共享知识库下的节点，所有成员可操作
-            if (parent.getKbId() == null && !parent.getUserId().equals(userId)) {
+            if (parent.getKbId() == null && !Objects.equals(parent.getUserId(), userId)) {
                 throw new IllegalArgumentException("无权访问");
             }
             if (!"folder".equals(parent.getNodeType())) {
@@ -279,7 +283,7 @@ public class DocumentServiceImpl implements DocumentService {
         if (node == null) {
             throw new IllegalArgumentException("节点不存在");
         }
-        if (node.getKbId() == null && !node.getUserId().equals(userId)) {
+        if (node.getKbId() == null && !Objects.equals(node.getUserId(), userId)) {
             throw new IllegalArgumentException("无权操作");
         }
         node.setLabel(label);
@@ -294,7 +298,7 @@ public class DocumentServiceImpl implements DocumentService {
         if (node == null) {
             throw new IllegalArgumentException("节点不存在");
         }
-        if (node.getKbId() == null && !node.getUserId().equals(userId)) {
+        if (node.getKbId() == null && !Objects.equals(node.getUserId(), userId)) {
             throw new IllegalArgumentException("无权操作");
         }
 
@@ -305,7 +309,7 @@ public class DocumentServiceImpl implements DocumentService {
             if ("file".equals(child.getNodeType()) && child.getDocId() != null) {
                 try {
                     deleteDocument(child.getDocId(), userId);
-                } catch (Exception e) {
+                } catch (RuntimeException e) {
                     log.warn("Failed to delete document {} while deleting node {}", child.getDocId(), child.getId());
                 }
             }
@@ -316,7 +320,7 @@ public class DocumentServiceImpl implements DocumentService {
         if ("file".equals(node.getNodeType()) && node.getDocId() != null) {
             try {
                 deleteDocument(node.getDocId(), userId);
-            } catch (Exception e) {
+            } catch (RuntimeException e) {
                 log.warn("Failed to delete document {} while deleting node {}", node.getDocId(), node.getId());
             }
         }
@@ -331,7 +335,7 @@ public class DocumentServiceImpl implements DocumentService {
         if (node == null) {
             throw new IllegalArgumentException("节点不存在");
         }
-        if (node.getKbId() == null && !node.getUserId().equals(userId)) {
+        if (node.getKbId() == null && !Objects.equals(node.getUserId(), userId)) {
             throw new IllegalArgumentException("无权操作");
         }
 
@@ -347,7 +351,7 @@ public class DocumentServiceImpl implements DocumentService {
             }
 
             DirectoryNode target = directoryNodeMapper.selectById(targetParentId);
-            if (target == null || !target.getUserId().equals(userId)) {
+            if (target == null || !Objects.equals(target.getUserId(), userId)) {
                 throw new IllegalArgumentException("目标节点不存在或无权访问");
             }
             if (!"folder".equals(target.getNodeType())) {
@@ -369,7 +373,7 @@ public class DocumentServiceImpl implements DocumentService {
     @Transactional(rollbackFor = Exception.class)
     public boolean toggleShare(Long userId, Long nodeId) {
         DirectoryNode node = directoryNodeMapper.selectById(nodeId);
-        if (node == null || !node.getUserId().equals(userId)) {
+        if (node == null || !Objects.equals(node.getUserId(), userId)) {
             throw new IllegalArgumentException("节点不存在或无权操作");
         }
         if (!"folder".equals(node.getNodeType())) {
@@ -395,7 +399,7 @@ public class DocumentServiceImpl implements DocumentService {
     }
 
     @Override
-    public List<java.util.Map<String, Object>> getSharedTree(Long userId) {
+    public List<Map<String, Object>> getSharedTree(Long userId) {
         return directoryNodeMapper.selectSharedByOthersWithName(userId);
     }
 

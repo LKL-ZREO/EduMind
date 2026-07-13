@@ -2,7 +2,10 @@ package com.firedemo.demo.Service.ServiceImpl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
-import com.firedemo.demo.DTO.*;
+import com.firedemo.demo.DTO.ClassGroupDTO;
+import com.firedemo.demo.DTO.CreateClassDTO;
+import com.firedemo.demo.DTO.ImportStudentsDTO;
+import com.firedemo.demo.DTO.UpdateClassDTO;
 import com.firedemo.demo.Entity.ClassInfo;
 import com.firedemo.demo.Entity.ClassStudent;
 import com.firedemo.demo.Entity.Course;
@@ -22,7 +25,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
-import java.util.*;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -265,7 +271,7 @@ public class ClassServiceImpl implements ClassService {
                 classStudentMapper.insertIgnore(classId, item.getStudentId(),
                         item.getStudentName(), "manual");
                 imported++;
-            } catch (Exception e) {
+            } catch (RuntimeException e) {
                 skipped++;
                 log.debug("跳过重复学生: classId={} studentId={}", classId, item.getStudentId());
             }

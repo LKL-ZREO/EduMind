@@ -1,8 +1,9 @@
 package com.firedemo.demo.Service.ServiceImpl;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
-import io.micrometer.core.annotation.Timed;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.annotation.Timed;
 import com.firedemo.demo.Entity.Course;
 import com.firedemo.demo.Service.CourseService;
 import com.firedemo.demo.Service.OpenClawService;
@@ -22,10 +23,13 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Flux;
 
-import java.io.IOException;
 import java.net.http.HttpClient;
 import java.time.Duration;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * OpenClaw 服务实现
@@ -36,6 +40,10 @@ import java.util.*;
 @Slf4j
 @Service
 public class OpenClawServiceImpl implements OpenClawService {
+
+    private static final String MODEL_PREFIX = "openclaw/";
+    private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
+    private static final Duration READ_TIMEOUT = Duration.ofMinutes(5);
 
     private final OpenClawProperties agentRouting;
     private final McpSessionStore mcpSessionStore;
@@ -71,11 +79,11 @@ public class OpenClawServiceImpl implements OpenClawService {
 
         HttpClient jdkClient = HttpClient.newBuilder()
                 .version(HttpClient.Version.HTTP_1_1)
-                .connectTimeout(Duration.ofSeconds(10))
+                .connectTimeout(CONNECT_TIMEOUT)
                 .build();
 
         JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(jdkClient);
-        factory.setReadTimeout(Duration.ofMinutes(5));
+        factory.setReadTimeout(READ_TIMEOUT);
 
         this.restClient = RestClient.builder()
                 .baseUrl(baseUrl)
@@ -174,7 +182,7 @@ public class OpenClawServiceImpl implements OpenClawService {
         prependSystemPrompt(messages, sessionId);
 
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("model", "openclaw/" + agent);
+        body.put("model", MODEL_PREFIX + agent);
         body.put("messages", messages);
         body.put("temperature", temperature);
         body.put("stream", true);
@@ -242,7 +250,7 @@ public class OpenClawServiceImpl implements OpenClawService {
 
             JsonNode content = delta.get("content");
             return content != null ? content.asText() : null;
-        } catch (Exception e) {
+        } catch (JsonProcessingException | RuntimeException e) {
             log.trace("Failed to parse SSE line: {}", line, e);
             return null;
         }
@@ -257,7 +265,7 @@ public class OpenClawServiceImpl implements OpenClawService {
     public boolean checkConnection() {
         try {
             Map<String, Object> requestBody = Map.of(
-                    "model", "openclaw/" + agentRouting.getDefaultAgent(),
+                    "model", MODEL_PREFIX + agentRouting.getDefaultAgent(),
                     "messages", List.of(Map.of("role", "user", "content", "hi")),
                     "temperature", 0.1,
                     "max_tokens", 5,
@@ -269,7 +277,7 @@ public class OpenClawServiceImpl implements OpenClawService {
                     .retrieve()
                     .body(Map.class);
             return response != null && response.containsKey("choices");
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             log.warn("OpenClaw connection check failed: {}", e.getMessage());
             return false;
         }
@@ -280,7 +288,7 @@ public class OpenClawServiceImpl implements OpenClawService {
     private Map<String, Object> buildRequestBody(String message, String sessionId,
                                                   String agent, boolean stream) {
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("model", "openclaw/" + agent);
+        body.put("model", MODEL_PREFIX + agent);
         body.put("messages", List.of(
                 Map.of("role", "system", "content", resolveSystemPrompt(sessionId)),
                 Map.of("role", "user", "content", message)));

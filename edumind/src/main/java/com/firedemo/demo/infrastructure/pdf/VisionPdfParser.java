@@ -1,6 +1,5 @@
 package com.firedemo.demo.infrastructure.pdf;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.Loader;
@@ -18,8 +17,16 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -50,9 +57,14 @@ import java.util.concurrent.atomic.AtomicInteger;
 @Component
 public class VisionPdfParser {
 
+    private static final int RENDER_DPI = 200;
+    private static final int RETRY_MAX = 2;
+    private static final long RETRY_DELAY_BASE_MS = 1500L;
+    private static final int LLM_TEMPERATURE = 1;
+    private static final int LLM_MAX_TOKENS = 8192;
+
     private final RestClient restClient;
     private final ObjectMapper objectMapper;
-
     private final String apiBaseUrl;
     private final String apiKey;
     private final String model;
@@ -60,10 +72,6 @@ public class VisionPdfParser {
     private final boolean maintainFormat;
     private final int maxPdfPages;
     private final int contextTailChars;
-
-    private static final int RENDER_DPI = 200;
-    private static final int RETRY_MAX = 2;
-
     private final ExecutorService executor;
 
     public VisionPdfParser(ObjectMapper objectMapper,
@@ -222,8 +230,8 @@ public class VisionPdfParser {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("model", model);  // 直连，不加 openclaw/ 前缀
         body.put("messages", List.of(Map.of("role", "user", "content", contentParts)));
-        body.put("temperature", 1);
-        body.put("max_tokens", 8192);
+        body.put("temperature", LLM_TEMPERATURE);
+        body.put("max_tokens", LLM_MAX_TOKENS);
 
         Exception lastError = null;
         for (int attempt = 1; attempt <= RETRY_MAX; attempt++) {
@@ -262,7 +270,7 @@ public class VisionPdfParser {
             } catch (Exception e) {
                 lastError = e;
                 if (attempt < RETRY_MAX) {
-                    long delay = attempt * 1500L;
+                    long delay = attempt * RETRY_DELAY_BASE_MS;
                     log.warn("Vision LLM 失败 (attempt={}/{}): {}, {}ms 后重试",
                             attempt, RETRY_MAX, e.getMessage(), delay);
                     try { Thread.sleep(delay); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); break; }
