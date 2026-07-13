@@ -361,7 +361,7 @@ export default {
           ElMessage.success('删除成功')
           this.loadTasks()
         }
-      } catch (e) {
+      } catch {
         ElMessage.error('删除失败')
       }
     }

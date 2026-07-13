@@ -180,13 +180,14 @@ async function streamChat(userMsg: string) {
           const t = line.trim()
           if (t.startsWith('data: ')) {
             const d = t.slice(6)
+            const msg = messages.value[idx]!
             if (d === '[DONE]') {
               if (throttleTimer) clearTimeout(throttleTimer)
-              messages.value[idx].html = md2html(messages.value[idx].content)
+              msg.html = md2html(msg.content)
               return
             }
-            try { messages.value[idx].content += JSON.parse(d).content || '' }
-            catch { messages.value[idx].content += d }
+            try { msg.content += JSON.parse(d).content || '' }
+            catch { msg.content += d }
 
             // 节流：标记需更新，100ms 后批量刷新 HTML
             pending = true
@@ -202,13 +203,15 @@ async function streamChat(userMsg: string) {
     }
 
     // 流自然结束（没有 [DONE] 标记的降级路径）
-    messages.value[idx].html = md2html(messages.value[idx].content)
+    const msg = messages.value[idx]!
+    msg.html = md2html(msg.content)
   } catch (e: any) {
     if (e.name === 'AbortError') return // 组件卸载时正常取消，不弹错误
-    if (!messages.value[idx].content) {
-      messages.value[idx].content = 'AI 服务暂时不可用，请稍后重试。'
+    const msg = messages.value[idx]!
+    if (!msg.content) {
+      msg.content = 'AI 服务暂时不可用，请稍后重试。'
     }
-    messages.value[idx].html = md2html(messages.value[idx].content)
+    msg.html = md2html(msg.content)
     ElMessage.error(e.message || '连接失败')
   } finally {
     streamingIdx.value = -1

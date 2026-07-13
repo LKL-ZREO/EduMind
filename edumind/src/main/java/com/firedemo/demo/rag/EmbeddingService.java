@@ -10,14 +10,20 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.*;
+import java.time.Duration;
+import java.util.Collections;
+import java.util.List;
 
 /**
  * 嵌入服务 - 使用 ONNX 真实嵌入模型
  * <p>从 ModelScope / HuggingFace 镜像下载 bge-small-zh-v1.5，
- * 通过 DJL ONNX Runtime 引擎推理，自动回退哈希模式。
+ * 通过 DJL ONNX Runtime 引擎推理，模型未就绪时抛出异常。
  */
 @Slf4j
 @Service
@@ -25,7 +31,11 @@ public class EmbeddingService {
 
     // paraphrase-multilingual-MiniLM-L12-v2: 384维，50+语言，中文效果良好
     private static final String MODEL_NAME = "BAAI/bge-small-zh-v1.5";
-    private static final int EMBEDDING_DIM = 512;
+
+    private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder()
+            .followRedirects(HttpClient.Redirect.NORMAL)
+            .connectTimeout(Duration.ofSeconds(30))
+            .build();
 
     // BGE 模型 query 侧指令前缀（文档侧不加）
     private static final String BGE_QUERY_PREFIX = "为这个句子生成表示以用于检索相关文章：";
@@ -62,18 +72,18 @@ public class EmbeddingService {
                         return;
                     }
                 }
-            } catch (Exception e) {
+            } catch (IOException | RuntimeException e) {
                 log.warn("Failed to load from {}: {}", mirror, e.getMessage());
             }
         }
 
-        log.warn("All model sources failed, falling back to hash-based embedding");
+        log.warn("All model sources failed, embedding service unavailable");
     }
 
     /**
      * 从镜像下载 model.onnx 和 tokenizer.json
      */
-    private boolean downloadModel(String mirror, Path targetDir) throws Exception {
+    private boolean downloadModel(String mirror, Path targetDir) throws IOException {
         String baseUrl = mirror + "/" + MODEL_NAME + "/resolve/main";
 
         Files.createDirectories(targetDir);
@@ -96,7 +106,7 @@ public class EmbeddingService {
         if (!Files.exists(tokCfgPath)) {
             try {
                 downloadFile(baseUrl + "/tokenizer_config.json", tokCfgPath);
-            } catch (Exception e) {
+            } catch (IOException e) {
                 log.debug("下载 tokenizer_config.json 失败（非必须）: {}", e.getMessage());
             }
         }
@@ -106,7 +116,7 @@ public class EmbeddingService {
         if (!Files.exists(stPath)) {
             try {
                 downloadFile(baseUrl + "/special_tokens_map.json", stPath);
-            } catch (Exception e) {
+            } catch (IOException e) {
                 log.debug("下载 special_tokens_map.json 失败（非必须）: {}", e.getMessage());
             }
         }
@@ -114,20 +124,20 @@ public class EmbeddingService {
         return Files.exists(onnxPath) && Files.size(onnxPath) > 1024;
     }
 
-    private void downloadFile(String url, Path target) throws Exception {
-        java.net.http.HttpClient client = java.net.http.HttpClient.newBuilder()
-                .followRedirects(java.net.http.HttpClient.Redirect.NORMAL)
-                .connectTimeout(java.time.Duration.ofSeconds(30))
-                .build();
-
-        java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
-                .uri(java.net.URI.create(url))
-                .timeout(java.time.Duration.ofMinutes(5))
+    private void downloadFile(String url, Path target) throws IOException {
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .timeout(Duration.ofMinutes(5))
                 .GET()
                 .build();
 
-        java.net.http.HttpResponse<Path> response = client.send(request,
-                java.net.http.HttpResponse.BodyHandlers.ofFile(target));
+        HttpResponse<Path> response;
+        try {
+            response = HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.ofFile(target));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Download interrupted: " + url, e);
+        }
 
         if (response.statusCode() != 200) {
             Files.deleteIfExists(target);
@@ -155,7 +165,7 @@ public class EmbeddingService {
             model = criteria.loadModel();
             predictor = model.newPredictor();
             modelReady = true;
-        } catch (Exception e) {
+        } catch (IOException | ai.djl.ModelException | RuntimeException e) {
             log.error("Failed to load local model: {}", e.getMessage());
         }
     }
@@ -210,69 +220,11 @@ public class EmbeddingService {
     @io.micrometer.core.annotation.Timed(value = "embedding.batch", histogram = true)
     public List<float[]> embedBatch(List<String> texts) {
         if (texts == null || texts.isEmpty()) {
-            return java.util.Collections.emptyList();
+            return Collections.emptyList();
         }
         return texts.stream()
                 .map(this::embed)
                 .toList();
     }
 
-    /**
-     * 模型是否就绪
-     */
-    public boolean isModelReady() {
-        return modelReady;
-    }
-
-    // ==================== 回退：哈希嵌入 ====================
-
-    /**
-     * 简化版嵌入 - 基于词频的稀疏向量（备用）
-     */
-    private float[] hashEmbed(String text) {
-        try {
-            Map<String, Integer> wordFreq = extractKeywords(text);
-            float[] vector = new float[EMBEDDING_DIM];
-
-            for (Map.Entry<String, Integer> entry : wordFreq.entrySet()) {
-                int idx = Math.abs(entry.getKey().hashCode()) % EMBEDDING_DIM;
-                vector[idx] += entry.getValue();
-            }
-
-            return normalize(vector);
-        } catch (Exception e) {
-            return new float[EMBEDDING_DIM];
-        }
-    }
-
-    private Map<String, Integer> extractKeywords(String text) {
-        Map<String, Integer> freq = new HashMap<>();
-        String[] tokens = text.toLowerCase()
-                .replaceAll("[^\\u4e00-\\u9fa5a-z0-9]", " ")
-                .split("\\s+");
-
-        for (String token : tokens) {
-            if (token.length() >= 2) freq.merge(token, 1, Integer::sum);
-        }
-
-        String chinese = text.replaceAll("[^\\u4e00-\\u9fa5]", "");
-        for (int i = 0; i < chinese.length() - 1; i++) {
-            freq.merge(chinese.substring(i, i + 2), 1, Integer::sum);
-        }
-
-        return freq;
-    }
-
-    private float[] normalize(float[] vector) {
-        double norm = 0;
-        for (float v : vector) norm += v * v;
-        norm = Math.sqrt(norm);
-        if (norm < 1e-10) return vector;
-
-        float[] normalized = new float[vector.length];
-        for (int i = 0; i < vector.length; i++) {
-            normalized[i] = (float) (vector[i] / norm);
-        }
-        return normalized;
-    }
 }

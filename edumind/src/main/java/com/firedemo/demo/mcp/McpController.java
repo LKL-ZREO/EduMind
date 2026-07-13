@@ -2,11 +2,18 @@ package com.firedemo.demo.mcp;
 
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
-import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
+
+import jakarta.servlet.http.HttpServletRequest;
 
 /**
  * MCP JSON-RPC 端点
@@ -30,6 +37,11 @@ public class McpController {
     private final Map<String, ToolDefinition> tools = new LinkedHashMap<>();
     private final McpSessionStore mcpSessionStore;
 
+    /** MCP 协议 JSON-RPC 响应键 */
+    private static final String KEY_CONTENT = "content";
+    private static final String KEY_TYPE = "type";
+    private static final String KEY_TEXT = "text";
+
     public McpController(List<ToolDefinition> toolDefinitions,
                          McpSessionStore mcpSessionStore) {
         for (ToolDefinition tool : toolDefinitions) {
@@ -49,12 +61,12 @@ public class McpController {
      */
     @PostMapping(produces = "application/json", consumes = "application/json")
     public Map<String, Object> handle(@RequestBody Map<String, Object> request,
-                                      jakarta.servlet.http.HttpServletRequest httpRequest) {
+                                      HttpServletRequest httpRequest) {
 
         String method = (String) request.get("method");
         Object id = request.get("id");
         @SuppressWarnings("unchecked")
-        Map<String, Object> params = (Map<String, Object>) request.getOrDefault("params", Map.of());
+        Map<String, Object> params = (Map<String, Object>) request.getOrDefault("params", new HashMap<>());
 
         log.info("MCP X-MCP-API-Key present={}", httpRequest.getHeader("X-MCP-API-Key") != null);
         log.debug("MCP request: method={}, id={}", method, id);
@@ -71,7 +83,7 @@ public class McpController {
                 case "tools/call" -> handleToolsCall(id, params);
                 default -> errorResponse(id, -32601, "未知方法: " + method);
             };
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             log.error("MCP 处理异常", e);
             return errorResponse(id, -32603, "服务内部错误: " + e.getMessage());
         }
@@ -154,9 +166,9 @@ public class McpController {
 
         // MCP 要求返回 content 数组
         return successResponse(id, Map.of(
-                "content", List.of(Map.of(
-                        "type", "text",
-                        "text", result != null ? result : ""
+                KEY_CONTENT, List.of(Map.of(
+                        KEY_TYPE, KEY_TEXT,
+                        KEY_TEXT, result != null ? result : ""
                 ))
         ));
     }

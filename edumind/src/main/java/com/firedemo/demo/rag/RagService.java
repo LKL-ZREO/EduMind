@@ -95,7 +95,7 @@ public class RagService {
                         queryRewritten = true;
                         log.debug("Query rewritten: \"{}\" → \"{}\"", originalQuery, keywordQuery);
                     }
-                } catch (Exception e) {
+                } catch (RuntimeException e) {
                     log.debug("Query rewrite failed, using original: {}", e.getMessage());
                 }
             }
@@ -154,7 +154,7 @@ public class RagService {
                                     finalResults = rerankerService.rerank(originalQuery, refusion, request.getTopK(), trace);
                                 }
                             }
-                        } catch (Exception e) {
+                        } catch (RuntimeException e) {
                             log.debug("Low-confidence rewrite fallback failed: {}", e.getMessage());
                         }
                     }
@@ -200,7 +200,7 @@ public class RagService {
 
             return builder.build();
 
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             log.error("RAG search failed", e);
             long elapsed = System.currentTimeMillis() - start;
             return RagResult.empty(originalQuery, trace, elapsed);

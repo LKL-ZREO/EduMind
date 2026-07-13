@@ -1,5 +1,6 @@
 package com.firedemo.demo.infrastructure.ai;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.firedemo.demo.common.util.JsonUtil;
 import lombok.extern.slf4j.Slf4j;
@@ -35,6 +36,9 @@ public class StructuredOutputInvoker {
     private final ObjectMapper objectMapper;
     private final int maxAttempts;
 
+    private static final int LOG_TRUNCATE_CHARS = 200;
+    private static final int ERROR_MSG_TRUNCATE_CHARS = 300;
+
     public StructuredOutputInvoker(ObjectMapper objectMapper,
                                    @Value("${app.ai.structured-max-attempts:2}") int maxAttempts) {
         this.objectMapper = objectMapper;
@@ -54,7 +58,7 @@ public class StructuredOutputInvoker {
      */
     public <T> T invoke(Function<String, String> llmCall, String prompt,
                         Class<T> clazz, String logCtx) {
-        Exception lastError = null;
+        RuntimeException lastError = null;
 
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             // 第 1 次：原始 prompt
@@ -66,7 +70,7 @@ public class StructuredOutputInvoker {
             try {
                 String rawResponse = llmCall.apply(finalPrompt);
                 log.debug("{} LLM 响应 (attempt={}): {}", logCtx, attempt,
-                        rawResponse != null ? rawResponse.substring(0, Math.min(200, rawResponse.length())) : "null");
+                        rawResponse != null ? rawResponse.substring(0, Math.min(LOG_TRUNCATE_CHARS, rawResponse.length())) : "null");
 
                 // 提取纯 JSON（去掉 Markdown 代码块和前后废话）
                 String json = extractJson(rawResponse);
@@ -74,8 +78,8 @@ public class StructuredOutputInvoker {
                 log.info("{} 结构化输出成功 (attempt={})", logCtx, attempt);
                 return result;
 
-            } catch (Exception e) {
-                lastError = e;
+            } catch (JsonProcessingException | RuntimeException e) {
+                lastError = (e instanceof RuntimeException r) ? r : new RuntimeException(e);
                 log.warn("{} 结构化解析失败 (attempt={}/{}): {}",
                         logCtx, attempt, maxAttempts, e.getMessage());
             }
@@ -91,7 +95,7 @@ public class StructuredOutputInvoker {
     /**
      * 构建重试 prompt：保留原始指令，额外强调 JSON 格式要求，附带上一次的错误原因
      */
-    private String buildRetryPrompt(String originalPrompt, Exception lastError) {
+    private String buildRetryPrompt(String originalPrompt, RuntimeException lastError) {
         StringBuilder sb = new StringBuilder(originalPrompt);
         sb.append("\n\n");
         sb.append("⚠️ 重要：你的上一次输出无法被 JSON 解析器解析。请严格遵守以下规则：\n");
@@ -103,8 +107,8 @@ public class StructuredOutputInvoker {
         if (lastError != null && lastError.getMessage() != null) {
             String errMsg = lastError.getMessage();
             // 截断太长的错误信息，避免 prompt 过长
-            if (errMsg.length() > 300) {
-                errMsg = errMsg.substring(0, 300) + "...";
+            if (errMsg.length() > ERROR_MSG_TRUNCATE_CHARS) {
+                errMsg = errMsg.substring(0, ERROR_MSG_TRUNCATE_CHARS) + "...";
             }
             sb.append("\n上次解析失败原因：").append(errMsg);
         }

@@ -48,7 +48,18 @@
       "Bash(git -C edumind log --oneline -1 -- src/main/resources/application-local.properties)",
       "Bash(echo \"EXIT:$?\")",
       "WebSearch",
-      "Bash(npx vue-tsc *)"
+      "Bash(npx vue-tsc *)",
+      "Bash(npm run *)",
+      "Bash(npx eslint *)",
+      "Bash(awk '{total+=$2; if\\($1==\"blob\"\\) print $2,$3}')",
+      "Bash(awk '$1==\"blob\" {print $2,$3}')",
+      "Bash(awk -F. 'NF>1{print tolower\\($NF\\)}')",
+      "Bash(xargs -0 ls -lS)",
+      "Bash(awk '{print $5,$9}')",
+      "Bash(xargs -0 du -sc)",
+      "Bash(xargs -0 du -sk)",
+      "WebFetch(domain:www.cnblogs.com)",
+      "WebFetch(domain:developer.aliyun.com)"
     ]
   }
 }

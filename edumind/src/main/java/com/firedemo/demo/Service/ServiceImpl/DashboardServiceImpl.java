@@ -1,8 +1,15 @@
 package com.firedemo.demo.Service.ServiceImpl;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.firedemo.demo.DTO.*;
+import com.firedemo.demo.DTO.ClassInfoDTO;
+import com.firedemo.demo.DTO.DashboardMetricsDTO;
+import com.firedemo.demo.DTO.FrequentErrorDTO;
+import com.firedemo.demo.DTO.KnowledgeMasteryDTO;
+import com.firedemo.demo.DTO.ScoreDistributionDTO;
+import com.firedemo.demo.DTO.StudentOverviewDTO;
+import com.firedemo.demo.DTO.TeacherKnowledgeDTO;
 import com.firedemo.demo.Entity.ClassInfo;
 import com.firedemo.demo.Entity.Submission;
 import com.firedemo.demo.Entity.SubmissionError;
@@ -11,7 +18,12 @@ import com.firedemo.demo.Entity.User;
 import com.firedemo.demo.Service.DashboardService;
 import com.firedemo.demo.Service.OpenClawService;
 import com.firedemo.demo.common.util.JsonUtil;
-import com.firedemo.demo.mapper.*;
+import com.firedemo.demo.mapper.ClassInfoMapper;
+import com.firedemo.demo.mapper.HomeworkEvaluationMapper;
+import com.firedemo.demo.mapper.SubmissionErrorMapper;
+import com.firedemo.demo.mapper.SubmissionMapper;
+import com.firedemo.demo.mapper.TeacherKnowledgeMapper;
+import com.firedemo.demo.mapper.UserMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.CacheManager;
@@ -23,11 +35,19 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
-import java.util.*;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Properties;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import jakarta.annotation.PostConstruct;
@@ -63,7 +83,7 @@ public class DashboardServiceImpl implements DashboardService {
             } else {
                 log.warn("concept-keywords.properties not found");
             }
-        } catch (Exception e) {
+        } catch (IOException | RuntimeException e) {
             log.error("Failed to load concept-keywords.properties", e);
         }
     }
@@ -345,7 +365,7 @@ public class DashboardServiceImpl implements DashboardService {
     })
     public void saveTeacherKnowledge(Long classId, Long userId, List<TeacherKnowledgeDTO> items) {
         teacherKnowledgeMapper.delete(
-                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<TeacherKnowledge>()
+                new LambdaQueryWrapper<TeacherKnowledge>()
                         .eq(TeacherKnowledge::getClassId, classId));
         if (items != null && !items.isEmpty()) {
             List<TeacherKnowledge> batch = new ArrayList<>(items.size());

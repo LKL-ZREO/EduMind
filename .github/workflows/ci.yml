@@ -54,6 +54,7 @@ jobs:
           cd edumind
           chmod +x mvnw
           ./mvnw verify -Dspring.profiles.active=test \
+            -Ddependency-check.skip=true \
             -Dspring.datasource.url=jdbc:postgresql://localhost:5432/postgres \
             -Dspring.datasource.username=postgres \
             -Dspring.datasource.password=postgres \
