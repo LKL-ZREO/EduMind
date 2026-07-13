@@ -46,7 +46,7 @@
     "eslint": "^10.0.2",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-oxlint": "~1.50.0",
-    "eslint-plugin-vue": "~10.8.0",
+    "eslint-plugin-vue": "~10.9.2",
     "jiti": "^2.6.1",
     "jsdom": "^29.1.1",
     "npm-run-all2": "^8.0.4",
