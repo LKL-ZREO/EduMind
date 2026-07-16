@@ -59,7 +59,42 @@
       </div>
     </section>
 
-    <!-- 图表区域 -->
+    <!-- 学生"不懂"标记（QQ + 课堂双源合并） -->
+    <section class="confusions-section" v-if="allConfusionStats.length || liveEvents.length || confusions.length">
+      <div class="detail-card">
+        <div class="card-header">
+          <h3>🤔 学生标记"不懂"的知识点</h3>
+          <span class="tag">QQ私聊 + 课堂实时</span>
+        </div>
+        <div class="confusions-body">
+          <div class="confusions-stats">
+            <h4>📊 知识点分布（合并）</h4>
+            <div v-if="!allConfusionStats.length" class="empty-hint">暂无数据</div>
+            <div v-else class="stat-bars">
+              <div v-for="s in allConfusionStats" :key="s.name" class="stat-bar-row">
+                <span class="stat-bar-name">{{ s.name }}</span>
+                <span class="stat-bar-wrap">
+                  <span class="stat-bar-fill" :style="{ width: Math.min(s.count * 20, 100) + '%' }"></span>
+                </span>
+                <span class="stat-bar-count">{{ s.count }}次</span>
+              </div>
+            </div>
+          </div>
+          <div class="confusions-log">
+            <h4>📋 最近记录</h4>
+            <div v-if="!allConfusionEvents.length" class="empty-hint">暂无记录</div>
+            <div v-else class="confusion-list">
+              <div v-for="c in allConfusionEvents.slice(0, 15)" :key="c._key" class="confusion-item">
+                <span class="confusion-name">{{ c.studentName || '未知' }}</span>
+                <span class="confusion-kp">{{ c.knowledgePoint }}</span>
+                <span class="confusion-source">{{ c._source }}</span>
+                <span class="confusion-time">{{ formatRelativeTime(c.createdAt) }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
     <section class="charts-section">
       <!-- 班级成绩分布 -->
       <div class="chart-card">
@@ -469,7 +504,13 @@ export default {
       },
       progressChartRef: null,
       progressChart: null,
-      progressChartResizeHandler: null
+      progressChartResizeHandler: null,
+
+      // 学生"不懂"标记
+      confusions: [],
+      confusionStats: [],
+      liveEvents: [],
+      liveStats: []
     }
   },
 
@@ -496,6 +537,21 @@ export default {
   },
 
   computed: {
+    // 合并 QQ + 活课堂的不懂统计
+    allConfusionStats() {
+      const map = {}
+      for (const s of this.confusionStats) map[s.name] = (map[s.name] || 0) + (s.count || 0)
+      for (const s of this.liveStats) map[s.name] = (map[s.name] || 0) + (s.count || 0)
+      return Object.entries(map)
+        .map(([name, count]) => ({ name, count }))
+        .sort((a, b) => b.count - a.count)
+    },
+    allConfusionEvents() {
+      const qq = (this.confusions || []).map(c => ({ ...c, _source: 'QQ', _key: 'qq-' + c.id }))
+      const live = (this.liveEvents || []).map(c => ({ ...c, _source: '课堂', _key: 'live-' + c.id }))
+      return [...qq, ...live].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+    },
+
     // 薄弱知识点（掌握度 < 70%）
     weakKnowledgePoints() {
       return this.knowledgeMastery
@@ -542,7 +598,9 @@ export default {
         this.loadScoreDistribution(),
         this.loadKnowledgeMastery(),
         this.loadFrequentErrors(),
-        this.loadStudents()
+        this.loadStudents(),
+        this.loadConfusions(),
+        this.loadLiveConfusions()
       ])
       this.loading = false
     },
@@ -608,6 +666,51 @@ export default {
       } catch (error) {
         console.error('加载学生列表失败:', error)
       }
+    },
+
+    // 加载活课堂"不懂"标记
+    async loadLiveConfusions() {
+      if (!this.selectedClass || this.selectedClass === 'null') return
+      try {
+        const res = await request.get('/dashboard/live-confusions', { params: { classId: this.selectedClass } })
+        if (res.data.code === 200) {
+          this.liveStats = res.data.data.stats || []
+          this.liveEvents = res.data.data.events || []
+        }
+      } catch (error) {
+        console.error('加载活课堂不懂标记失败:', error)
+      }
+    },
+
+    // 加载学生"不懂"标记（QQ）
+    async loadConfusions() {
+      if (!this.selectedClass || this.selectedClass === 'null') return
+      try {
+        const [logRes, statsRes] = await Promise.all([
+          request.get('/dashboard/student-confusions', { params: { classId: this.selectedClass } }),
+          request.get('/dashboard/student-confusions/stats', { params: { classId: this.selectedClass } })
+        ])
+        if (logRes.data.code === 200) this.confusions = logRes.data.data || []
+        if (statsRes.data.code === 200) this.confusionStats = statsRes.data.data || []
+      } catch (error) {
+        console.error('加载不懂标记失败:', error)
+      }
+    },
+
+    // 相对时间格式化
+    formatRelativeTime(dateStr) {
+      if (!dateStr) return ''
+      const now = Date.now()
+      const t = new Date(dateStr).getTime()
+      const diff = now - t
+      const mins = Math.floor(diff / 60000)
+      if (mins < 1) return '刚刚'
+      if (mins < 60) return mins + '分钟前'
+      const hours = Math.floor(mins / 60)
+      if (hours < 24) return hours + '小时前'
+      const days = Math.floor(hours / 24)
+      if (days < 30) return days + '天前'
+      return Math.floor(days / 30) + '个月前'
     },
 
     // 刷新数据
@@ -1874,10 +1977,120 @@ export default {
   cursor: not-allowed;
 }
 
+/* 学生"不懂"标记 */
+.confusions-section {
+  margin-bottom: 1.5rem;
+}
+
+.confusions-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+  padding: 1.25rem;
+}
+
+.confusions-body h4 {
+  margin: 0 0 0.75rem 0;
+  font-size: 0.9rem;
+  color: #4a5568;
+}
+
+.stat-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.stat-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.stat-bar-name {
+  width: 100px;
+  text-align: right;
+  color: #4a5568;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stat-bar-wrap {
+  flex: 1;
+  height: 14px;
+  background: #edf2f7;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.stat-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #faad14, #f5222d);
+  border-radius: 4px;
+  transition: width 0.3s;
+  min-width: 2px;
+}
+
+.stat-bar-count {
+  width: 35px;
+  font-weight: 600;
+  color: #f5222d;
+  font-size: 0.8rem;
+}
+
+.confusion-list {
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.confusion-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid #f0f0f0;
+  font-size: 0.85rem;
+}
+
+.confusion-item:last-child {
+  border-bottom: none;
+}
+
+.confusion-name {
+  color: #4a5568;
+  min-width: 60px;
+}
+
+.confusion-kp {
+  flex: 1;
+  color: #f5222d;
+  font-weight: 500;
+}
+
+.confusion-time {
+  color: #a0aec0;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.confusion-source {
+  background: #f0f0f0;
+  color: #888;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 0.7rem;
+}
+
 /* 响应式 */
 @media (max-width: 1200px) {
   .metrics-section {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  .confusions-body {
+    grid-template-columns: 1fr;
   }
 
   .charts-section,

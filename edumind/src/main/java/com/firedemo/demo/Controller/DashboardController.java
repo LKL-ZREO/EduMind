@@ -1,13 +1,21 @@
 package com.firedemo.demo.Controller;
 
 import com.firedemo.demo.DTO.*;
+import com.firedemo.demo.Entity.StudentConfusionLog;
 import com.firedemo.demo.Entity.Submission;
 import com.firedemo.demo.Entity.TeacherKnowledge;
 import com.firedemo.demo.Service.DashboardService;
+import com.firedemo.demo.Service.PreLessonService;
 import com.firedemo.demo.Service.SubmissionService;
+import com.firedemo.demo.Service.TimelineService;
 import com.firedemo.demo.common.exception.ErrorCode;
 import com.firedemo.demo.infrastructure.prompt.PromptLoader;
 import com.firedemo.demo.common.result.Result;
+import com.firedemo.demo.Entity.LiveConfusionEvent;
+import com.firedemo.demo.Entity.TeachingCalendar;
+import com.firedemo.demo.mapper.LiveConfusionEventMapper;
+import com.firedemo.demo.mapper.StudentConfusionLogMapper;
+import com.firedemo.demo.mapper.TeachingCalendarMapper;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -31,9 +39,14 @@ import java.util.Map;
 public class DashboardController {
 
     private final DashboardService dashboardService;
+    private final PreLessonService preLessonService;
+    private final TimelineService timelineService;
     private final RBloomFilter<String> classIdBloomFilter;
     private final SubmissionService submissionService;
     private final PromptLoader promptLoader;
+    private final StudentConfusionLogMapper confusionLogMapper;
+    private final LiveConfusionEventMapper liveConfusionEventMapper;
+    private final TeachingCalendarMapper teachingCalendarMapper;
 
     // ======================== 核心数据 ========================
 
@@ -222,6 +235,83 @@ public class DashboardController {
                 .replace("{{difficultPoint}}", diffPoint);
         plan.append(result);
         return Result.success(plan.toString());
+    }
+
+    // ======================== 备课学情仪表盘 ========================
+
+    @GetMapping("/pre-lesson")
+    @PreAuthorize("@sec.isClassOwner(#classId)")
+    public Result<PreLessonDTO> getPreLessonOverview(@RequestParam Long classId) {
+        if (!classIdBloomFilter.contains(String.valueOf(classId)))
+            return Result.error(ErrorCode.DATA_NOT_FOUND.getCode(), "班级不存在");
+        return Result.success(preLessonService.getPreLessonOverview(classId));
+    }
+
+    /** 教学时间线（聚合课堂/作业/预习） */
+    @GetMapping("/timeline")
+    @PreAuthorize("@sec.isClassOwner(#classId)")
+    public Result<TimelineDTO> getTimeline(@RequestParam Long classId,
+                                           @RequestParam(defaultValue = "15") int limit) {
+        if (!classIdBloomFilter.contains(String.valueOf(classId)))
+            return Result.error(ErrorCode.DATA_NOT_FOUND.getCode(), "班级不存在");
+        return Result.success(timelineService.getTimeline(classId, limit));
+    }
+
+    /** AI 备课建议（独立接口，避免主接口因 AI 调用超时） */
+    @GetMapping("/pre-lesson/suggestion")
+    @PreAuthorize("@sec.isClassOwner(#classId)")
+    public Result<Map<String, String>> getPreLessonSuggestion(@RequestParam Long classId) {
+        if (!classIdBloomFilter.contains(String.valueOf(classId)))
+            return Result.error(ErrorCode.DATA_NOT_FOUND.getCode(), "班级不存在");
+        String suggestion = preLessonService.getAiSuggestion(classId);
+        return Result.success(Map.of("suggestion", suggestion));
+    }
+
+    // ======================== 学生"不懂"标记 ========================
+
+    @GetMapping("/student-confusions")
+    @PreAuthorize("@sec.isClassOwner(#classId)")
+    public Result<List<StudentConfusionLog>> getStudentConfusions(@RequestParam Long classId) {
+        return Result.success(confusionLogMapper.findByClassId(classId, 50));
+    }
+
+    /** 按知识点聚合计数 */
+    @GetMapping("/student-confusions/stats")
+    @PreAuthorize("@sec.isClassOwner(#classId)")
+    public Result<List<Map<String, Object>>> getConfusionStats(@RequestParam Long classId) {
+        return Result.success(confusionLogMapper.countByKnowledgePoint(classId, 20));
+    }
+
+    // ======================== 教学日历 ========================
+
+    @GetMapping("/teaching-calendar")
+    @PreAuthorize("@sec.isClassOwner(#classId)")
+    public Result<List<TeachingCalendar>> getTeachingCalendar(@RequestParam Long classId) {
+        return Result.success(teachingCalendarMapper.findByClassId(classId));
+    }
+
+    @PostMapping("/teaching-calendar/add")
+    @PreAuthorize("@sec.isClassOwner(#plan.classId)")
+    public Result<TeachingCalendar> addPlan(@Valid @RequestBody TeachingCalendar plan) {
+        Long userId = getCurrentUserId();
+        plan.setTeacherId(userId);
+        plan.setStatus("PLANNED");
+        teachingCalendarMapper.insertPlan(plan);
+        return Result.success(plan);
+    }
+
+    @DeleteMapping("/teaching-calendar/{id}")
+    public Result<Void> deletePlan(@PathVariable Long id) {
+        teachingCalendarMapper.deletePlan(id);
+        return Result.success(null);
+    }
+
+    @GetMapping("/live-confusions")
+    @PreAuthorize("@sec.isClassOwner(#classId)")
+    public Result<Map<String, Object>> getLiveConfusions(@RequestParam Long classId) {
+        List<Map<String, Object>> stats = liveConfusionEventMapper.countByClassId(classId, 20);
+        List<LiveConfusionEvent> events = liveConfusionEventMapper.findByClassId(classId, 30);
+        return Result.success(Map.of("stats", stats, "total", events.size(), "events", events));
     }
 
     // ======================== 内部工具 ========================
