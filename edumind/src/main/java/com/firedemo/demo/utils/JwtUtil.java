@@ -23,6 +23,7 @@ public class JwtUtil {
 
     public static final long EXPIRATION = 86400000; // 24小时
     public static final long EXPIRATION_SECONDS = EXPIRATION / 1000;
+    public static final long STUDENT_EXPIRATION = 2 * 3600 * 1000; // 学生临时Token 2小时
 
     private final SecretKey key;
 
@@ -59,6 +60,23 @@ public class JwtUtil {
         return builder.signWith(key, SignatureAlgorithm.HS256).compact();
     }
 
+    /** 生成学生临时 Token（用于课堂 WebSocket 连接，有效期 2 小时） */
+    public String generateStudentToken(String studentId, String studentName, Long sessionId) {
+        Date now = new Date();
+        Date expiry = new Date(now.getTime() + STUDENT_EXPIRATION);
+        return Jwts.builder().setSubject(studentId).claim("username", studentName)
+                .claim("role", "STUDENT").claim("sessionId", sessionId)
+                .setIssuedAt(now).setExpiration(expiry)
+                .signWith(key, SignatureAlgorithm.HS256).compact();
+    }
+
+    public Long getSessionIdFromToken(String token) {
+        Claims claims = parseToken(token);
+        Object sid = claims.get("sessionId");
+        if (sid instanceof Number n) return n.longValue();
+        return null;
+    }
+
     // 从 Token 获取 status
     public Integer getStatusFromToken(String token) {
         Claims claims = parseToken(token);
@@ -78,6 +96,11 @@ public class JwtUtil {
     public Long getUserIdFromToken(String token) {
         Claims claims = parseToken(token);
         return Long.valueOf(claims.getSubject());
+    }
+
+    /** 获取 Token 的 subject（不做 Long 转换，适用学生 token 的学号字符串） */
+    public String getSubjectFromToken(String token) {
+        return parseToken(token).getSubject();
     }
 
     // 从 Token 获取角色

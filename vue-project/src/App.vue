@@ -82,6 +82,10 @@ watch(isLoggedIn, (loggedIn) => {
               <span class="icon">🎒</span>
               数据中心
             </RouterLink>
+            <RouterLink to="/teacher/pre-lesson" class="nav-item">
+              <span class="icon">📋</span>
+              备课仪表盘
+            </RouterLink>
           </nav>
         </aside>
 

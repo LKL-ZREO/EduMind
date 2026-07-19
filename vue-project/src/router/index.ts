@@ -73,6 +73,15 @@ const router = createRouter({
       component: () => import('../views/Dashboard.vue'),
       meta: { requiresAuth: true }
     },
+    // 课堂实时互动
+    { path: '/teacher/live/:classId', name: 'liveTeacher', component: () => import('../views/teacher/LiveDashboard.vue'), meta: { requiresAuth: true } },
+    { path: '/live/join', name: 'liveJoin', component: () => import('../views/LiveJoin.vue') },
+    { path: '/live/:sessionCode', name: 'liveStudent', component: () => import('../views/StudentLive.vue') },
+    // 备课学情仪表盘
+    { path: '/teacher/pre-lesson', name: 'preLesson', component: () => import('../views/teacher/PreLessonDashboard.vue'), meta: { requiresAuth: true } },
+    // 预习任务
+    { path: '/teacher/preview/create', name: 'previewCreate', component: () => import('../views/teacher/PreviewTaskCreate.vue'), meta: { requiresAuth: true } },
+    { path: '/preview/:taskId', name: 'previewView', component: () => import('../views/PreviewTaskView.vue') },
     {
       path: '/:catchAll(.*)*',
       name: 'not-found',

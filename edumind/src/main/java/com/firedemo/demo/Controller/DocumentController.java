@@ -1,10 +1,15 @@
 package com.firedemo.demo.Controller;
 
+import com.firedemo.demo.DTO.GenerateMaterialsRequest;
+import com.firedemo.demo.DTO.GenerateMaterialsResponse;
 import com.firedemo.demo.Entity.DirectoryNode;
 import com.firedemo.demo.Entity.Document;
 import com.firedemo.demo.Service.DocumentService;
 import com.firedemo.demo.Service.FileStorageService;
+import com.firedemo.demo.live.service.TeachingMaterialGenerator;
 import com.firedemo.demo.mapper.DirectoryNodeMapper;
+import com.firedemo.demo.mapper.InteractionMapper;
+import com.firedemo.demo.mapper.PreviewTaskMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -30,6 +35,9 @@ public class DocumentController {
     private final DocumentService documentService;
     private final FileStorageService fileStorageService;
     private final DirectoryNodeMapper directoryNodeMapper;
+    private final TeachingMaterialGenerator materialGenerator;
+    private final PreviewTaskMapper previewTaskMapper;
+    private final InteractionMapper interactionMapper;
 
     /**
      * 上传文档并自动处理（切割+向量化）
@@ -211,6 +219,101 @@ public class DocumentController {
         Long userId = getCurrentUserId();
         if (userId == null) return ResponseEntity.status(401).build();
         return ResponseEntity.ok(documentService.getSharedTree(userId));
+    }
+
+    // ========== AI 生成教学材料 ==========
+
+    @PostMapping("/generate-materials")
+    public ResponseEntity<GenerateMaterialsResponse> generateMaterials(
+            @RequestBody GenerateMaterialsRequest req) {
+        Long userId = getCurrentUserId();
+        if (userId == null) return ResponseEntity.status(401).build();
+        req.setTeacherId(userId);
+        GenerateMaterialsResponse result = materialGenerator.generate(req, userId);
+        return ResponseEntity.ok(result);
+    }
+
+    /** 保存已审核的预习作业 */
+    @PostMapping("/generate-materials/save-preview")
+    public ResponseEntity<Map<String, Object>> savePreview(
+            @RequestBody Map<String, Object> body) {
+        Long userId = getCurrentUserId();
+        if (userId == null) return ResponseEntity.status(401).build();
+
+        GenerateMaterialsResponse.PreviewItem item = GenerateMaterialsResponse.PreviewItem.builder()
+                .topic((String) body.get("topic"))
+                .guideText((String) body.get("guideText"))
+                .discussionQuestion((String) body.get("discussionQuestion"))
+                .build();
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> questionsRaw = (List<Map<String, Object>>) body.get("questions");
+
+        Long classId = body.get("classId") instanceof Number n ? n.longValue() : null;
+        if (classId == null) return ResponseEntity.badRequest().body(Map.of("error", "请选择班级"));
+
+        String docId = (String) body.get("docId");
+        GenerateMaterialsResponse.PreviewItem saved = materialGenerator.savePreview(
+                item, classId, userId, docId);
+        return ResponseEntity.ok(Map.of("savedId", saved.getSavedId()));
+    }
+
+    /** 保存已审核的课堂试题 */
+    /** 获取某文档生成的教学材料草稿 */
+    @GetMapping("/drafts")
+    public ResponseEntity<Map<String, Object>> listDrafts(@RequestParam String docId) {
+        Long userId = getCurrentUserId();
+        if (userId == null) return ResponseEntity.status(401).build();
+
+        List<Map<String, Object>> previews = previewTaskMapper.findBySourceDocId(docId).stream()
+                .map(p -> Map.<String, Object>of(
+                        "id", p.getId(), "type", "preview", "title", p.getTitle(),
+                        "topic", p.getKnowledgePoint() != null ? p.getKnowledgePoint() : "",
+                        "status", p.getStatus(), "createdAt", p.getCreatedAt() != null ? p.getCreatedAt().toString() : ""))
+                .toList();
+
+        List<Map<String, Object>> quizzes = interactionMapper.findDraftsByDocId(docId).stream()
+                .map(i -> Map.<String, Object>of(
+                        "id", i.getId(), "type", "quiz", "quizType", i.getType(),
+                        "title", i.getTitle(), "knowledgePoint", i.getKnowledgePoint() != null ? i.getKnowledgePoint() : "",
+                        "status", i.getStatus(), "createdAt", i.getCreatedAt() != null ? i.getCreatedAt().toString() : ""))
+                .toList();
+
+        return ResponseEntity.ok(Map.of("previews", previews, "quizzes", quizzes));
+    }
+
+    /** 删除草稿 */
+    @DeleteMapping("/drafts/{type}/{id}")
+    public ResponseEntity<Map<String, String>> deleteDraft(@PathVariable String type, @PathVariable Long id) {
+        Long userId = getCurrentUserId();
+        if (userId == null) return ResponseEntity.status(401).build();
+        if ("preview".equals(type)) {
+            previewTaskMapper.deleteById(id);
+        } else if ("quiz".equals(type)) {
+            interactionMapper.deleteDraft(id);
+        }
+        return ResponseEntity.ok(Map.of("message", "已删除"));
+    }
+
+    @PostMapping("/generate-materials/save-quiz")
+    public ResponseEntity<Map<String, Object>> saveQuiz(
+            @RequestBody Map<String, Object> body) {
+        Long userId = getCurrentUserId();
+        if (userId == null) return ResponseEntity.status(401).build();
+
+        Long classId = body.get("classId") instanceof Number n ? n.longValue() : null;
+        if (classId == null) return ResponseEntity.badRequest().body(Map.of("error", "请选择班级"));
+
+        GenerateMaterialsResponse.QuizItem item = GenerateMaterialsResponse.QuizItem.builder()
+                .type((String) body.get("type"))
+                .title((String) body.get("title"))
+                .correctKey((String) body.get("correctKey"))
+                .knowledgePoint((String) body.get("knowledgePoint"))
+                .difficulty((String) body.get("difficulty"))
+                .timeLimit(body.get("timeLimit") instanceof Number n ? n.intValue() : null)
+                .build();
+        String docId = (String) body.get("docId");
+        GenerateMaterialsResponse.QuizItem saved = materialGenerator.saveQuiz(item, classId, docId);
+        return ResponseEntity.ok(Map.of("savedId", saved.getSavedId()));
     }
 
     // ========== 内部工具 ==========

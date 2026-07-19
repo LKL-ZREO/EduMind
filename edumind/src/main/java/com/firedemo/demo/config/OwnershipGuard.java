@@ -36,6 +36,17 @@ public class OwnershipGuard {
     private final SharedKbMapper sharedKbMapper;
     private final SubmissionMapper submissionMapper;
     private final TeacherKnowledgeMapper teacherKnowledgeMapper;
+    private final ClassroomSessionMapper sessionMapper;
+
+    // ───────────────────── 课堂会话 ─────────────────────
+
+    public boolean isSessionOwner(Long sessionId) {
+        Long userId = getCurrentUserId();
+        if (userId == null || sessionId == null) return false;
+        ClassroomSession session = sessionMapper.selectById(sessionId);
+        if (session == null) return false;
+        return denyIfNotOwner(userId, session.getTeacherId(), "课堂会话", sessionId);
+    }
 
     // ───────────────────── 班级 ─────────────────────
 

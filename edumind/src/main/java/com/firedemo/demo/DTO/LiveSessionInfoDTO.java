@@ -1,0 +1,16 @@
+package com.firedemo.demo.DTO;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+@Data @Builder @NoArgsConstructor @AllArgsConstructor
+public class LiveSessionInfoDTO {
+    private Long sessionId;
+    private String sessionCode;
+    private String title;
+    private String className;
+    private String teacherName;
+    private String token;
+    private String studentId;
+    private String studentName;
+}

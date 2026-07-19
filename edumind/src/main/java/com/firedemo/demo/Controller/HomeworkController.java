@@ -254,20 +254,21 @@ private final TaskReminderService taskReminderService;
         int submitCount = existingCount + 1;
 
         // 7. 创建 Submission（状态 PENDING），入库
-        Submission submission = new Submission();
-        submission.setStudentId(studentId);
-        submission.setStudentName(studentName);
-        submission.setClassName(className);
-        submission.setClassId(classInfo.getId());
-        submission.setAssignmentName(assignmentName);
-        submission.setFileName(originalFileName);
-        submission.setFilePath(filePath);
-        submission.setFileSize(file.getSize());
-        submission.setStatus(SubmissionStatus.PENDING.getCode());
-        submission.setTaskId(expectedTaskId);
-        submission.setSubmitCount(submitCount);
-        submission.setRemainingAttempts(Math.max(0, 3 - submitCount));
-        submission.setAssignmentNo(submitCount);
+        Submission submission = Submission.builder()
+                .studentId(studentId)
+                .studentName(studentName)
+                .className(className)
+                .classId(classInfo.getId())
+                .assignmentName(assignmentName)
+                .fileName(originalFileName)
+                .filePath(filePath)
+                .fileSize(file.getSize())
+                .status(SubmissionStatus.PENDING.getCode())
+                .taskId(expectedTaskId)
+                .submitCount(submitCount)
+                .remainingAttempts(Math.max(0, 3 - submitCount))
+                .assignmentNo(submitCount)
+                .build();
         submissionService.save(submission);
 
         log.info("作业提交已入库(PENDING): submissionId={}, studentName={}, className={}, assignmentName={}",

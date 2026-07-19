@@ -46,7 +46,6 @@ public class DocumentServiceImpl implements DocumentService {
 
     private final DocumentMapper documentMapper;
     private final DirectoryNodeMapper directoryNodeMapper;
-    private final SharedKbMemberMapper sharedKbMemberMapper;
     private final FileStorageService fileStorageService;
     private final SmartChunkService chunkService;
     private final VectorStoreService vectorStoreService;
@@ -186,39 +185,6 @@ public class DocumentServiceImpl implements DocumentService {
         }
     }
 
-    @Override
-    public List<String> searchRelevantContent(String query, int topK) {
-        return searchRelevantContent(query, topK, null);
-    }
-
-    /**
-     * RRF 混合检索 —— 委托 {@link RagService} 统一处理
-     *
-     * @param query  查询文本
-     * @param topK   返回条数
-     * @param userId 当前用户ID，NULL=不过滤
-     * @return 相关文档内容列表
-     */
-    @Override
-    public List<String> searchRelevantContent(String query, int topK, Long userId) {
-        Set<Long> accessibleKbIds = null;
-        if (userId != null) {
-            accessibleKbIds = sharedKbMemberMapper.selectKbIdsByUserId(userId);
-        }
-
-        RagResult result = ragService.search(RagSearchRequest.builder()
-                .query(query)
-                .topK(topK)
-                .userId(userId)
-                .accessibleKbIds(accessibleKbIds)
-                .enableReranker(false)  // 兼容旧行为：不触发 Reranker
-                .format(RagSearchRequest.Format.RAW_RESULTS)
-                .build());
-
-        return result.getResults().stream()
-                .map(sc -> sc.chunk().getContent())
-                .toList();
-    }
 
 
 

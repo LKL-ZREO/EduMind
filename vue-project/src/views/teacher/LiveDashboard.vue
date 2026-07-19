@@ -39,6 +39,26 @@
             </div>
             <div v-if="!store.studentList.length" class="no-students">暂无学生加入</div>
           </div>
+          <!-- 举手队列 -->
+          <div v-if="store.handQueue.waiting.length || store.handQueue.called.length" class="hand-queue-panel">
+            <el-divider />
+            <h3>✋ 举手队列 ({{ store.handQueue.waiting.length }})</h3>
+            <div class="hand-list">
+              <div v-for="(h, i) in store.handQueue.waiting" :key="h.studentId" class="hand-item">
+                <span class="hand-idx">{{ i + 1 }}.</span>
+                <span class="hand-name">{{ h.studentName }}({{ h.studentId }})</span>
+                <el-button size="small" type="primary" @click="store.callStudent(h.studentId)">点名</el-button>
+                <el-button size="small" text type="danger" @click="store.dismissHand(h.studentId)">✕</el-button>
+              </div>
+            </div>
+            <template v-if="store.handQueue.called.length">
+              <div class="hand-called-title">已点名:</div>
+              <div v-for="h in store.handQueue.called" :key="h.studentId" class="hand-item called">
+                <span class="hand-name">{{ h.studentName }}</span>
+                <el-button size="small" text type="danger" @click="store.dismissHand(h.studentId)">✕</el-button>
+              </div>
+            </template>
+          </div>
           <template v-if="store.absentStudents.length">
             <el-divider />
             <h3>🚫 未加入 ({{ store.absentCount }})</h3>
@@ -470,6 +490,12 @@ onUnmounted(() => { if (confusionTimer) clearInterval(confusionTimer) })
 .student-item.absent{color:#909399}
 .no-students{color:#ccc;font-size:12px;text-align:center;padding:8px}
 .student-item.clickable{cursor:pointer}.student-item.clickable:hover{background:#f0f2f5;border-radius:4px}
+.hand-queue-panel{margin-top:4px}.hand-list{max-height:180px;overflow-y:auto;font-size:13px}
+.hand-item{display:flex;align-items:center;gap:4px;padding:4px 0;border-bottom:1px solid #f5f5f5}
+.hand-idx{min-width:20px;color:#909399;font-size:12px}
+.hand-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hand-item.called .hand-name{color:#909399;text-decoration:line-through}
+.hand-called-title{font-size:12px;color:#909399;margin-top:8px;padding:4px 0}
 .reaction-bar{display:flex;flex-wrap:wrap;gap:6px;margin-top:16px;padding:10px;background:#fafafa;border-radius:6px;align-items:center}
 .reaction-bubble{padding:2px 8px;background:#fff;border-radius:12px;font-size:13px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
 .picker-display{text-align:center;padding:30px 0;font-size:36px;font-weight:700}

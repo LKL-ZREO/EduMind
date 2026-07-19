@@ -509,6 +509,7 @@ function joinArray(arr: string[]): string {
 <template>
   <div class="home-submit">
     <div class="top-bar">
+      <router-link to="/live/join" class="join-entry">📱 加入课堂</router-link>
       <router-link to="/login" class="teacher-entry">👨‍🏫 教师登录</router-link>
     </div>
 

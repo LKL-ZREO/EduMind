@@ -17,6 +17,7 @@
     <div v-else class="interaction-container">
       <header class="student-header"><h3>{{ store.sessionInfo?.title }}</h3><span>👤 {{ store.sessionInfo?.studentName }}</span></header>
       <main class="student-main">
+        <div v-if="!store.teacherOnline" class="teacher-offline-banner">⚠️ 老师暂时离开，请耐心等待...</div>
         <template v-if="store.currentInteraction?.status === 'ACTIVE'">
           <div class="question-card">
             <el-tag size="small">{{ typeLabel }}</el-tag>
@@ -62,7 +63,9 @@
       </main>
       <footer class="student-qa">
         <div class="emoji-bar">
-          <span v-for="e in ['👍','👎','❓','😮','✋']" :key="e" class="emoji-btn" @click="sendEmoji(e)">{{ e }}</span>
+          <span v-for="e in ['👍','👎','❓','😮']" :key="e" class="emoji-btn" @click="sendEmoji(e)">{{ e }}</span>
+          <span class="emoji-btn hand-btn" :class="{ raised: store.handRaised }" @click="toggleHand" :title="store.handRaised ? '取消举手' : '举手'">✋</span>
+          <span v-if="store.handRaised" class="hand-label">等待中</span>
         </div>
         <div class="qa-input-row"><el-input v-model="qaText" placeholder="🙋 匿名提问" @keyup.enter="handleQA"><template #append><el-button @click="handleQA" :disabled="!qaText.trim()">发送</el-button></template></el-input></div>
       </footer>
@@ -99,11 +102,12 @@ const canSubmit = computed(() => { if (!store.currentInteraction||store.currentI
 async function handleSubmit() { if(!canSubmit.value) return; submitting.value=true; store.submitResponse(store.currentInteraction?.type==='CHOICE'?sel.value:textAns.value.trim()); done.value=true; submitting.value=false; ElMessage.success('已提交') }
 
 const remaining = ref(0); const pct = ref(100); let timer: any = null
-watch(()=>store.currentInteraction, i=>{ if(timer)clearInterval(timer); done.value=false; sel.value=''; textAns.value=''; confused.value=false; explanation.value=''; if(i?.timeLimit&&i.status==='ACTIVE'){ remaining.value=i.timeLimit; pct.value=100; timer=setInterval(()=>{remaining.value--; pct.value=Math.round(remaining.value/i!.timeLimit!*10000)/100; if(remaining.value<=0)clearInterval(timer)},1000) } })
+watch(()=>store.currentInteraction, i=>{ if(timer)clearInterval(timer); done.value=false; sel.value=''; textAns.value=''; confused.value=false; explanation.value=''; if(i?.timeLimit&&i?.deadlineEpochMs&&i.status==='ACTIVE'){ const total=i.timeLimit; timer=setInterval(()=>{remaining.value=Math.max(0,Math.round((i.deadlineEpochMs!-Date.now())/1000));pct.value=Math.round(remaining.value/total*10000)/100; if(remaining.value<=0)clearInterval(timer)},250) } })
 
 const qaText = ref('')
 function handleQA() { if(!qaText.value.trim()) return; store.askQuestion(qaText.value.trim()); qaText.value=''; ElMessage.success('已发送') }
 function sendEmoji(e: string) { store.sendReaction(e); ElMessage({ message: e, duration: 600, center: true }) }
+function toggleHand() { if (store.handRaised) { store.lowerHand() } else { store.raiseHand() } }
 
 const typeLabel = computed(()=>({CHOICE:'选择题',OPEN:'简答题',EXERCISE:'随堂练习'} as any)[store.currentInteraction?.type||'']||'')
 
@@ -146,6 +150,7 @@ onUnmounted(()=>{if(timer)clearInterval(timer);store.disconnect()})
 .interaction-container{flex:1;display:flex;flex-direction:column}
 .student-header{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;background:#fff}
 .student-main{flex:1;display:flex;flex-direction:column;align-items:center;padding:20px 16px;overflow-y:auto}
+.teacher-offline-banner{width:100%;max-width:500px;padding:12px 16px;background:#fef0f0;border:1px solid #fbc4c4;border-radius:8px;color:#e15858;font-size:14px;text-align:center;margin-bottom:16px}
 .question-card{width:100%;max-width:500px;background:#fff;border-radius:12px;padding:24px;box-shadow:0 2px 8px rgba(0,0,0,.04)}
 .question-card h3{margin:10px 0;font-size:17px}
 .countdown{margin:12px 0;font-size:14px;color:#e6a23c}
@@ -162,6 +167,8 @@ onUnmounted(()=>{if(timer)clearInterval(timer);store.disconnect()})
 .emoji-bar{display:flex;gap:8px;justify-content:center;margin-bottom:8px}
 .emoji-btn{font-size:24px;cursor:pointer;padding:4px;transition:transform .15s;user-select:none}
 .emoji-btn:active{transform:scale(1.3)}
+.hand-btn.raised{color:#409eff;text-shadow:0 0 8px rgba(64,158,255,.4)}
+.hand-label{font-size:12px;color:#409eff;margin-left:-4px}
 .qa-input-row{max-width:500px;margin:0 auto}
 .result-card{text-align:center}
 .history-section{margin-top:24px;width:100%;max-width:500px}

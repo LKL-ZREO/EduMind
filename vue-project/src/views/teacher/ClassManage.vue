@@ -156,6 +156,7 @@ function onImported() { showImport.value = false; fetchDetail() }
         </div>
 
         <div class="info-actions">
+          <button class="btn-action btn-action-start" @click="router.push({name:'liveTeacher',params:{classId:String(classData.id)}})">▶ 开始上课</button>
           <button class="btn-action btn-action-highlight" @click="showInvite = true">🔗 邀请学生加入</button>
           <button class="btn-action" @click="showImport = true">📥 批量导入学生</button>
           <button class="btn-action" @click="toggleArchive" :disabled="togglingArchive">{{ classData.status === 'ACTIVE' ? '📦 归档班级' : '📂 取消归档' }}</button>
@@ -244,6 +245,8 @@ function onImported() { showImport.value = false; fetchDetail() }
 .info-actions { display: flex; flex-wrap: wrap; gap: 10px; }
 .btn-action { padding: 8px 16px; border-radius: 8px; border: 1px solid #dcdfe6; background: #fff; color: #606266; font-size: 0.85rem; cursor: pointer; transition: all 0.2s; }
 .btn-action:hover { border-color: #409EFF; color: #409EFF; }
+.btn-action-start { background: #67c23a; border-color: #67c23a; color: #fff; font-weight: 600; }
+.btn-action-start:hover { background: #5daf34; }
 .btn-action-highlight { background: #ecf5ff; border-color: #409EFF; color: #409EFF; font-weight: 600; }
 .btn-action-highlight:hover { background: #409EFF; color: #fff; }
 .btn-action:disabled { opacity: 0.4; cursor: not-allowed; }

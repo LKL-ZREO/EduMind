@@ -40,11 +40,6 @@ public class McpSessionStore {
                 sessionId, userId, accessibleKbIds != null ? accessibleKbIds.size() : 0, courseId);
     }
 
-    /** 兼容旧调用（无 courseId） */
-    public void put(String sessionId, Long userId, Set<Long> accessibleKbIds) {
-        put(sessionId, userId, accessibleKbIds, null);
-    }
-
     public ToolContext get(String sessionId) {
         if (sessionId == null || sessionId.isEmpty()) return null;
         RBucket<String> bucket = redissonClient.getBucket(PREFIX + sessionId);

@@ -3,19 +3,12 @@ package com.firedemo.demo.Controller;
 import com.firedemo.demo.Service.*;
 import com.firedemo.demo.common.annotation.RateLimit;
 import com.firedemo.demo.common.annotation.RateLimit.Dimension;
-import com.firedemo.demo.common.util.JsonUtil;
 import com.firedemo.demo.common.annotation.RateLimit.TimeUnit;
-import com.firedemo.demo.DTO.ChatResponse;
-import com.firedemo.demo.DTO.EvaluationResultDTO;
-import com.firedemo.demo.DTO.GradeRequest;
 import com.firedemo.demo.Entity.ChatHistory;
-import com.firedemo.demo.Entity.HomeworkEvaluation;
 import com.firedemo.demo.Entity.ClassInfo;
 import com.firedemo.demo.Entity.User;
 import com.firedemo.demo.mapper.ClassInfoMapper;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletResponse;
-import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
@@ -40,10 +33,8 @@ public class ChatController {
     private final OpenClawService openClawService;
     private final FileStorageService fileStorageService;
     private final ChatHistoryService chatHistoryService;
-    private final HomeworkResultService homeworkResultService;
     private final UserService userService;
     private final ClassInfoMapper classInfoMapper;
-    private final ObjectMapper objectMapper;
 
     @GetMapping("/health")
     public ResponseEntity<Map<String, Object>> health() {
@@ -151,98 +142,7 @@ public class ChatController {
                 .body(responseBody);
     }
 
-    @RateLimit(dimensions = {Dimension.GLOBAL, Dimension.USER}, count = 5, interval = 60, timeUnit = TimeUnit.SECONDS)
-    @PostMapping("/grade")
-    public ResponseEntity<ChatResponse> gradeHomework(@Valid @RequestBody GradeRequest request) {
-        Long userId = getCurrentUserId();
-
-        String fileContent = fileStorageService.readFileContent(request.getFilePath());
-        String message = String.format("""
-            请批改以下作业，并以JSON格式返回结果：
-
-            要求：%s
-
-            文件内容：
-            %s
-
-            请使用批改作业助手的标准格式输出结果，必须是合法JSON格式。
-            """, request.getRequirement(), fileContent);
-
-        String response = openClawService.chat(message, request.getSessionId());
-
-        String displayContent = response;
-        try {
-            String jsonStr = JsonUtil.extractJson(response);
-            EvaluationResultDTO evaluation = objectMapper.readValue(jsonStr, EvaluationResultDTO.class);
-            saveEvaluation(userId, request.getSessionId(), request, evaluation, response);
-            displayContent = formatEvaluationToText(evaluation);
-        } catch (Exception e) {
-            log.warn("解析评价JSON失败，返回原始响应: {}", e.getMessage());
-        }
-
-        return ResponseEntity.ok(ChatResponse.builder()
-                .content(displayContent).role("assistant")
-                .timestamp(Instant.now().toEpochMilli()).model("OpenClaw").done(true).build());
-    }
-
     // ============ 私有方法 ============
-
-    private void saveEvaluation(Long userId, String sessionId, GradeRequest request,
-                                 EvaluationResultDTO evaluation, String rawResponse) {
-        try {
-            HomeworkEvaluation entity = new HomeworkEvaluation();
-            entity.setUserId(userId);
-            entity.setSessionId(sessionId);
-            entity.setFilePath(request.getFilePath());
-            entity.setRequirement(request.getRequirement());
-            entity.setTotalScore(evaluation.getTotalScore());
-            entity.setContentScore(evaluation.getContentScore() != null ? evaluation.getContentScore() : evaluation.getTotalScore());
-            entity.setFormatScore(evaluation.getFormatScore() != null ? evaluation.getFormatScore() : 0);
-            entity.setOverallComment(evaluation.getOverallComment());
-            entity.setStrengths(evaluation.getStrengths() != null ?
-                String.join(",", evaluation.getStrengths()) : "");
-            entity.setWeaknesses(evaluation.getWeaknesses() != null ?
-                String.join(",", evaluation.getWeaknesses()) : "");
-            String suggestionsStr = "";
-            if (evaluation.getSuggestions() != null) {
-                suggestionsStr = evaluation.getSuggestions().stream()
-                    .map(s -> s.getPriority() + ": " + s.getIssue() + " -> " + s.getSuggestion())
-                    .reduce((a, b) -> a + "\n" + b).orElse("");
-            }
-            entity.setSuggestions(suggestionsStr);
-            entity.setRawResponse(rawResponse);
-            User user = userService.getById(userId);
-            if (user != null && user.getClassId() != null) {
-                entity.setClassId(user.getClassId());
-            }
-            homeworkResultService.saveEvaluation(entity);
-            log.info("评价结果已保存: userId={}, totalScore={}", userId, evaluation.getTotalScore());
-        } catch (Exception e) {
-            log.error("保存评价结果失败", e);
-        }
-    }
-
-    private String formatEvaluationToText(EvaluationResultDTO evaluation) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("## 批改结果\n\n");
-        sb.append("**总分**: ").append(evaluation.getTotalScore());
-        if (evaluation.getMaxScore() != null) sb.append("/").append(evaluation.getMaxScore());
-        sb.append("分\n\n");
-        sb.append("### 总体评语\n").append(evaluation.getOverallComment()).append("\n\n");
-        sb.append("### 亮点\n");
-        if (evaluation.getStrengths() != null) {
-            for (String h : evaluation.getStrengths()) sb.append("- ").append(h).append("\n");
-        }
-        sb.append("\n### 改进建议\n");
-        if (evaluation.getSuggestions() != null) {
-            for (EvaluationResultDTO.SuggestionItem s : evaluation.getSuggestions()) {
-                sb.append("**[").append(s.getPriority()).append("]** ")
-                  .append(s.getIssue()).append("\n")
-                  .append("→ ").append(s.getSuggestion()).append("\n\n");
-            }
-        }
-        return sb.toString();
-    }
 
     private Long resolveCourseId(Long userId) {
         if (userId == null) return null;

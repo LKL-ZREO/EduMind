@@ -86,7 +86,9 @@ public class SecurityConfig {
             )
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/api/auth/**", "/api/chat/health", "/api/onebot/rag", "/api/homework/**",
-                        "/api/teacher/classes/join",
+                        "/api/teacher/classes/join", "/api/live/join", "/api/live/session/**",
+                        "/api/preview/**",
+                        "/ws/live/**",
                         "/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html", "/doc.html", "/webjars/**",
                         "/actuator/health/**", "/actuator/prometheus").permitAll()
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()

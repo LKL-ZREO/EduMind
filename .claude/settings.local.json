@@ -59,7 +59,16 @@
       "Bash(xargs -0 du -sc)",
       "Bash(xargs -0 du -sk)",
       "WebFetch(domain:www.cnblogs.com)",
-      "WebFetch(domain:developer.aliyun.com)"
+      "WebFetch(domain:developer.aliyun.com)",
+      "Bash(GIT_SSL_NO_VERIFY=true git push *)",
+      "Bash(reg query *)",
+      "Bash(powershell -Command \"[Environment]::GetEnvironmentVariable\\('Path', 'User'\\)\")",
+      "Bash(powershell -Command \"[Environment]::SetEnvironmentVariable\\('Path', [Environment]::GetEnvironmentVariable\\('Path', 'User'\\) + ';C:\\\\Program Files\\\\NVIDIA GPU Computing Toolkit\\\\CUDA\\\\v13.0\\\\bin', 'User'\\)\")",
+      "Bash(cmd.exe //c \"reg query \\\\\"HKCU\\\\Environment\\\\\" /v Path 2>nul | findstr CUDA\")",
+      "Bash(cmd.exe //c \"reg query \\\\\"HKLM\\\\SYSTEM\\\\CurrentControlSet\\\\Control\\\\Session Manager\\\\Environment\\\\\" /v Path 2>nul | findstr CUDA\")",
+      "Bash(grep -v \"cu121/win\" 2.2.2.txt)",
+      "Bash(mv 2.2.2_clean.txt 2.2.2.txt)",
+      "Bash(npm uninstall *)"
     ]
   }
 }

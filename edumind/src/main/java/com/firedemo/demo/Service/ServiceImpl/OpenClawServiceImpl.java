@@ -153,7 +153,7 @@ public class OpenClawServiceImpl implements OpenClawService {
         log.info("OpenClaw SSE stream: sessionId={}, agent={}, msg={}",
                 sessionId, agent, truncate(message, 50));
 
-        Map<String, Object> body = buildRequestBody(message, null, agent, true);
+        Map<String, Object> body = buildRequestBody(message, sessionId, agent, true);
         return executeStreamRequest(body);
     }
 

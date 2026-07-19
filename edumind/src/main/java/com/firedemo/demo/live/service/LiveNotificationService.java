@@ -188,9 +188,8 @@ public class LiveNotificationService {
         List<ClassStudent> students = classStudentMapper.selectByClassId(session.getClassId());
         if (students.isEmpty()) return;
 
-        // 收集所有作答记录，按 studentId 分组
-        Map<String, List<InteractionResponse>> responsesByStudent = interactions.stream()
-                .flatMap(i -> responseMapper.findByInteractionId(i.getId()).stream())
+        // 一次批量查询该 session 下所有 response，避免 N+1
+        Map<String, List<InteractionResponse>> responsesByStudent = responseMapper.findBySessionId(session.getId()).stream()
                 .collect(Collectors.groupingBy(InteractionResponse::getStudentId));
 
         // 不懂标记按学生分组

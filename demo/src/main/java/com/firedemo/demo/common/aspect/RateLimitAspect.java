@@ -1,7 +1,8 @@
 package com.firedemo.demo.common.aspect;
 
 import com.firedemo.demo.common.annotation.RateLimit;
-import com.firedemo.demo.common.exception.RateLimitExceededException;
+import com.firedemo.demo.common.result.Result;
+import com.firedemo.demo.common.exception.ErrorCode;
 import jakarta.annotation.PostConstruct;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -108,7 +109,7 @@ public class RateLimitAspect {
                 }
             }
         }
-        throw new RateLimitExceededException("请求过于频繁，请稍后再试");
+        return Result.error(ErrorCode.RATE_LIMIT_EXCEEDED);
     }
 
     private List<String> generateKeys(String className, String methodName, RateLimit.Dimension[] dimensions) {

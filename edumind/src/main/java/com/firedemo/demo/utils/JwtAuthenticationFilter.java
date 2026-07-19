@@ -48,6 +48,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         // 放行路径（不需要 JWT）
         if (path.startsWith("/api/auth/") || path.startsWith("/api/chat/health")
                 || path.startsWith("/api/onebot/rag") || path.startsWith("/api/homework/")
+                || path.startsWith("/api/live/join") || path.startsWith("/api/live/session/")
+                || path.startsWith("/ws/")
                 || path.startsWith("/mcp")
                 || path.startsWith("/v3/api-docs") || path.startsWith("/swagger-ui")
                 || path.equals("/doc.html") || path.startsWith("/webjars")

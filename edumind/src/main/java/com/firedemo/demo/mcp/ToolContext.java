@@ -12,10 +12,6 @@ public class ToolContext {
     private final Set<Long> accessibleKbIds;
     private final Long courseId;
 
-    public ToolContext(Long userId, Set<Long> accessibleKbIds) {
-        this(userId, accessibleKbIds, null);
-    }
-
     public ToolContext(Long userId, Set<Long> accessibleKbIds, Long courseId) {
         this.userId = userId;
         this.accessibleKbIds = accessibleKbIds != null ? Set.copyOf(accessibleKbIds) : Collections.emptySet();

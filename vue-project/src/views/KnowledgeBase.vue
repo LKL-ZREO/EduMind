@@ -110,12 +110,28 @@
         <div v-else class="content-file">
           <div class="file-header">
             <div class="file-header-left"><el-icon :size="24" color="#409eff"><Document /></el-icon><h2>{{ selectedNode.label }}</h2></div>
-            <el-tag size="small" type="info" effect="plain">预览</el-tag>
+            <div class="file-header-right">
+              <el-tag size="small" type="info" effect="plain">预览</el-tag>
+              <el-button v-if="isPptFile(selectedNode.label)" size="small" type="warning" :icon="MagicStick" @click="openGenerateDialog">🤖 AI 生成教学材料</el-button>
+            </div>
           </div>
-          <el-divider />
+          <!-- 已生成的草稿 -->
+          <div v-if="drafts.previews.length || drafts.quizzes.length" class="file-drafts">
+            <el-divider />
+            <h4>📋 已生成的教学材料</h4>
+            <div v-for="p in drafts.previews" :key="'p'+p.id" class="draft-item" style="cursor:pointer" @click="viewDraft('preview', p)">
+              <div class="draft-info"><span class="draft-tag preview">预习</span><span>{{ p.title }}</span></div>
+              <div class="draft-actions"><el-button text size="small" type="danger" @click.stop="deleteDraft('preview', p.id)">🗑</el-button></div>
+            </div>
+            <div v-for="q in drafts.quizzes" :key="'q'+q.id" class="draft-item" style="cursor:pointer" @click="viewDraft('quiz', q)">
+              <div class="draft-info"><el-tag size="small" :type="q.quizType==='CHOICE'?'primary':q.quizType==='OPEN'?'success':'warning'">{{ typeLabelZh(q.quizType) }}</el-tag><span>{{ q.title }}</span></div>
+              <div class="draft-actions"><el-button text size="small" type="danger" @click.stop="deleteDraft('quiz', q.id)">🗑</el-button></div>
+            </div>
+            <el-divider />
+          </div>
           <div class="file-body">
             <div v-if="selectedNode.content" class="markdown-preview" v-html="renderContent(selectedNode.content)" />
-            <div v-else class="content-empty"><el-icon :size="48" color="#dcdfe6"><Tickets /></el-icon><p>暂无内容</p></div>
+            <div v-else class="content-empty"><el-icon :size="48" color="#dcdfe6"><Tickets /></el-icon><p>文档正在处理中，请稍后查看...</p></div>
           </div>
         </div>
       </main>
@@ -200,13 +216,103 @@
       </el-upload>
       <template #footer><el-button @click="uploadVisible = false">取消</el-button><el-button type="primary" :loading="uploadLoading" :disabled="uploadFileList.length === 0" @click="submitUpload">上传 {{ uploadFileList.length ? `${uploadFileList.length} 个文件` : '' }}</el-button></template>
     </el-dialog>
+
+    <!-- 草稿详情 -->
+    <el-dialog v-model="showDraftDetail" :title="draftDetail?.type === 'preview' ? '📖 预习作业详情' : '✏️ 试题详情'" width="560px" append-to-body>
+      <div v-if="draftDetail?.type === 'preview'" class="draft-detail">
+        <p><strong>知识点：</strong>{{ draftDetail.data.topic || draftDetail.data.title }}</p>
+        <div v-if="draftDetail.data.guideText" class="gen-guide" v-html="markdownToHtml(draftDetail.data.guideText)"></div>
+        <div v-if="draftDetail.data.discussionQuestion"><p><strong>课堂讨论：</strong>{{ draftDetail.data.discussionQuestion }}</p></div>
+      </div>
+      <div v-else-if="draftDetail?.type === 'quiz'" class="draft-detail">
+        <p><strong>知识点：</strong>{{ draftDetail.data.knowledgePoint }}</p>
+        <p><strong>类型：</strong>{{ typeLabelZh(draftDetail.data.quizType) }}</p>
+        <p><strong>题目：</strong>{{ draftDetail.data.title }}</p>
+        <p v-if="draftDetail.data.correctKey"><strong>答案：</strong>{{ draftDetail.data.correctKey }}</p>
+      </div>
+    </el-dialog>
+
+    <!-- AI 生成教学材料 -->
+    <el-dialog v-model="gen.visible" title="🤖 AI 生成教学材料" width="640px" :close-on-click-modal="false" append-to-body @closed="resetGen">
+      <div v-if="!gen.result" class="gen-step">
+        <p style="color:#666;margin-bottom:16px">将根据 PPT 内容自动生成预习作业和课堂试题，生成后可在面板中编辑和选择保存。</p>
+        <el-form label-width="80px">
+          <el-form-item label="目标班级">
+            <el-select v-model="gen.classId" placeholder="选择班级" style="width:100%">
+              <el-option v-for="c in classList" :key="c.id" :label="c.name" :value="c.id" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="PPT 文件"><span style="color:#409eff">{{ selectedNode?.label }}</span></el-form-item>
+        </el-form>
+        <div style="text-align:center;padding:12px">
+          <el-button type="primary" :loading="gen.loading" :disabled="!gen.classId" @click="doGenerate">开始生成</el-button>
+        </div>
+        <div v-if="gen.loading" style="text-align:center;padding:16px;color:#909399">
+          <el-icon class="is-loading" :size="20"><Loading /></el-icon> 正在分析 PPT 内容，生成教学材料...
+        </div>
+      </div>
+      <!-- 生成结果 -->
+      <div v-else class="gen-result">
+        <el-tabs>
+          <el-tab-pane label="📖 预习作业">
+            <template v-if="gen.result.preview">
+              <div class="gen-preview-section">
+                <p><strong>知识点：</strong>{{ gen.result.preview.topic }}</p>
+                <div class="gen-guide" v-html="markdownToHtml(gen.result.preview.guideText)"></div>
+                <div v-if="gen.result.preview.questions?.length" style="margin-top:12px">
+                  <p><strong>预习自测题 ({{ gen.result.preview.questions.length }}道)：</strong></p>
+                  <div v-for="(q,i) in gen.result.preview.questions" :key="i" class="gen-quiz-card">
+                    <el-tag size="small" :type="q.type==='CHOICE'?'primary':'success'">{{ q.type==='CHOICE'?'选择题':'简答题' }}</el-tag>
+                    <p>{{ q.question }}</p>
+                    <div v-if="q.options?.length" style="margin:4px 0;font-size:13px;color:#666">
+                      <span v-for="o in q.options" :key="o.key" style="margin-right:12px">{{ o.key }}. {{ o.text }}</span>
+                    </div>
+                    <p style="font-size:12px;color:#67c23a">答案: {{ q.correctKey }}</p>
+                  </div>
+                </div>
+                <p v-if="gen.result.preview.discussionQuestion" style="margin-top:8px"><strong>课堂讨论：</strong>{{ gen.result.preview.discussionQuestion }}</p>
+                <div style="margin-top:12px">
+                  <el-button size="small" type="primary" :loading="gen.savingPreview" @click="savePreview">📢 发布预习作业</el-button>
+                  <span v-if="gen.result.preview.published" style="color:#67c23a;margin-left:8px">✅ 已发布</span>
+                </div>
+              </div>
+            </template>
+            <div v-else style="padding:20px;text-align:center;color:#909399">预习作业生成失败，请返回重试</div>
+          </el-tab-pane>
+          <el-tab-pane label="✏️ 课堂试题 ({{ gen.result.quizzes?.length || 0 }})">
+            <div class="gen-preview-section" v-if="gen.result.quizzes?.length">
+              <div v-for="(q,i) in gen.result.quizzes" :key="i" class="gen-quiz-card">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+                  <el-tag size="small" :type="q.type==='CHOICE'?'primary':q.type==='OPEN'?'success':'warning'">{{ typeLabel(q.type) }}</el-tag>
+                  <el-tag size="small" :type="q.difficulty==='easy'?'success':q.difficulty==='hard'?'danger':''">{{ diffLabel(q.difficulty) }}</el-tag>
+                  <span style="margin-left:auto;font-size:12px;color:#909399">{{ q.knowledgePoint }}</span>
+                </div>
+                <p>{{ q.title }}</p>
+                <div v-if="q.options?.length" style="font-size:13px;color:#666">
+                  <span v-for="o in q.options" :key="o.key" style="margin-right:12px">{{ o.key }}. {{ o.text }}</span>
+                </div>
+                <p style="font-size:12px;color:#67c23a">答案: {{ q.correctKey }} | 限时: {{ q.timeLimit || '-' }}s</p>
+                <div style="margin-top:4px">
+                  <el-button size="small" :loading="gen.savingQuiz === i" @click="saveQuiz(i)">💾 保存到草稿库</el-button>
+                  <span v-if="q.published" style="color:#67c23a;margin-left:8px">✅ 已保存</span>
+                </div>
+              </div>
+            </div>
+            <div v-else style="padding:20px;text-align:center;color:#909399">暂无试题数据</div>
+          </el-tab-pane>
+        </el-tabs>
+        <div style="text-align:center;margin-top:12px">
+          <el-button @click="resetGen">关闭</el-button>
+        </div>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { FolderOpened, Document, FolderAdd, Upload, UploadFilled, Edit, Delete, Tickets, Loading, Share, Link, Setting, Star, ArrowRight } from '@element-plus/icons-vue'
+import { FolderOpened, Document, FolderAdd, Upload, UploadFilled, Edit, Delete, Tickets, Loading, Share, Link, Setting, Star, ArrowRight, MagicStick } from '@element-plus/icons-vue'
 import type { ElTree, UploadUserFile } from 'element-plus'
 import type { DropType } from 'element-plus/es/components/tree/src/tree.type'
 import request from '@/api/request'
@@ -431,7 +537,7 @@ function filterTree() { treeRef.value?.filter(searchQuery.value) }
 function filterNode(value: string, data: TreeNode) { if (!value) return true; return data.label.toLowerCase().includes(value.toLowerCase()) }
 
 /* ===== Click ===== */
-function handleNodeClick(data: TreeNode) { selectedNode.value = data; if (data.type === 'file' && data.docId) loadFileContent(data) }
+function handleNodeClick(data: TreeNode) { selectedNode.value = data; drafts.value = { previews: [], quizzes: [] }; if (data.type === 'file' && data.docId) { loadFileContent(data); loadDrafts(data.docId) } }
 const contentCache = new Map<string, string>()
 async function loadFileContent(node: TreeNode) {
   if (!node.docId) return
@@ -440,6 +546,106 @@ async function loadFileContent(node: TreeNode) {
     const r = await request.get(`/documents/${node.docId}/content`)
     node.content = typeof r.data === 'string' ? r.data : `# ${node.label}\n\n文档正在处理中，请稍后查看。`; if (node.content && !node.content.startsWith('#')) contentCache.set(node.docId, node.content)
   } catch { node.content = `# ${node.label}\n\n暂无法加载文档内容。` }
+}
+
+/* ===== AI 生成教学材料 ===== */
+interface GenResult { preview: any; quizzes: any[]; pptFileName: string }
+const gen = reactive({
+  visible: false, loading: false, classId: null as number | null,
+  result: null as GenResult | null, savingPreview: false, savingQuiz: null as number | null,
+})
+const classList = ref<{ id: number; name: string }[]>([])
+
+function isPptFile(label: string) { return /\.(ppt|pptx)$/i.test(label) }
+function typeLabel(t: string) { return ({ CHOICE: '选择题', OPEN: '简答题', EXERCISE: '随堂练习' } as any)[t] || t }
+function diffLabel(d: string) { return ({ easy: '简单', medium: '中等', hard: '困难' } as any)[d] || d }
+
+async function fetchClassList() {
+  try { const r = await request.get('/dashboard/classes'); classList.value = r.data?.data || [] } catch {}
+}
+fetchClassList()
+
+async function openGenerateDialog() {
+  if (!selectedNode.value?.docId) { ElMessage.warning('请先选择一个文件'); return }
+  if (classList.value.length === 0) { await fetchClassList() }
+  gen.visible = true; gen.classId = null; gen.result = null
+}
+
+async function doGenerate() {
+  if (!selectedNode.value?.docId || !gen.classId) return
+  gen.loading = true; gen.result = null
+  try {
+    const r = await request.post('/documents/generate-materials', { classId: gen.classId, docId: selectedNode.value.docId }, { timeout: 120000 })
+    gen.result = r.data
+  } catch (e: any) { ElMessage.error(e?.response?.data?.message || '生成失败，请重试') }
+  finally { gen.loading = false }
+}
+
+async function savePreview() {
+  if (!gen.result || !gen.classId) return
+  gen.savingPreview = true
+  try {
+    await request.post('/documents/generate-materials/save-preview', { ...gen.result.preview, classId: gen.classId, docId: selectedNode.value?.docId })
+    gen.result.preview.published = true; ElMessage.success('预习作业已发布')
+  } catch (e: any) { ElMessage.error(e?.response?.data?.message || '保存失败') }
+  finally { gen.savingPreview = false }
+}
+
+async function saveQuiz(index: number) {
+  if (!gen.result || !gen.classId) return
+  gen.savingQuiz = index
+  try {
+    await request.post('/documents/generate-materials/save-quiz', { ...gen.result.quizzes[index], classId: gen.classId, docId: selectedNode.value?.docId })
+    gen.result.quizzes[index].published = true; ElMessage.success('试题已保存到草稿库')
+  } catch (e: any) { ElMessage.error(e?.response?.data?.message || '保存失败') }
+  finally { gen.savingQuiz = null }
+}
+
+function resetGen() { gen.visible = false; gen.result = null; gen.loading = false }
+
+/* ===== 教学草稿 ===== */
+const drafts = ref<{ previews: any[]; quizzes: any[] }>({ previews: [], quizzes: [] })
+
+async function loadDrafts(docId: string) {
+  try {
+    const r = await request.get(`/documents/drafts?docId=${docId}`)
+    drafts.value = r.data || { previews: [], quizzes: [] }
+  } catch { drafts.value = { previews: [], quizzes: [] } }
+}
+
+const draftDetail = ref<any>(null)
+const showDraftDetail = ref(false)
+
+async function viewDraft(type: string, item: any) {
+  if (type === 'preview') {
+    try {
+      const r = await request.get(`/preview/${item.id}`)
+      draftDetail.value = { type: 'preview', data: r.data.data || r.data }
+    } catch { draftDetail.value = { type: 'preview', ...item } }
+  } else {
+    draftDetail.value = { type: 'quiz', data: item }
+  }
+  showDraftDetail.value = true
+}
+
+async function deleteDraft(type: string, id: number) {
+  try {
+    await request.delete(`/documents/drafts/${type}/${id}`)
+    if (type === 'preview') drafts.value.previews = drafts.value.previews.filter((p: any) => p.id !== id)
+    else drafts.value.quizzes = drafts.value.quizzes.filter((q: any) => q.id !== id)
+    ElMessage.success('已删除')
+  } catch { ElMessage.error('删除失败') }
+}
+
+function typeLabelZh(t: string) { return ({ CHOICE: '选择题', OPEN: '简答题', EXERCISE: '随堂练习' } as any)[t] || t }
+
+function markdownToHtml(md: string): string {
+  if (!md) return ''
+  return md
+    .replace(/^### (.+)$/gm, '<h3>$1</h3>').replace(/^## (.+)$/gm, '<h2>$1</h2>').replace(/^# (.+)$/gm, '<h1>$1</h1>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/`(.+?)`/g, '<code>$1</code>')
+    .replace(/- (.+)/g, '<li>$1</li>').replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>')
+    .replace(/\n\n/g, '</p><p>').replace(/^(.+)$/gm, m => m.startsWith('<') ? m : m)
 }
 
 /* ===== Utils ===== */
@@ -509,6 +715,7 @@ function renderContent(content: string): string {
 .file-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
 .file-header-left { display: flex; align-items: center; gap: 10px; }
 .file-header-left h2 { margin: 0; font-size: 20px; color: #303133; }
+.file-header-right { display: flex; align-items: center; gap: 10px; }
 .file-body { padding-top: 8px; line-height: 1.8; color: #303133; font-size: 14px; }
 .markdown-preview h1 { font-size: 22px; color: #303133; margin: 16px 0 8px; border-bottom: 1px solid #ebeef5; padding-bottom: 6px; }
 .markdown-preview h2 { font-size: 18px; color: #303133; margin: 14px 0 6px; }
@@ -552,4 +759,20 @@ function renderContent(content: string): string {
 :deep(.el-tabs__item) { color: #909399; }
 :deep(.el-tabs__item.is-active) { color: #409EFF; }
 :deep(.el-select .el-input__wrapper) { background: #ebeef5; border: 1px solid #e4e7ed; box-shadow: none; }
+.gen-preview-section { max-height: 400px; overflow-y: auto; padding: 4px; }
+.gen-guide { font-size: 13px; line-height: 1.7; color: #333; margin: 8px 0; padding: 10px 14px; background: #f9fafb; border-radius: 6px; }
+.gen-guide h1,.gen-guide h2,.gen-guide h3 { color: #303133; }
+.gen-guide strong { color: #409eff; }
+.gen-guide code { background: #ebeef5; padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+.gen-guide ul { padding-left: 18px; }
+.gen-quiz-card { padding: 12px; margin: 8px 0; border: 1px solid #ebeef5; border-radius: 8px; background: #fafafa; }
+.gen-quiz-card p { margin: 6px 0; font-size: 14px; color: #333; }
+.file-drafts { margin-bottom: 0; }
+.file-drafts h4 { font-size: 14px; color: #666; margin: 8px 0; }
+.draft-item { display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; border: 1px solid #ebeef5; border-radius: 6px; margin: 4px 0; }
+.draft-info { display: flex; align-items: center; gap: 8px; flex: 1; overflow: hidden; }
+.draft-info span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.draft-tag { padding: 1px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+.draft-tag.preview { background: #fef0e6; color: #e6a23c; }
+.draft-actions { flex-shrink: 0; }
 </style>

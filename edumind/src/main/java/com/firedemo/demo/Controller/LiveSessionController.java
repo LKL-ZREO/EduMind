@@ -14,6 +14,8 @@ import com.firedemo.demo.mapper.LiveConfusionEventMapper;
 import com.firedemo.demo.rag.RagResult;
 import com.firedemo.demo.rag.RagSearchRequest;
 import com.firedemo.demo.rag.RagService;
+import com.firedemo.demo.utils.JwtUtil;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -36,6 +38,7 @@ public class LiveSessionController {
     private final RagService ragService;
     private final LiveConfusionEventMapper confusionEventMapper;
     private final InteractionMapper interactionMapper;
+    private final JwtUtil jwtUtil;
 
     @PostMapping("/create")
     public Result<Map<String, Object>> createSession(@RequestBody LiveSessionCreateDTO dto) {
@@ -148,16 +151,24 @@ public class LiveSessionController {
 
     /**
      * 学生对课堂推送到题目标记"不懂"，AI 即时返回该知识点的解析。
+     * 学生身份从 JWT 中提取，忽略请求体中的 studentId/studentName（防止冒用）。
      */
     @PostMapping("/confusion/mark")
-    public Result<Map<String, Object>> markConfusion(@RequestBody Map<String, Object> body) {
+    public Result<Map<String, Object>> markConfusion(@RequestBody Map<String, Object> body,
+                                                      HttpServletRequest request) {
+        // 从 JWT 提取学生身份，不信任请求体中的 studentId/studentName
+        String token = jwtUtil.extractTokenFromRequest(request);
+        if (token == null || !jwtUtil.validateToken(token)) {
+            return Result.error(401, "请先加入课堂");
+        }
+        String studentId = jwtUtil.getSubjectFromToken(token);
+        String studentName = jwtUtil.getUsernameFromToken(token);
+
         Long sessionId = toLong(body.get("sessionId"));
         Long interactionId = toLong(body.get("interactionId"));
-        String studentId = (String) body.get("studentId");
-        String studentName = (String) body.get("studentName");
 
         if (sessionId == null || studentId == null || studentId.isBlank()) {
-            return Result.error(400, "sessionId 和 studentId 必填");
+            return Result.error(400, "sessionId 和登录凭证无效");
         }
 
         // 获取题目信息
