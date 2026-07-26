@@ -79,6 +79,19 @@ jobs:
           OPENCLAW_API_KEY: ci-test-key
           MCP_API_KEY: ci-test-key
 
+      - name: Report integration test failures
+        if: failure()
+        shell: bash
+        run: |
+          cd edumind
+          grep -h -E '<<< (FAILURE|ERROR)|^Caused by:|AssertionError|expected:|but was:' \
+            target/surefire-reports/*.txt 2>/dev/null | head -n 20 | while IFS= read -r line; do
+              line="${line//'%'/'%25'}"
+              line="${line//$'\r'/'%0D'}"
+              line="${line//$'\n'/'%0A'}"
+              echo "::error title=Integration test failure::$line"
+            done
+
       - name: Upload JaCoCo coverage report
         uses: actions/upload-artifact@v4
         if: always()
