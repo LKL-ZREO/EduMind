@@ -40,7 +40,7 @@ public class InteractionHandler {
     public void respond(@DestinationVariable Long sessionId, @DestinationVariable Long interactionId,
                         @Payload StudentResponseDTO dto,
                         SimpMessageHeaderAccessor headerAccessor) {
-        // 从 JWT 已验身份覆盖 payload 中的 studentId/studentName，防止冒用
+        // 用课堂令牌身份覆盖 payload 中的 studentId/studentName，防止冒用
         String[] identity = resolveStudentIdentity(headerAccessor);
         dto.setStudentId(identity[0]);
         dto.setStudentName(identity[1]);
@@ -50,11 +50,11 @@ public class InteractionHandler {
         interactionService.handleResponse(sessionId, dto);
     }
 
-    /** 从 STOMP 会话属性（CONNECT 阶段 JWT 验证后存储）读取学生身份 */
+    /** 从 STOMP 会话属性读取学生身份。 */
     private static String[] resolveStudentIdentity(SimpMessageHeaderAccessor accessor) {
         Map<String, Object> attrs = accessor.getSessionAttributes();
         if (attrs == null) return new String[]{"unknown", "未知"};
-        String studentId = String.valueOf(attrs.getOrDefault("userId", "unknown"));
+        String studentId = String.valueOf(attrs.getOrDefault("studentId", "unknown"));
         String studentName = String.valueOf(attrs.getOrDefault("username", "未知"));
         return new String[]{studentId, studentName};
     }

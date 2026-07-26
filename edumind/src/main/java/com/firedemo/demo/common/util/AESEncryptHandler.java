@@ -64,10 +64,17 @@ public class AESEncryptHandler extends BaseTypeHandler<String> {
     }
 
     /**
-     * 尝试解密。若解密失败（旧数据是明文），返回原值并记录警告——兼容加密迁移过渡期。
+     * 尝试解密。若解密失败（旧数据是明文），返回原值——兼容加密迁移过渡期。
+     * <p>
+     * 前置判断：如果值包含明显非 Base64 字符（如 @ . 中文等），
+     * 说明是明文数据，直接返回避免触发 AesUtil 的 ERROR 日志。
      */
     private String tryDecrypt(String value) {
         if (value == null) return null;
+        // 快速判断：Base64 只包含 A-Z a-z 0-9 + / =，含其他字符的必为明文
+        if (value.contains("@") || value.contains(".") && value.length() < 50) {
+            return value;
+        }
         try {
             return aesUtil.decrypt(value);
         } catch (Exception e) {

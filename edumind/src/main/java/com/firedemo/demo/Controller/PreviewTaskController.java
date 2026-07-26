@@ -23,6 +23,7 @@ public class PreviewTaskController {
 
     /** 教师：AI 生成预习任务 */
     @PostMapping("/create")
+    @PreAuthorize("@sec.isClassOwner(#req.classId)")
     public Result<PreviewTaskDTO> create(@Valid @RequestBody CreatePreviewRequest req) {
         Long userId = getCurrentUserId();
         if (userId == null) return Result.error(401, "未登录");
@@ -45,6 +46,7 @@ public class PreviewTaskController {
 
     /** 教师：关闭预习任务 */
     @PostMapping("/{taskId}/close")
+    @PreAuthorize("@sec.isPreviewTaskOwner(#taskId)")
     public Result<Void> close(@PathVariable Long taskId) {
         Long userId = getCurrentUserId();
         if (userId == null) return Result.error(401, "未登录");
@@ -57,7 +59,9 @@ public class PreviewTaskController {
             Object details = SecurityContextHolder.getContext().getAuthentication().getDetails();
             if (details instanceof Long id) return id;
             if (details instanceof Integer i) return i.longValue();
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            log.debug("读取当前用户ID失败: {}", e.getMessage());
+        }
         return null;
     }
 }

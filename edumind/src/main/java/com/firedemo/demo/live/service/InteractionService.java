@@ -84,6 +84,8 @@ public class InteractionService {
         Interaction interaction = interactionMapper.selectById(dto.getInteractionId());
         if (interaction == null || !"ACTIVE".equals(interaction.getStatus()))
             throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "互动已关闭或不存在");
+        if (!sessionId.equals(interaction.getSessionId()))
+            throw new BusinessException(ErrorCode.FORBIDDEN.getCode(), "互动不属于当前课堂");
 
         Boolean isCorrect = null;
         if ("CHOICE".equals(interaction.getType()) && interaction.getCorrectKey() != null)
@@ -103,15 +105,18 @@ public class InteractionService {
 
     @Transactional
     public void closeInteraction(Long interactionId, Long sessionId) {
+        Interaction interaction = interactionMapper.selectById(interactionId);
+        if (interaction == null || !"ACTIVE".equals(interaction.getStatus())) return;
+        if (!sessionId.equals(interaction.getSessionId()))
+            throw new BusinessException(ErrorCode.FORBIDDEN.getCode(), "互动不属于当前课堂");
+
         // 取消自动关闭定时任务（如果教师手动提前关闭）
         ScheduledFuture<?> future = pendingClosures.remove(interactionId);
         if (future != null) {
             future.cancel(false);
         }
 
-        Interaction interaction = interactionMapper.selectById(interactionId);
-        if (interaction == null || !"ACTIVE".equals(interaction.getStatus())) return;
-        interactionMapper.closeInteraction(interactionId);
+        if (interactionMapper.closeInteraction(interactionId, sessionId) == 0) return;
 
         InteractionPushDTO push = buildPushDTO(interaction);
         push.setStatus("CLOSED");
@@ -332,6 +337,63 @@ public class InteractionService {
         int end = s.lastIndexOf('}');
         if (start >= 0 && end > start) return s.substring(start, end + 1);
         return s;
+    }
+
+    /**
+     * 教师从草稿库一键激活试题推送到课堂。
+     */
+    @Transactional
+    public InteractionPushDTO activateDraft(Long sessionId, Long interactionId) {
+        Interaction draft = interactionMapper.selectById(interactionId);
+        if (draft == null || !"DRAFT".equals(draft.getStatus()))
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "草稿不存在或已使用");
+
+        ClassroomSession session = sessionMapper.selectById(sessionId);
+        if (session == null)
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "课堂不存在");
+
+        if (draft.getClassId() != null && !draft.getClassId().equals(session.getClassId()))
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "草稿不属于该班级");
+
+        interactionMapper.activateDraft(interactionId, sessionId);
+        draft.setSessionId(sessionId);
+        draft.setStatus("ACTIVE");
+
+        // 推送到学生端
+        InteractionPushDTO push = buildPushDTO(draft);
+        messagingTemplate.convertAndSend("/topic/session/" + sessionId + "/interaction", push);
+
+        // 推送初始统计
+        pushStatsToTeacher(draft, session.getClassId(), session.getTeacherId());
+
+        // 自动关闭计时
+        if (draft.getTimeLimit() != null && draft.getTimeLimit() > 0) {
+            scheduleAutoClose(interactionId, sessionId, draft.getTimeLimit());
+        }
+
+        log.info("草稿已激活: interactionId={}, sessionId={}", interactionId, sessionId);
+        return push;
+    }
+
+    /**
+     * 获取班级所有草稿试题（供教师课堂推题时选择）。
+     */
+    public List<InteractionHistoryDTO> getDraftsByClassId(Long classId) {
+        return interactionMapper.findDraftsByClassId(classId).stream().map(i -> {
+            List<InteractionCreateDTO.OptionDTO> options = null;
+            if (i.getOptions() != null && !i.getOptions().isEmpty()) {
+                try {
+                    options = objectMapper.readValue(i.getOptions(),
+                            objectMapper.getTypeFactory().constructCollectionType(List.class, InteractionCreateDTO.OptionDTO.class));
+                } catch (JsonProcessingException ignored) {}
+            }
+            return InteractionHistoryDTO.builder()
+                    .interactionId(i.getId()).type(i.getType()).title(i.getTitle())
+                    .description(i.getDescription()).options(options)
+                    .correctKey(i.getCorrectKey()).timeLimit(i.getTimeLimit())
+                    .status(i.getStatus()).knowledgePoint(i.getKnowledgePoint())
+                    .createdAt(i.getCreatedAt() != null ? i.getCreatedAt().toString() : null).build();
+        }).toList();
     }
 
     /** 学生个人画像：汇总该学生在某班级所有课堂中的答题表现。批量查询避免 N+1。 */

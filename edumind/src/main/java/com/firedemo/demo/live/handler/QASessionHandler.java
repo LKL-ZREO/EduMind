@@ -2,6 +2,8 @@ package com.firedemo.demo.live.handler;
 
 import com.firedemo.demo.DTO.QAMessageDTO;
 import com.firedemo.demo.Entity.ClassroomQA;
+import com.firedemo.demo.common.exception.BusinessException;
+import com.firedemo.demo.common.exception.ErrorCode;
 import com.firedemo.demo.mapper.ClassroomQAMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,7 +28,7 @@ public class QASessionHandler {
     @MessageMapping("/session/{sessionId}/qa/ask")
     public void ask(@DestinationVariable Long sessionId, @Payload QAMessageDTO.QuestionItem dto,
                     SimpMessageHeaderAccessor headerAccessor) {
-        // 从 JWT 已验身份读取学生信息（DB 记录真实身份，广播时匿名展示）
+        // 从课堂令牌身份读取学生信息（DB 记录真实身份，广播时匿名展示）
         String[] identity = resolveStudentIdentity(headerAccessor);
         ClassroomQA qa = new ClassroomQA();
         qa.setSessionId(sessionId);
@@ -40,7 +42,9 @@ public class QASessionHandler {
     @MessageMapping("/session/{sessionId}/qa/{qaId}/answer")
     public void answer(@DestinationVariable Long sessionId, @DestinationVariable Long qaId,
                        @Payload QAMessageDTO.QuestionItem dto) {
-        qaMapper.markAnswered(qaId, dto.getAnswerText());
+        if (qaMapper.markAnswered(qaId, sessionId, dto.getAnswerText()) == 0) {
+            throw new BusinessException(ErrorCode.FORBIDDEN.getCode(), "问题不属于当前课堂");
+        }
         pushQAToTeacher(sessionId);
     }
 
@@ -60,11 +64,11 @@ public class QASessionHandler {
                 QAMessageDTO.builder().topQuestions(items).build());
     }
 
-    /** 从 STOMP 会话属性（CONNECT 阶段 JWT 验证后存储）读取学生身份 */
+    /** 从 STOMP 会话属性读取学生身份。 */
     private static String[] resolveStudentIdentity(SimpMessageHeaderAccessor accessor) {
         Map<String, Object> attrs = accessor.getSessionAttributes();
         if (attrs == null) return new String[]{"anonymous", "匿名"};
-        String studentId = String.valueOf(attrs.getOrDefault("userId", "anonymous"));
+        String studentId = String.valueOf(attrs.getOrDefault("studentId", "anonymous"));
         String studentName = String.valueOf(attrs.getOrDefault("username", "匿名"));
         return new String[]{studentId, studentName};
     }

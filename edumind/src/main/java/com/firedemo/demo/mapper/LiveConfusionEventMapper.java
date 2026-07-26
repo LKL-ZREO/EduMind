@@ -47,4 +47,9 @@ public interface LiveConfusionEventMapper extends BaseMapper<LiveConfusionEvent>
         LIMIT #{limit}
     """)
     List<LiveConfusionEvent> findByClassId(@Param("classId") Long classId, @Param("limit") int limit);
+
+    /** 查询同一学生对同一题目是否已标记过不懂 */
+    @Select("SELECT * FROM live_confusion_event WHERE interaction_id = #{interactionId} AND student_id = #{studentId} LIMIT 1")
+    LiveConfusionEvent findByInteractionAndStudent(@Param("interactionId") Long interactionId,
+                                                    @Param("studentId") String studentId);
 }

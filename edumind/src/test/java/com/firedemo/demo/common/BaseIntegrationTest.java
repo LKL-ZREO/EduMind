@@ -1,5 +1,6 @@
 package com.firedemo.demo.common;
 
+import com.redis.testcontainers.RedisContainer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
@@ -40,7 +41,9 @@ public abstract class BaseIntegrationTest {
     protected int port;
 
     private static PostgreSQLContainer<?> postgresContainer;
+    private static RedisContainer redisContainer;
     private static boolean testcontainersStarted = false;
+    private static boolean redisContainerStarted = false;
 
     static {
         if (isRunningInCi()) {
@@ -58,8 +61,20 @@ public abstract class BaseIntegrationTest {
                 testcontainersStarted = true;
                 log.info("[Test] Testcontainers pgvector 启动成功: {}", postgresContainer.getJdbcUrl());
             } catch (Exception e) {
-                log.warn("[Test] Testcontainers 启动失败: {} — 回退到外部数据源", e.getMessage());
+                log.warn("[Test] PostgreSQL Testcontainer 启动失败: {} — 回退到外部数据源", e.getMessage());
                 postgresContainer = null;
+                testcontainersStarted = false;
+            }
+            try {
+                redisContainer = new RedisContainer(DockerImageName.parse("redis:7-alpine"));
+                redisContainer.start();
+                redisContainerStarted = true;
+                log.info("[Test] Testcontainers Redis 启动成功: {}:{}",
+                        redisContainer.getHost(), redisContainer.getFirstMappedPort());
+            } catch (Exception e) {
+                log.warn("[Test] Redis Testcontainer 启动失败: {} — 回退到外部 Redis", e.getMessage());
+                redisContainer = null;
+                redisContainerStarted = false;
             }
         } else {
             log.info("[Test] Docker 不可用 — 使用外部数据源（确保 docker compose up postgres 已启动）");
@@ -73,6 +88,11 @@ public abstract class BaseIntegrationTest {
             registry.add("spring.datasource.username", postgresContainer::getUsername);
             registry.add("spring.datasource.password", postgresContainer::getPassword);
         }
+        if (redisContainerStarted && redisContainer != null) {
+            registry.add("spring.data.redis.host", redisContainer::getHost);
+            registry.add("spring.data.redis.port", redisContainer::getFirstMappedPort);
+        }
+        registry.add("spring.flyway.enabled", () -> true);
         // 如果未用 Testcontainers（CI 模式 或 外部 DB），使用 application-test.properties
         // 中的默认值或 CLI 传入的 -Dspring.datasource.url=... 覆盖
     }

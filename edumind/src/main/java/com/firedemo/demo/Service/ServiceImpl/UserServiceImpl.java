@@ -4,12 +4,10 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.firedemo.demo.DTO.UserLoginDTO;
 import com.firedemo.demo.DTO.UserRegisterDTO;
 import com.firedemo.demo.Entity.User;
-import com.firedemo.demo.Service.TokenService;
 import com.firedemo.demo.Service.UserService;
 import com.firedemo.demo.VO.UserLoginVO;
 import com.firedemo.demo.mapper.UserMapper;
 import com.firedemo.demo.mapper.ChatHistoryMapper;
-import com.firedemo.demo.utils.JwtUtil;
 import com.firedemo.demo.common.exception.BusinessException;
 import com.firedemo.demo.common.exception.ErrorCode;
 import com.firedemo.demo.utils.PasswordUtil;
@@ -26,9 +24,7 @@ public class UserServiceImpl implements UserService {
 
     private final UserMapper userMapper;
     private final ChatHistoryMapper chatHistoryMapper;
-    private final JwtUtil jwtUtil;
     private final PasswordUtil passwordUtil;
-    private final TokenService tokenService;
 
     @Override
     public User getById(Long id) {
@@ -81,21 +77,14 @@ throw new BusinessException(ErrorCode.PASSWORD_ERROR);
 throw new BusinessException(ErrorCode.ACCOUNT_DISABLED);
         }
 
-        // 4. 生成 JWT + 刷新令牌
-        String token = jwtUtil.generateToken(user.getId(), user.getUsername(), user.getStatus());
-        String refreshToken = tokenService.createRefreshToken(user.getId());
-
-        // 5. 获取或生成 sessionId（查最近的历史记录）
+        // 4. 获取或生成 AI 对话 sessionId（查最近的历史记录）
         String sessionId = getOrCreateSessionId(user.getId());
 
-        // 6. 返回登录信息
+        // 5. HTTP 登录状态由 AuthController 写入 Spring Session。
         return UserLoginVO.builder()
                 .id(user.getId())
                 .username(user.getUsername())
                 .email(user.getEmail())
-                .token(token)
-                .refreshToken(refreshToken)
-                .expiresIn(JwtUtil.EXPIRATION_SECONDS)
                 .sessionId(sessionId)
                 .build();
     }

@@ -14,8 +14,9 @@ public interface InteractionMapper extends BaseMapper<Interaction> {
     List<Interaction> findBySessionIds(@Param("sessionIds") List<Long> sessionIds);
     @Select("SELECT * FROM interaction WHERE session_id = #{sessionId} AND status = 'ACTIVE' ORDER BY sort_order LIMIT 1")
     Interaction findActiveBySessionId(@Param("sessionId") Long sessionId);
-    @Update("UPDATE interaction SET status = 'CLOSED', closed_at = NOW() WHERE id = #{id}")
-    int closeInteraction(@Param("id") Long id);
+    @Update("UPDATE interaction SET status = 'CLOSED', closed_at = NOW() " +
+            "WHERE id = #{id} AND session_id = #{sessionId} AND status = 'ACTIVE'")
+    int closeInteraction(@Param("id") Long id, @Param("sessionId") Long sessionId);
 
     @Select("SELECT * FROM interaction WHERE class_id = #{classId} AND status = 'DRAFT' ORDER BY created_at DESC")
     List<Interaction> findDraftsByClassId(@Param("classId") Long classId);

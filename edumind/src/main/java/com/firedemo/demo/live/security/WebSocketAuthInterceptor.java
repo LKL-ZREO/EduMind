@@ -1,7 +1,7 @@
 package com.firedemo.demo.live.security;
 
+import com.firedemo.demo.config.OwnershipGuard;
 import com.firedemo.demo.live.service.StudentPresenceService;
-import com.firedemo.demo.utils.JwtUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.context.event.EventListener;
@@ -13,31 +13,55 @@ import org.springframework.messaging.simp.stomp.StompCommand;
 import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
 import org.springframework.messaging.support.ChannelInterceptor;
 import org.springframework.messaging.support.MessageHeaderAccessor;
+import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.messaging.SessionDisconnectEvent;
 
 import java.util.List;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Pattern;
 
 @Slf4j
 @Component
 public class WebSocketAuthInterceptor implements ChannelInterceptor {
 
-    private final JwtUtil jwtUtil;
+    private static final Pattern APP_SESSION_DESTINATION =
+            Pattern.compile("^/app/session/(\\d+)(?:/.*)?$");
+    private static final Pattern TOPIC_SESSION_DESTINATION =
+            Pattern.compile("^/topic/session/(\\d+)(?:/.*)?$");
+    private static final List<Pattern> STUDENT_SEND_DESTINATIONS = List.of(
+            Pattern.compile("^/app/session/\\d+/interaction/\\d+/respond$"),
+            Pattern.compile("^/app/session/\\d+/qa/ask$"),
+            Pattern.compile("^/app/session/\\d+/reaction$"),
+            Pattern.compile("^/app/session/\\d+/hand/(?:raise|lower)$"));
+    private static final List<Pattern> TEACHER_SEND_DESTINATIONS = List.of(
+            Pattern.compile("^/app/session/\\d+/interaction/create$"),
+            Pattern.compile("^/app/session/\\d+/interaction/\\d+/close$"),
+            Pattern.compile("^/app/session/\\d+/qa/\\d+/answer$"),
+            Pattern.compile("^/app/session/\\d+/hand/(?:call|dismiss)$"));
+    private static final Set<String> STUDENT_TOPIC_SUFFIXES = Set.of(
+            "/interaction", "/reactions", "/hand-queue", "/teacher-status");
+
+    private final LiveSessionTokenService liveSessionTokenService;
     private final StudentPresenceService presenceService;
     private final SimpMessagingTemplate messagingTemplate;
+    private final OwnershipGuard ownershipGuard;
     // WebSocket sessionId → (liveSessionId, studentId, studentName) — 学生连接追踪
     private final Map<String, SessionInfo> sessionMap = new ConcurrentHashMap<>();
     // liveSessionId → 该课堂教师 WebSocket 连接集合（一个教师可能多 tab 打开）
     private final Map<Long, Set<String>> teacherSessions = new ConcurrentHashMap<>();
 
-    public WebSocketAuthInterceptor(JwtUtil jwtUtil, StudentPresenceService presenceService,
-                                     @Lazy SimpMessagingTemplate messagingTemplate) {
-        this.jwtUtil = jwtUtil;
+    public WebSocketAuthInterceptor(LiveSessionTokenService liveSessionTokenService,
+                                     StudentPresenceService presenceService,
+                                     @Lazy SimpMessagingTemplate messagingTemplate,
+                                     OwnershipGuard ownershipGuard) {
+        this.liveSessionTokenService = liveSessionTokenService;
         this.presenceService = presenceService;
         this.messagingTemplate = messagingTemplate;
+        this.ownershipGuard = ownershipGuard;
     }
 
     @Override
@@ -58,45 +82,74 @@ public class WebSocketAuthInterceptor implements ChannelInterceptor {
 
     private void handleConnect(StompHeaderAccessor accessor) {
         List<String> authHeaders = accessor.getNativeHeader("Authorization");
-        if (authHeaders == null || authHeaders.isEmpty())
-            throw new IllegalArgumentException("缺少登录凭证");
-        String token = authHeaders.get(0);
-        if (token.startsWith("Bearer ")) token = token.substring(7);
-        if (!jwtUtil.validateToken(token))
-            throw new IllegalArgumentException("登录已过期");
+        if (authHeaders != null && !authHeaders.isEmpty()) {
+            authenticateStudent(accessor, authHeaders.get(0));
+            return;
+        }
+        authenticateTeacher(accessor);
+    }
 
-        String username = jwtUtil.getUsernameFromToken(token);
-        String role = jwtUtil.getRoleFromToken(token);
-        Long userId = jwtUtil.getUserIdFromToken(token);
-        // 用 userId 做 principal，保证 convertAndSendToUser 能正确路由到该连接
+    private void authenticateStudent(StompHeaderAccessor accessor, String header) {
+        String token = header.startsWith("Bearer ") ? header.substring(7) : header;
+        ClassroomStudentPrincipal student = liveSessionTokenService.parse(token)
+                .orElseThrow(() -> new IllegalArgumentException("课堂凭证无效或已过期"));
+        if (!ownershipGuard.isLiveSessionActive(student.liveSessionId())) {
+            throw new IllegalArgumentException("课堂不存在或已结束");
+        }
+        Map<String, Object> attributes = sessionAttributes(accessor);
+        accessor.setUser(student);
+        attributes.put("username", student.studentName());
+        attributes.put("role", "STUDENT");
+        attributes.put("studentId", student.studentId());
+        attributes.put("userId", student.studentId());
+        attributes.put("liveSessionId", student.liveSessionId());
+
+        sessionMap.put(accessor.getSessionId(), new SessionInfo(
+                student.liveSessionId(), student.studentId(), student.studentName()));
+        presenceService.studentJoined(
+                student.liveSessionId(), student.studentId(), student.studentName());
+        log.info("WS CONNECT: user={}, role=STUDENT", student.studentId());
+    }
+
+    private void authenticateTeacher(StompHeaderAccessor accessor) {
+        if (!(accessor.getUser() instanceof Authentication authentication)
+                || !authentication.isAuthenticated()
+                || authentication.getAuthorities().stream()
+                .noneMatch(authority -> "ROLE_TEACHER".equals(authority.getAuthority()))
+                || !(authentication.getDetails() instanceof Long userId)) {
+            throw new IllegalArgumentException("缺少教师登录会话");
+        }
+
+        Map<String, Object> attributes = sessionAttributes(accessor);
+        String username = authentication.getName();
         accessor.setUser(() -> String.valueOf(userId));
-        accessor.getSessionAttributes().put("username", username);
-        accessor.getSessionAttributes().put("role", role);
-        accessor.getSessionAttributes().put("userId", userId);
-        accessor.getSessionAttributes().put("token", token);
+        attributes.put("username", username);
+        attributes.put("role", "TEACHER");
+        attributes.put("userId", userId);
 
-        // 学生连接时通知教师
-        if ("STUDENT".equals(role)) {
-            Long sessionId = jwtUtil.getSessionIdFromToken(token);
-            if (sessionId != null) {
-                String wsSessionId = accessor.getSessionId();
-                sessionMap.put(wsSessionId, new SessionInfo(sessionId, username, username));
-                presenceService.studentJoined(sessionId, jwtUtil.getUserIdFromToken(token).toString(), username);
+        List<String> sidHeaders = accessor.getNativeHeader("X-Session-Id");
+        if (sidHeaders != null && !sidHeaders.isEmpty()) {
+            Long sid = parseSessionId(sidHeaders.get(0));
+            if (!ownershipGuard.isSessionOwner(userId, sid)) {
+                throw new IllegalArgumentException("无权连接该课堂");
             }
+            attributes.put("liveSessionId", sid);
+            teacherSessions.computeIfAbsent(sid, key -> ConcurrentHashMap.newKeySet())
+                    .add(accessor.getSessionId());
+            messagingTemplate.convertAndSend("/topic/session/" + sid + "/teacher-status",
+                    (Object) Map.of("online", true));
+            log.info("教师连接课堂: sessionId={}, user={}", sid, username);
         }
-        // 教师连接时追踪
-        if ("TEACHER".equals(role)) {
-            List<String> sidHeaders = accessor.getNativeHeader("X-Session-Id");
-            if (sidHeaders != null && !sidHeaders.isEmpty()) {
-                Long sid = Long.valueOf(sidHeaders.get(0));
-                teacherSessions.computeIfAbsent(sid, k -> ConcurrentHashMap.newKeySet())
-                        .add(accessor.getSessionId());
-                messagingTemplate.convertAndSend("/topic/session/" + sid + "/teacher-status",
-                        (Object) Map.of("online", true));
-                log.info("教师连接课堂: sessionId={}, user={}", sid, username);
-            }
+        log.info("WS CONNECT: user={}, role=TEACHER", username);
+    }
+
+    private Map<String, Object> sessionAttributes(StompHeaderAccessor accessor) {
+        Map<String, Object> attributes = accessor.getSessionAttributes();
+        if (attributes == null) {
+            attributes = new HashMap<>();
+            accessor.setSessionAttributes(attributes);
         }
-        log.info("WS CONNECT: user={}, role={}", username, role);
+        return attributes;
     }
 
     @EventListener
@@ -127,20 +180,69 @@ public class WebSocketAuthInterceptor implements ChannelInterceptor {
 
     private void handleSend(StompHeaderAccessor accessor) {
         String dest = accessor.getDestination();
-        String role = (String) accessor.getSessionAttributes().get("role");
-        if (dest == null || role == null) return;
-        if ("STUDENT".equals(role) &&
-                (dest.contains("/interaction/create") || dest.contains("/interaction/close")
-                 || dest.contains("/qa/answer") || dest.contains("/hand/call") || dest.contains("/hand/dismiss")))
-            throw new IllegalArgumentException("学生无权执行此操作");
+        if (dest == null) throw new IllegalArgumentException("缺少消息目的地址");
+        String role = requireRole(accessor);
+        requireBoundSession(accessor, dest, APP_SESSION_DESTINATION);
+
+        List<Pattern> allowed = "STUDENT".equals(role)
+                ? STUDENT_SEND_DESTINATIONS
+                : TEACHER_SEND_DESTINATIONS;
+        if (allowed.stream().noneMatch(pattern -> pattern.matcher(dest).matches())) {
+            throw new IllegalArgumentException("当前身份无权发送到该目的地址");
+        }
     }
 
     private void handleSubscribe(StompHeaderAccessor accessor) {
         String dest = accessor.getDestination();
-        String role = (String) accessor.getSessionAttributes().get("role");
-        if (dest == null || role == null) return;
-        if ("STUDENT".equals(role) &&
-                (dest.contains("/stats") || dest.contains("/qa") || dest.contains("/students")))
-            throw new IllegalArgumentException("学生无权订阅此频道");
+        if (dest == null) throw new IllegalArgumentException("缺少订阅目的地址");
+        String role = requireRole(accessor);
+        Long sessionId = requireBoundSession(accessor, dest, TOPIC_SESSION_DESTINATION);
+        if ("STUDENT".equals(role)) {
+            String prefix = "/topic/session/" + sessionId;
+            String suffix = dest.substring(prefix.length());
+            if (!STUDENT_TOPIC_SUFFIXES.contains(suffix)) {
+                throw new IllegalArgumentException("学生无权订阅此频道");
+            }
+        }
+    }
+
+    private String requireRole(StompHeaderAccessor accessor) {
+        Map<String, Object> attributes = accessor.getSessionAttributes();
+        Object role = attributes != null ? attributes.get("role") : null;
+        if (!"TEACHER".equals(role) && !"STUDENT".equals(role)) {
+            throw new IllegalArgumentException("WebSocket 会话尚未认证");
+        }
+        return role.toString();
+    }
+
+    private Long requireBoundSession(StompHeaderAccessor accessor,
+                                     String destination,
+                                     Pattern destinationPattern) {
+        var matcher = destinationPattern.matcher(destination);
+        if (!matcher.matches()) {
+            throw new IllegalArgumentException("不允许访问该目的地址");
+        }
+        Long targetSessionId = parseSessionId(matcher.group(1));
+        Map<String, Object> attributes = accessor.getSessionAttributes();
+        Object boundValue = attributes != null ? attributes.get("liveSessionId") : null;
+        Long boundSessionId = toLong(boundValue);
+        if (!targetSessionId.equals(boundSessionId)) {
+            throw new IllegalArgumentException("无权访问其他课堂");
+        }
+        return targetSessionId;
+    }
+
+    private Long parseSessionId(String value) {
+        try {
+            return Long.valueOf(value);
+        } catch (RuntimeException e) {
+            throw new IllegalArgumentException("课堂 ID 无效");
+        }
+    }
+
+    private Long toLong(Object value) {
+        if (value instanceof Number number) return number.longValue();
+        if (value instanceof String text) return parseSessionId(text);
+        return null;
     }
 }

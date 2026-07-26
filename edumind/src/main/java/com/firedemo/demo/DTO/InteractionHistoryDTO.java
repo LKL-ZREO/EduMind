@@ -16,6 +16,7 @@ public class InteractionHistoryDTO {
     private String correctKey;
     private Integer timeLimit;
     private String status;
+    private String knowledgePoint;
     private String createdAt;
     // 统计摘要（教师端用）
     private Integer totalStudents;

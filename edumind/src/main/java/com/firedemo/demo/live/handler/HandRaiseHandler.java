@@ -13,7 +13,7 @@ import java.util.Map;
 
 /**
  * 举手队列 WebSocket 端点。
- * 学生身份从 STOMP 会话属性读取（CONNECT 阶段 JWT 验证后存储），防止冒用。
+ * 学生身份从 STOMP 会话属性读取（CONNECT 阶段课堂令牌验证后存储），防止冒用。
  */
 @Slf4j
 @Controller
@@ -56,11 +56,11 @@ public class HandRaiseHandler {
         }
     }
 
-    /** 从 STOMP 会话属性读取学生身份（CONNECT 阶段 JWT 验证后由 WebSocketAuthInterceptor 存储） */
+    /** 从 STOMP 会话属性读取学生身份。 */
     private static String[] resolveStudentIdentity(SimpMessageHeaderAccessor accessor) {
         Map<String, Object> attrs = accessor.getSessionAttributes();
         if (attrs == null) return new String[]{"unknown", "匿名"};
-        String studentId = String.valueOf(attrs.getOrDefault("userId", "unknown"));
+        String studentId = String.valueOf(attrs.getOrDefault("studentId", "unknown"));
         String studentName = String.valueOf(attrs.getOrDefault("username", "匿名"));
         return new String[]{studentId, studentName};
     }

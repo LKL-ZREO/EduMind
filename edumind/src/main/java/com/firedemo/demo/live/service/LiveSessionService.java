@@ -4,15 +4,17 @@ import com.firedemo.demo.DTO.*;
 import com.firedemo.demo.Entity.*;
 import com.firedemo.demo.common.exception.BusinessException;
 import com.firedemo.demo.common.exception.ErrorCode;
+import com.firedemo.demo.live.security.LiveSessionTokenService;
 import com.firedemo.demo.mapper.*;
-import com.firedemo.demo.utils.JwtUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
+import java.util.Map;
 import java.util.Optional;
 
 @Slf4j
@@ -25,10 +27,11 @@ public class LiveSessionService {
     private final ClassStudentMapper classStudentMapper;
     private final InteractionMapper interactionMapper;
     private final UserMapper userMapper;
-    private final JwtUtil jwtUtil;
+    private final LiveSessionTokenService liveSessionTokenService;
     private final LiveNotificationService liveNotificationService;
     private final HandRaiseService handRaiseService;
     private final StudentPresenceService presenceService;
+    private final SimpMessagingTemplate messagingTemplate;
 
     private static final String CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
     private static final SecureRandom RNG = new SecureRandom();
@@ -70,7 +73,8 @@ public class LiveSessionService {
 
         classStudentMapper.insertIgnore(session.getClassId(), dto.getStudentId(), dto.getStudentName(), "manual");
 
-        String token = jwtUtil.generateStudentToken(dto.getStudentId(), dto.getStudentName(), session.getId());
+        String token = liveSessionTokenService.issue(
+                dto.getStudentId(), dto.getStudentName(), session.getId());
         ClassInfo classInfo = classInfoMapper.selectById(session.getClassId());
         String teacherName = "";
         if (classInfo != null && classInfo.getTeacherId() != null) {
@@ -93,6 +97,11 @@ public class LiveSessionService {
         if (!session.getTeacherId().equals(teacherId))
             throw new BusinessException(ErrorCode.FORBIDDEN.getCode(), "无权结束此课堂");
         sessionMapper.endSession(sessionId);
+
+        // 通过 WebSocket 通知所有学生：课堂已结束
+        messagingTemplate.convertAndSend("/topic/session/" + sessionId + "/teacher-status",
+                (Object) Map.of("online", false, "sessionEnded", true));
+
         // 清理举手队列 + 在线状态
         handRaiseService.clear(sessionId);
         presenceService.clearSession(sessionId);
