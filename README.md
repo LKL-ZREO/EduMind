@@ -91,7 +91,7 @@ Query → Embedding(ONNX) → pgvector相似度  ─┐
 ```bash
 cd edumind
 cp .env.example .env
-# 编辑 .env，填入 DB_PASS、JWT_SECRET、OPENCLAW_API_KEY 等
+# 编辑 .env，填入 DB_PASS、LIVE_SESSION_TOKEN_SECRET、LLM_API_KEY 等
 ```
 
 ### 2. 启动基础设施
