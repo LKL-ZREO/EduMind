@@ -97,13 +97,15 @@ services:
       SPRING_DATASOURCE_PASSWORD: ${DB_PASS:?请设置 DB_PASS 环境变量或创建 .env 文件}
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: 6379
-      JWT_SECRET: ${JWT_SECRET:?请设置 JWT_SECRET 环境变量}
+      LIVE_SESSION_TOKEN_SECRET: ${LIVE_SESSION_TOKEN_SECRET:?请设置 LIVE_SESSION_TOKEN_SECRET 环境变量}
       ENCRYPT_AES_KEY: ${ENCRYPT_AES_KEY:?请设置 ENCRYPT_AES_KEY 环境变量}
       MCP_API_KEY: ${MCP_API_KEY:-change-me}
-      LANGCHAIN4J_OPENAI_BASE_URL: http://host.docker.internal:18789/v1
-      LANGCHAIN4J_OPENAI_API_KEY: ${OPENCLAW_API_KEY:?请设置 OPENCLAW_API_KEY 环境变量}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.moonshot.cn/v1}
+      LLM_API_KEY: ${LLM_API_KEY:?请设置 LLM_API_KEY 环境变量}
       ONEBOT_HTTP_URL: http://host.docker.internal:3000
       ONEBOT_HTTP_TOKEN: ${ONEBOT_TOKEN:-change-me}
+      ONEBOT_WS_URL: ${ONEBOT_WS_URL:-ws://host.docker.internal:3001}
+      ONEBOT_WS_TOKEN: ${ONEBOT_WS_TOKEN:-change-me}
       AI_MODEL_DIR: ${AI_MODEL_DIR:-/app/models}
       LOG_DIR: /root/.edumind/logs
       APP_CORS_ALLOWED_ORIGINS: ${APP_CORS_ALLOWED_ORIGINS:-https://${DOMAIN:-localhost}}

@@ -54,13 +54,13 @@ groups:
 
       # === AI 对话慢 ===
       - alert: AIChatSlow
-        expr: histogram_quantile(0.95, sum(rate(openclaw_chat_seconds_bucket[5m])) by (le)) > 30
+        expr: histogram_quantile(0.95, sum(rate(llm_chat_seconds_bucket[5m])) by (le)) > 30
         for: 5m
         labels:
           severity: warning
         annotations:
           summary: "AI 对话 p95 延迟超过 30 秒"
-          description: "p95: {{ $value }}s — OpenClaw 可能过载或模型响应变慢"
+          description: "p95: {{ $value }}s — LLM API 可能过载或模型响应变慢"
 
       # === Embedding 推理慢 ===
       - alert: EmbeddingSlow

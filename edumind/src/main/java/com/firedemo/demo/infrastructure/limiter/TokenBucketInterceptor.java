@@ -48,8 +48,17 @@ public class TokenBucketInterceptor implements HandlerInterceptor {
         // 按接口路径查配置，无匹配则用默认配置
         BucketConfig.Rule rule = resolveRule(uri, request);
 
-        if (rateLimiter.tryConsume(bucketKey, rule.getCapacity(),
-                rule.getRefillPerMinute(), TOKENS_PER_REQUEST)) {
+        boolean allowed;
+        try {
+            allowed = rateLimiter.tryConsume(bucketKey, rule.getCapacity(),
+                    rule.getRefillPerMinute(), TOKENS_PER_REQUEST);
+        } catch (RuntimeException e) {
+            log.warn("Token bucket rate limiter unavailable, fail open. key={}, uri={}, error={}",
+                    bucketKey, uri, e.getMessage());
+            return true;
+        }
+
+        if (allowed) {
             return true;
         }
 

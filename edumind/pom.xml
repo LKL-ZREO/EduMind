@@ -28,7 +28,7 @@
     </scm>
     <properties>
         <java.version>21</java.version>
-        <langchain4j.version>1.13.0</langchain4j.version>
+        <langchain4j.version>1.15.1</langchain4j.version>
         <spring-boot.version>4.0.4</spring-boot.version>
     </properties>
 
@@ -72,6 +72,11 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-security</artifactId>
+        </dependency>
+        <!-- 教师 Web 认证：Redis-backed HttpSession -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-session-data-redis</artifactId>
         </dependency>
         <!-- 专用 MyBatis-Plus（必须这个！） -->
         <dependency>
@@ -152,7 +157,7 @@
             <artifactId>caffeine</artifactId>
         </dependency>
 
-        <!-- JWT 依赖 -->
+        <!-- 学生课堂范围令牌（不用于教师 Web 登录） -->
         <dependency>
             <groupId>io.jsonwebtoken</groupId>
             <artifactId>jjwt-api</artifactId>
@@ -171,12 +176,7 @@
             <scope>runtime</scope>
         </dependency>
 
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-devtools</artifactId>
-            <scope>runtime</scope>
-            <optional>true</optional>
-        </dependency>
+        <!-- DevTools 已移除：导致 Entity 类在 RestartClassLoader 和 app ClassLoader 间冲突 -->
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
@@ -240,7 +240,14 @@
             <version>3.0.0</version>
         </dependency>
 
-        <!-- LangChain4j OpenAI 模块（OpenClaw Gateway 兼容，含流式模型） -->
+        <!-- LangChain4j 核心（AiServices / @Tool / @MemoryId / TokenStream / ChatMemory） -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j</artifactId>
+            <version>${langchain4j.version}</version>
+        </dependency>
+
+        <!-- LangChain4j OpenAI（ChatModel / StreamingChatModel，DeepSeek 兼容） -->
         <dependency>
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j-open-ai</artifactId>
@@ -292,6 +299,11 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-test</artifactId>
+            <scope>test</scope>
+        </dependency>
 
         <!-- Testcontainers — 集成测试用 PostgreSQL + Redis 容器 -->
         <dependency>
@@ -310,6 +322,13 @@
             <groupId>com.redis.testcontainers</groupId>
             <artifactId>testcontainers-redis</artifactId>
             <version>1.6.4</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- JUnit Platform Launcher（IntelliJ 测试运行器必需） -->
+        <dependency>
+            <groupId>org.junit.platform</groupId>
+            <artifactId>junit-platform-launcher</artifactId>
             <scope>test</scope>
         </dependency>
 
