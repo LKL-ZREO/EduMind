@@ -1,16 +1,17 @@
 package com.firedemo.demo.infrastructure.pdf;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.firedemo.demo.config.properties.VisionPdfProperties;
+import com.firedemo.demo.vision.VisualAsset;
+import com.firedemo.demo.vision.VisualAssetService;
+import com.firedemo.demo.vision.VisionModelClient;
+import com.firedemo.demo.vision.VisionTask;
+import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.rendering.PDFRenderer;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.RestClient;
 
-import jakarta.annotation.PreDestroy;
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
@@ -18,11 +19,8 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.Comparator;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -30,30 +28,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/**
- * 多模态 LLM PDF 解析器 — 对标 gptpdf / Zerox 范式。
- *
- * <h3>直连视觉模型 API（绕过 OpenClaw）</h3>
- * <p>
- * OpenClaw 无法在文本模型和视觉模型间自动路由，所以这里直连 Kimi API：
- * <pre>
- *   PDF 页面 → PNG base64 → POST https://api.moonshot.cn/v1/chat/completions
- *                           → model: kimi-k2.5
- *                           → Markdown
- *   (中国站 Key 用 .cn, 海外站 Key 用 .ai, 通过 VISION_PDF_API_URL 环境变量覆盖)
- * </pre>
- *
- * <h3>两种处理模式</h3>
- * <pre>
- *   并发模式（默认，maintainFormat=false）：
- *     N 页并行发给 Kimi，Semaphore(concurrency) 限流
- *     10 页 PDF ~3s（vs 串行 ~30s）
- *
- *   跨页上下文模式（maintainFormat=true）：
- *     逐页串行，每页传入前一页 Markdown 末尾 N 字符
- *     牺牲速度换跨页表格/公式连贯性
- * </pre>
- */
 @Slf4j
 @Component
 public class VisionPdfParser {
@@ -61,276 +35,163 @@ public class VisionPdfParser {
     private static final int RENDER_DPI = 200;
     private static final int RETRY_MAX = 2;
     private static final long RETRY_DELAY_BASE_MS = 1500L;
-    private static final int LLM_TEMPERATURE = 1;
-    private static final int LLM_MAX_TOKENS = 8192;
 
-    private final RestClient restClient;
-    private final ObjectMapper objectMapper;
-    private final String apiBaseUrl;
-    private final String apiKey;
-    private final String model;
-    private final int concurrency;
-    private final boolean maintainFormat;
-    private final int maxPdfPages;
-    private final int contextTailChars;
+    private final VisualAssetService visualAssetService;
+    private final VisionModelClient visionModelClient;
+    private final VisionPdfProperties properties;
     private final ExecutorService executor;
 
-    public VisionPdfParser(ObjectMapper objectMapper,
-                           @Value("${vision-pdf.api-base-url:https://api.moonshot.ai/v1}") String apiBaseUrl,
-                           @Value("${vision-pdf.api-key:}") String apiKey,
-                           @Value("${vision-pdf.model:kimi-k2.5}") String model,
-                           @Value("${vision-pdf.concurrency:10}") int concurrency,
-                           @Value("${vision-pdf.maintain-format:false}") boolean maintainFormat,
-                           @Value("${vision-pdf.max-pdf-pages:50}") int maxPdfPages,
-                           @Value("${vision-pdf.context-tail-chars:500}") int contextTailChars) {
-        this.objectMapper = objectMapper;
-        this.apiBaseUrl = apiBaseUrl;
-        this.apiKey = apiKey;
-        this.model = model;
-        this.concurrency = concurrency;
-        this.maintainFormat = maintainFormat;
-        this.maxPdfPages = maxPdfPages;
-        this.contextTailChars = contextTailChars;
-
-        this.restClient = RestClient.builder()
-                .baseUrl(apiBaseUrl)
-                .defaultHeader("Authorization", "Bearer " + apiKey)
-                .defaultHeader("Content-Type", MediaType.APPLICATION_JSON_VALUE)
-                .build();
-
+    public VisionPdfParser(VisualAssetService visualAssetService,
+                           VisionModelClient visionModelClient,
+                           VisionPdfProperties properties) {
+        this.visualAssetService = visualAssetService;
+        this.visionModelClient = visionModelClient;
+        this.properties = properties;
         this.executor = Executors.newVirtualThreadPerTaskExecutor();
-
-        log.info("VisionPdfParser 初始化: api={}, model={}, concurrency={}, maintainFormat={}, maxPages={}",
-                apiBaseUrl, model, concurrency, maintainFormat, maxPdfPages);
+        log.info("VisionPdfParser initialized: concurrency={}, maintainFormat={}, maxPages={}",
+                properties.getConcurrency(), properties.isMaintainFormat(), properties.getMaxPdfPages());
     }
 
-    // ======================== 公开 API ========================
-
-    /**
-     * 解析 PDF 文件，返回 Markdown。
-     */
     public String parse(Path pdfPath) {
-        if (!Files.exists(pdfPath)) {
-            log.error("PDF 文件不存在: {}", pdfPath);
+        if (pdfPath == null || !Files.exists(pdfPath)) {
+            log.error("PDF file does not exist: {}", pdfPath);
             return "";
         }
 
-        long t0 = System.currentTimeMillis();
-
-        try (PDDocument doc = Loader.loadPDF(pdfPath.toFile())) {
-            int totalPages = doc.getNumberOfPages();
-            log.info("Vision PDF 开始: {} ({} 页, concurrency={}, maintainFormat={})",
-                    pdfPath.getFileName(), totalPages, concurrency, maintainFormat);
-
-            if (totalPages > maxPdfPages) {
-                log.warn("PDF 页数({})超过上限({})，截断处理", totalPages, maxPdfPages);
-                totalPages = maxPdfPages;
-            }
-
-            PDFRenderer renderer = new PDFRenderer(doc);
-
-            // 1) 预渲染所有页面为 base64
+        long startedAt = System.currentTimeMillis();
+        try (PDDocument document = Loader.loadPDF(pdfPath.toFile())) {
+            int totalPages = Math.min(document.getNumberOfPages(), properties.getMaxPdfPages());
+            PDFRenderer renderer = new PDFRenderer(document);
             List<PageImage> pages = new ArrayList<>(totalPages);
-            for (int i = 0; i < totalPages; i++) {
-                BufferedImage image = renderer.renderImageWithDPI(i, RENDER_DPI);
-                String base64 = encodeToBase64Png(image);
-                pages.add(new PageImage(i + 1, base64));
+
+            for (int index = 0; index < totalPages; index++) {
+                BufferedImage image = renderer.renderImageWithDPI(index, RENDER_DPI);
+                pages.add(new PageImage(index + 1, encodeToPng(image)));
             }
 
-            // 2) 按模式处理
-            List<String> results;
-            if (maintainFormat) {
-                results = processSequentialWithContext(pages);
-            } else {
-                results = processConcurrent(pages);
-            }
-
-            String result = String.join("\n\n", results);
-            long elapsed = System.currentTimeMillis() - t0;
-            log.info("Vision PDF 完成: {} → {} 字符, {} 页, 耗时 {}ms",
-                    pdfPath.getFileName(), result.length(), totalPages, elapsed);
-            return result;
-
+            List<String> results = properties.isMaintainFormat()
+                    ? processSequentialWithContext(pages)
+                    : processConcurrent(pages);
+            String markdown = String.join("\n\n", results);
+            log.info("Vision PDF completed: file={}, pages={}, chars={}, elapsedMs={}",
+                    pdfPath.getFileName(), totalPages, markdown.length(),
+                    System.currentTimeMillis() - startedAt);
+            return markdown;
         } catch (IOException e) {
-            log.error("Vision PDF 解析失败: {}", e.getMessage(), e);
+            log.error("Vision PDF parsing failed: {}", pdfPath, e);
             return "";
         }
     }
-
-    // ======================== 并发模式 ========================
 
     List<String> processConcurrent(List<PageImage> pages) {
         int total = pages.size();
-        Semaphore semaphore = new Semaphore(concurrency);
+        Semaphore semaphore = new Semaphore(properties.getConcurrency());
+        AtomicInteger completed = new AtomicInteger();
         List<CompletableFuture<IndexedResult>> futures = new ArrayList<>();
-        AtomicInteger completed = new AtomicInteger(0);
 
         for (PageImage page : pages) {
-            CompletableFuture<IndexedResult> f = CompletableFuture.supplyAsync(() -> {
+            futures.add(CompletableFuture.supplyAsync(() -> {
                 semaphore.acquireUninterruptibly();
                 try {
-                    String md = callVisionLLM(List.of(page.base64), page.pageNum, page.pageNum, total, null);
+                    String markdown = analyzePage(page, total, null);
                     int done = completed.incrementAndGet();
                     if (done % 5 == 0 || done == total) {
-                        log.info("Vision PDF 并发进度: {}/{} 页完成", done, total);
+                        log.info("Vision PDF progress: {}/{}", done, total);
                     }
-                    return new IndexedResult(page.pageNum, md);
+                    return new IndexedResult(page.pageNumber(), markdown);
                 } finally {
                     semaphore.release();
                 }
-            }, executor);
-            futures.add(f);
+            }, executor));
         }
 
         return futures.stream()
                 .map(CompletableFuture::join)
                 .filter(Objects::nonNull)
-                .sorted(Comparator.comparingInt(r -> r.index))
-                .map(r -> r.markdown)
+                .sorted(Comparator.comparingInt(IndexedResult::index))
+                .map(IndexedResult::markdown)
                 .toList();
     }
 
-    // ======================== 跨页上下文模式 ========================
-
     List<String> processSequentialWithContext(List<PageImage> pages) {
-        int total = pages.size();
         List<String> results = new ArrayList<>();
-        String prevTail = null;
+        String previousTail = null;
 
         for (PageImage page : pages) {
-            String md = callVisionLLM(
-                    List.of(page.base64), page.pageNum, page.pageNum, total, prevTail);
-            results.add(md);
-            prevTail = (md != null && md.length() > contextTailChars)
-                    ? md.substring(md.length() - contextTailChars)
-                    : md;
-            log.info("Vision PDF 串行进度: {}/{} 页完成 (contextTail={}chars)",
-                    page.pageNum, total, prevTail != null ? prevTail.length() : 0);
+            String markdown = analyzePage(page, pages.size(), previousTail);
+            results.add(markdown);
+            previousTail = markdown.length() > properties.getContextTailChars()
+                    ? markdown.substring(markdown.length() - properties.getContextTailChars())
+                    : markdown;
         }
         return results;
     }
 
-    // ======================== Vision LLM 调用（直连 Kimi / 其他 OpenAI 兼容 API） ========================
-
-    /**
-     * 调用视觉模型 API，支持重试。
-     * <p>
-     * 直连模式不带 "openclaw/" 前缀，model 直接传给 API。
-     */
-    String callVisionLLM(List<String> base64Images, int fromPage, int toPage, int totalPages,
-                         String priorContext) {
-        List<Map<String, Object>> contentParts = new ArrayList<>();
-        for (String b64 : base64Images) {
-            contentParts.add(Map.of(
-                    "type", "image_url",
-                    "image_url", Map.of("url", "data:image/png;base64," + b64, "detail", "high")
-            ));
-        }
-        contentParts.add(Map.of("type", "text", "text", buildPrompt(fromPage, toPage, totalPages, priorContext)));
-
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("model", model);  // 直连，不加 openclaw/ 前缀
-        body.put("messages", List.of(Map.of("role", "user", "content", contentParts)));
-        body.put("temperature", LLM_TEMPERATURE);
-        body.put("max_tokens", LLM_MAX_TOKENS);
-
+    private String analyzePage(PageImage page, int totalPages, String previousTail) {
+        VisualAsset asset = visualAssetService.importBytes(page.png(), "image/png");
+        String prompt = buildPrompt(page.pageNumber(), totalPages, previousTail);
         Exception lastError = null;
+
         for (int attempt = 1; attempt <= RETRY_MAX; attempt++) {
             try {
-                @SuppressWarnings("unchecked")
-                Map<String, Object> response = restClient.post()
-                        .uri("/chat/completions")
-                        .body(body)
-                        .retrieve()
-                        .body(Map.class);
-
-                if (response == null) {
-                    lastError = new RuntimeException("空响应");
-                    continue;
-                }
-
-                @SuppressWarnings("unchecked")
-                List<Map<String, Object>> choices = (List<Map<String, Object>>) response.get("choices");
-                if (choices == null || choices.isEmpty()) {
-                    lastError = new RuntimeException("空 choices: " + response.keySet());
-                    continue;
-                }
-
-                @SuppressWarnings("unchecked")
-                Map<String, Object> msg = (Map<String, Object>) choices.get(0).get("message");
-                String content = (String) msg.get("content");
-
-                String finishReason = (String) choices.get(0).get("finish_reason");
-                if (finishReason != null && !"stop".equals(finishReason)) {
-                    log.warn("Vision LLM finish_reason={} (页{}), content_len={}",
-                            finishReason, fromPage, content != null ? content.length() : 0);
-                }
-
-                return content != null ? content : "";
-
+                return visionModelClient.analyze(asset, VisionTask.OCR, prompt).summary();
             } catch (Exception e) {
                 lastError = e;
-                if (attempt < RETRY_MAX) {
-                    long delay = attempt * RETRY_DELAY_BASE_MS;
-                    log.warn("Vision LLM 失败 (attempt={}/{}): {}, {}ms 后重试",
-                            attempt, RETRY_MAX, e.getMessage(), delay);
-                    try { Thread.sleep(delay); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); break; }
-                }
+                if (attempt < RETRY_MAX) sleep(attempt * RETRY_DELAY_BASE_MS);
             }
         }
 
-        log.error("Vision LLM 调用失败 (页{}): {}",
-                fromPage, lastError != null ? lastError.getMessage() : "未知错误");
+        log.error("Vision PDF page analysis failed: page={}, error={}",
+                page.pageNumber(), lastError != null ? lastError.getMessage() : "unknown");
         return "";
     }
 
-    // ======================== Prompt ========================
-
-    private String buildPrompt(int fromPage, int toPage, int totalPages, String priorContext) {
-        StringBuilder sb = new StringBuilder();
-
-        if (priorContext != null && !priorContext.isEmpty()) {
-            sb.append("前一页 Markdown 末尾（仅供参考，用于保持格式连贯）：\n");
-            sb.append("```markdown\n").append(priorContext).append("\n```\n\n");
+    private String buildPrompt(int pageNumber, int totalPages, String previousTail) {
+        StringBuilder prompt = new StringBuilder();
+        if (previousTail != null && !previousTail.isBlank()) {
+            prompt.append("Previous page Markdown tail, provided only for cross-page continuity:\n")
+                    .append(previousTail)
+                    .append("\n\n");
         }
-
-        if (fromPage == toPage) {
-            sb.append(String.format("请将这张 PDF 页面（第 %d/%d 页）转为结构良好的 Markdown", fromPage, totalPages));
-        } else {
-            sb.append(String.format("请将以上 %d 张 PDF 页面（第 %d-%d 页，共 %d 页）转为 Markdown",
-                    toPage - fromPage + 1, fromPage, toPage, totalPages));
-        }
-
-        sb.append("""
-
-
-                要求：
-                1. **保留文档结构** — 标题用 # / ## / ### 层级，段落间空行
-                2. **表格** — 必须用 Markdown 表格（| col1 | col2 |），不省略行列，不转为图片描述
-                3. **数学公式** — 行内公式用 $...$，独立公式用 $$...$$（LaTeX 格式）
-                4. **代码块** — 用 ``` 包裹并标注语言
-                5. **完整保留内容** — 正文、脚注、页眉标题都要保留，不遗漏
-                6. **图片描述** — 如果页面中有图片/图表，用 <!-- 图片/图表描述 --> 标注
-                7. 严禁在 Markdown 前后输出任何解释、说明、问候语或总结性文字
-                8. 输出必须以 Markdown 语法开头，不要任何前缀""");
-        return sb.toString();
+        prompt.append("Convert this PDF page (page ")
+                .append(pageNumber)
+                .append(" of ")
+                .append(totalPages)
+                .append(") into well-structured Markdown.\n")
+                .append("""
+                        Requirements:
+                        1. Preserve heading, paragraph, and list structure.
+                        2. Convert tables to complete Markdown tables without dropping rows or columns.
+                        3. Use LaTeX for mathematical formulas.
+                        4. Use fenced code blocks with language identifiers for code.
+                        5. Describe images and charts in HTML comments.
+                        6. Return only the converted content, without commentary or a summary.
+                        """);
+        return prompt.toString();
     }
 
-    // ======================== 工具方法 ========================
+    byte[] encodeToPng(BufferedImage image) throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        ImageIO.write(image, "png", output);
+        return output.toByteArray();
+    }
+
+    private void sleep(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
 
     @PreDestroy
     public void shutdown() {
         executor.close();
-        log.info("VisionPdfParser 已关闭");
     }
 
-    String encodeToBase64Png(BufferedImage image) throws IOException {
-        ByteArrayOutputStream bos = new ByteArrayOutputStream();
-        ImageIO.write(image, "png", bos);
-        return Base64.getEncoder().encodeToString(bos.toByteArray());
+    record PageImage(int pageNumber, byte[] png) {
     }
 
-    record PageImage(int pageNum, String base64) {}
-
-    record IndexedResult(int index, String markdown) {}
+    record IndexedResult(int index, String markdown) {
+    }
 }

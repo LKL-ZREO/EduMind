@@ -109,6 +109,30 @@ public class FileStorageServiceImpl implements FileStorageService {
     }
 
     @Override
+    public String storeBytes(byte[] content, String storageKey, String contentType) {
+        if (content == null || content.length == 0 || storageKey == null || storageKey.isBlank()) {
+            throw new BusinessException(ErrorCode.FILE_UPLOAD_ERROR);
+        }
+
+        try {
+            Path uploadRoot = Paths.get(uploadDir).toAbsolutePath().normalize();
+            Files.createDirectories(uploadRoot);
+            Path targetPath = uploadRoot.resolve(storageKey).normalize();
+            if (!targetPath.startsWith(uploadRoot)) {
+                throw new SecurityException("Path traversal attempt detected");
+            }
+            Files.createDirectories(targetPath.getParent());
+            Files.write(targetPath, content);
+            log.info("Binary file stored: key={}, size={}, contentType={}",
+                    storageKey, content.length, contentType);
+            return storageKey;
+        } catch (IOException e) {
+            log.error("Failed to store binary file: key={}", storageKey, e);
+            throw new BusinessException(ErrorCode.FILE_UPLOAD_ERROR);
+        }
+    }
+
+    @Override
     public void deleteFile(String filePath) {
         try {
             Path path = validatePath(filePath);
@@ -148,6 +172,16 @@ public class FileStorageServiceImpl implements FileStorageService {
             }
         } catch (IOException e) {
             log.error("读取文件失败: {}", filePath, e);
+            throw new BusinessException(ErrorCode.FILE_READ_ERROR);
+        }
+    }
+
+    @Override
+    public byte[] readFileBytes(String filePath) {
+        try {
+            return Files.readAllBytes(validatePath(filePath));
+        } catch (IOException e) {
+            log.error("Failed to read binary file: {}", filePath, e);
             throw new BusinessException(ErrorCode.FILE_READ_ERROR);
         }
     }

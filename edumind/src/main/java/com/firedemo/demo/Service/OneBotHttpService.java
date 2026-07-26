@@ -11,7 +11,11 @@ import java.util.Map;
 
 /**
  * OneBot HTTP 服务 - 直接调用 Napcat 接口发送消息
+ *
+ * @deprecated 使用 {@link com.firedemo.demo.infrastructure.onebot.OneBotWebSocketClient} 替代。
+ *             新架构下所有 QQ 消息收发统一走 WebSocket 双向连接，不再需要 HTTP 通道。
  */
+@Deprecated
 @Service
 @RequiredArgsConstructor
 @Slf4j
