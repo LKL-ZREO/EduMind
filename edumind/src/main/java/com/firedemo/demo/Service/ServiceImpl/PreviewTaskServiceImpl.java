@@ -161,7 +161,9 @@ public class PreviewTaskServiceImpl implements PreviewTaskService {
             try {
                 questions = objectMapper.readValue(task.getQuestionsJson(),
                         new TypeReference<List<PreviewTaskDTO.QuestionItem>>() {});
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                log.warn("试题 JSON 解析失败 taskId={}: {}", task.getId(), e.getMessage());
+            }
         }
 
         return PreviewTaskDTO.builder()

@@ -7,7 +7,7 @@ import com.firedemo.demo.Entity.Submission;
 import com.firedemo.demo.Entity.SubmissionError;
 import com.firedemo.demo.Entity.TeacherKnowledge;
 import com.firedemo.demo.Service.FileStorageService;
-import com.firedemo.demo.Service.OneBotHttpService;
+import com.firedemo.demo.infrastructure.onebot.OneBotWebSocketClient;
 import com.firedemo.demo.common.enums.SubmissionStatus;
 import com.firedemo.demo.Service.OpenClawService;
 import com.firedemo.demo.agent.workflow.GradingWorkflow;
@@ -44,7 +44,7 @@ public class GradingStreamConsumer extends AbstractStreamConsumer {
     private final SubmissionMapper submissionMapper;
     private final FileStorageService fileStorageService;
     private final OpenClawService openClawService;
-    private final OneBotHttpService oneBotHttpService;
+    private final OneBotWebSocketClient oneBot;
     private final TeacherKnowledgeMapper teacherKnowledgeMapper;
     private final SubmissionErrorMapper submissionErrorMapper;
     private final HomeworkTaskMapper taskMapper;
@@ -75,7 +75,7 @@ public class GradingStreamConsumer extends AbstractStreamConsumer {
                                   SubmissionMapper submissionMapper,
                                   FileStorageService fileStorageService,
                                   OpenClawService openClawService,
-                                  OneBotHttpService oneBotHttpService,
+                                  OneBotWebSocketClient oneBot,
                                   TeacherKnowledgeMapper teacherKnowledgeMapper,
                                   SubmissionErrorMapper submissionErrorMapper,
                                   HomeworkTaskMapper taskMapper,
@@ -91,7 +91,7 @@ public class GradingStreamConsumer extends AbstractStreamConsumer {
         this.submissionMapper = submissionMapper;
         this.fileStorageService = fileStorageService;
         this.openClawService = openClawService;
-        this.oneBotHttpService = oneBotHttpService;
+        this.oneBot = oneBot;
         this.teacherKnowledgeMapper = teacherKnowledgeMapper;
         this.submissionErrorMapper = submissionErrorMapper;
         this.taskMapper = taskMapper;
@@ -257,7 +257,7 @@ public class GradingStreamConsumer extends AbstractStreamConsumer {
         if (evaluation.getTotalScore() != null && evaluation.getTotalScore() < 60) {
             String qq = studentQqBindingMapper.selectQqByStudentId(submission.getStudentId());
             if (qq != null) {
-                oneBotHttpService.sendPrivateMessage(qq, String.format(
+                oneBot.sendPrivateMessage(qq, String.format(
                         "同学你好，你的作业「%s」得分 %d 分，建议多向老师或机器人提问。",
                         submission.getAssignmentName(), evaluation.getTotalScore()));
             }

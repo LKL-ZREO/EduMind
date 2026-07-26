@@ -1,13 +1,19 @@
 package com.firedemo.demo.Controller;
 
 import com.firedemo.demo.Entity.ClassInfo;
+import com.firedemo.demo.Entity.HomeworkDraft;
+import com.firedemo.demo.Entity.HomeworkDraftQuestion;
 import com.firedemo.demo.Entity.HomeworkTask;
+import com.firedemo.demo.Entity.QuestionBankItem;
 import com.firedemo.demo.Entity.Submission;
 import com.firedemo.demo.Service.ClassService;
 import com.firedemo.demo.Service.HomeworkTaskService;
 import com.firedemo.demo.Service.SubmissionService;
 import com.firedemo.demo.Service.TaskReminderService;
 import com.firedemo.demo.common.result.Result;
+import com.firedemo.demo.mapper.HomeworkDraftMapper;
+import com.firedemo.demo.mapper.HomeworkDraftQuestionMapper;
+import com.firedemo.demo.mapper.QuestionBankItemMapper;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -16,6 +22,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
@@ -34,6 +41,9 @@ public class TaskController {
     private final SubmissionService submissionService;
     private final ClassService classService;
     private final TaskReminderService taskReminderService;
+    private final HomeworkDraftMapper draftMapper;
+    private final HomeworkDraftQuestionMapper draftQuestionMapper;
+    private final QuestionBankItemMapper questionBankItemMapper;
 
     /**
      * 创建作业 — 需是该班级的教师
@@ -62,6 +72,157 @@ public class TaskController {
         taskReminderService.scheduleReminders(task.getId());
 
         return Result.success(task);
+    }
+
+    @GetMapping("/drafts")
+    public Result<List<DraftResponse>> listDrafts() {
+        Long userId = getCurrentUserId();
+        if (userId == null) return Result.error(401, "Unauthorized");
+        return Result.success(draftMapper.selectByTeacherId(userId).stream()
+                .map(this::toDraftResponse)
+                .toList());
+    }
+
+    @GetMapping("/drafts/{id}")
+    public Result<DraftResponse> getDraft(@PathVariable Long id) {
+        Long userId = getCurrentUserId();
+        if (userId == null) return Result.error(401, "Unauthorized");
+        HomeworkDraft draft = draftMapper.selectById(id);
+        if (draft == null) return Result.error(404, "Draft not found");
+        if (!userId.equals(draft.getTeacherId())) return Result.error(403, "Forbidden");
+        return Result.success(toDraftResponse(draft));
+    }
+
+    @PostMapping("/drafts")
+    @Transactional(rollbackFor = Exception.class)
+    public Result<DraftResponse> createDraft(@RequestBody SaveDraftRequest req) {
+        Long userId = getCurrentUserId();
+        if (userId == null) return Result.error(401, "Unauthorized");
+
+        HomeworkDraft draft = new HomeworkDraft();
+        applyDraftRequest(draft, req);
+        draft.setTeacherId(userId);
+        draft.setStatus("draft");
+        draft.setCreatedAt(LocalDateTime.now());
+        draft.setUpdatedAt(LocalDateTime.now());
+        draftMapper.insert(draft);
+        syncDraftQuestions(draft.getId(), userId, req.getQuestions());
+
+        return Result.success(toDraftResponse(draftMapper.selectById(draft.getId())));
+    }
+
+    @PutMapping("/drafts/{id}")
+    @Transactional(rollbackFor = Exception.class)
+    public Result<DraftResponse> updateDraft(@PathVariable Long id, @RequestBody SaveDraftRequest req) {
+        Long userId = getCurrentUserId();
+        if (userId == null) return Result.error(401, "Unauthorized");
+        HomeworkDraft draft = draftMapper.selectById(id);
+        if (draft == null) return Result.error(404, "Draft not found");
+        if (!userId.equals(draft.getTeacherId())) return Result.error(403, "Forbidden");
+
+        applyDraftRequest(draft, req);
+        draft.setUpdatedAt(LocalDateTime.now());
+        draftMapper.updateById(draft);
+        syncDraftQuestions(draft.getId(), userId, req.getQuestions());
+
+        return Result.success(toDraftResponse(draftMapper.selectById(draft.getId())));
+    }
+
+    @DeleteMapping("/drafts/{id}")
+    @Transactional(rollbackFor = Exception.class)
+    public Result<Void> deleteDraft(@PathVariable Long id) {
+        Long userId = getCurrentUserId();
+        if (userId == null) return Result.error(401, "Unauthorized");
+        HomeworkDraft draft = draftMapper.selectById(id);
+        if (draft == null) return Result.success(null);
+        if (!userId.equals(draft.getTeacherId())) return Result.error(403, "Forbidden");
+        draftMapper.deleteById(id);
+        return Result.success(null);
+    }
+
+    @GetMapping("/questions")
+    public Result<List<DraftQuestionDTO>> searchQuestionBank(@RequestParam(required = false) String keyword) {
+        Long userId = getCurrentUserId();
+        if (userId == null) return Result.error(401, "Unauthorized");
+        return Result.success(questionBankItemMapper.searchByTeacher(userId, keyword).stream()
+                .map(this::toQuestionDTO)
+                .toList());
+    }
+
+    @PostMapping("/questions")
+    public Result<DraftQuestionDTO> createQuestion(@RequestBody DraftQuestionDTO req) {
+        Long userId = getCurrentUserId();
+        if (userId == null) return Result.error(401, "Unauthorized");
+        QuestionBankItem item = upsertQuestion(userId, req);
+        return Result.success(toQuestionDTO(item));
+    }
+
+    @PutMapping("/questions/{id}")
+    public Result<DraftQuestionDTO> updateQuestion(@PathVariable Long id, @RequestBody DraftQuestionDTO req) {
+        Long userId = getCurrentUserId();
+        if (userId == null) return Result.error(401, "Unauthorized");
+        QuestionBankItem item = questionBankItemMapper.selectById(id);
+        if (item == null) return Result.error(404, "Question not found");
+        if (!userId.equals(item.getTeacherId())) return Result.error(403, "Forbidden");
+        req.setId(id);
+        return Result.success(toQuestionDTO(upsertQuestion(userId, req)));
+    }
+
+    @DeleteMapping("/questions/{id}")
+    public Result<Void> deleteQuestion(@PathVariable Long id) {
+        Long userId = getCurrentUserId();
+        if (userId == null) return Result.error(401, "Unauthorized");
+        QuestionBankItem item = questionBankItemMapper.selectById(id);
+        if (item == null) return Result.success(null);
+        if (!userId.equals(item.getTeacherId())) return Result.error(403, "Forbidden");
+        questionBankItemMapper.deleteById(id);
+        return Result.success(null);
+    }
+
+    @PostMapping("/drafts/{id}/publish")
+    @Transactional(rollbackFor = Exception.class)
+    public Result<List<HomeworkTask>> publishDraft(@PathVariable Long id, @RequestBody PublishDraftRequest req) {
+        Long userId = getCurrentUserId();
+        if (userId == null) return Result.error(401, "Unauthorized");
+        HomeworkDraft draft = draftMapper.selectById(id);
+        if (draft == null) return Result.error(404, "Draft not found");
+        if (!userId.equals(draft.getTeacherId())) return Result.error(403, "Forbidden");
+        if (req.getClassIds() == null || req.getClassIds().isEmpty()) {
+            return Result.error(400, "classIds is required");
+        }
+
+        String taskName = blankToDefault(req.getTaskName(), draft.getTaskName());
+        if (taskName == null || taskName.isBlank()) return Result.error(400, "taskName is required");
+        String description = buildDescriptionFromDraft(draft);
+        if (description.isBlank()) return Result.error(400, "questions are required");
+
+        List<HomeworkTask> created = new ArrayList<>();
+        for (Long classId : req.getClassIds()) {
+            ClassInfo classInfo = classService.getClassById(classId);
+            if (!userId.equals(classInfo.getTeacherId())) return Result.error(403, "Forbidden");
+
+            HomeworkTask task = new HomeworkTask();
+            task.setClassId(classId);
+            task.setTaskName(taskName);
+            task.setDescription(description);
+            task.setDeadline(req.getDeadline() != null ? req.getDeadline() : draft.getDeadline());
+            task.setAllowLate(req.getAllowLate() != null ? req.getAllowLate() : defaultBool(draft.getAllowLate(), true));
+            task.setLatePenalty(req.getLatePenalty() != null ? req.getLatePenalty() : defaultInt(draft.getLatePenalty(), 0));
+            task.setStatus("active");
+            task.setCreatedBy(userId);
+            task.setCreatedAt(LocalDateTime.now());
+            task.setUpdatedAt(LocalDateTime.now());
+            taskService.create(task);
+            created.add(task);
+
+            taskReminderService.sendTaskPublishedNotification(classId, taskName, task.getDeadline());
+            taskReminderService.scheduleReminders(task.getId());
+        }
+
+        draft.setStatus("published");
+        draft.setUpdatedAt(LocalDateTime.now());
+        draftMapper.updateById(draft);
+        return Result.success(created);
     }
 
     @PutMapping("/{id}")
@@ -246,6 +407,179 @@ public class TaskController {
     }
 
     // ========== 内部工具 ==========
+
+    @Data
+    public static class SaveDraftRequest {
+        private String taskName;
+        private String description;
+        private LocalDateTime deadline;
+        private Boolean allowLate;
+        private Integer latePenalty;
+        private List<DraftQuestionDTO> questions = new ArrayList<>();
+    }
+
+    @Data
+    public static class PublishDraftRequest {
+        private List<Long> classIds = new ArrayList<>();
+        private String taskName;
+        private LocalDateTime deadline;
+        private Boolean allowLate;
+        private Integer latePenalty;
+    }
+
+    @Data
+    public static class DraftResponse {
+        private Long id;
+        private String taskName;
+        private String description;
+        private LocalDateTime deadline;
+        private Boolean allowLate;
+        private Integer latePenalty;
+        private String status;
+        private LocalDateTime createdAt;
+        private LocalDateTime updatedAt;
+        private List<DraftQuestionDTO> questions = new ArrayList<>();
+    }
+
+    @Data
+    public static class DraftQuestionDTO {
+        private Long id;
+        private String title;
+        private String requirement;
+        private Integer score;
+        private Boolean uploadRequired;
+    }
+
+    private void applyDraftRequest(HomeworkDraft draft, SaveDraftRequest req) {
+        draft.setTaskName(req.getTaskName() != null ? req.getTaskName() : "");
+        draft.setDescription(req.getDescription());
+        draft.setDeadline(req.getDeadline());
+        draft.setAllowLate(req.getAllowLate() != null ? req.getAllowLate() : true);
+        draft.setLatePenalty(req.getLatePenalty() != null ? req.getLatePenalty() : 0);
+    }
+
+    private void syncDraftQuestions(Long draftId, Long teacherId, List<DraftQuestionDTO> questions) {
+        draftQuestionMapper.deleteByDraftId(draftId);
+        if (questions == null || questions.isEmpty()) return;
+
+        int order = 0;
+        for (DraftQuestionDTO dto : questions) {
+            if (dto == null) continue;
+            QuestionBankItem item = upsertQuestion(teacherId, dto);
+
+            HomeworkDraftQuestion relation = new HomeworkDraftQuestion();
+            relation.setDraftId(draftId);
+            relation.setQuestionId(item.getId());
+            relation.setSortOrder(order++);
+            relation.setCreatedAt(LocalDateTime.now());
+            draftQuestionMapper.insert(relation);
+        }
+    }
+
+    private QuestionBankItem upsertQuestion(Long teacherId, DraftQuestionDTO dto) {
+        QuestionBankItem item = null;
+        if (dto.getId() != null) {
+            item = questionBankItemMapper.selectById(dto.getId());
+            if (item != null && !teacherId.equals(item.getTeacherId())) {
+                item = null;
+            }
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        if (item == null) {
+            item = new QuestionBankItem();
+            item.setTeacherId(teacherId);
+            item.setCreatedAt(now);
+        }
+
+        item.setTitle(blankToDefault(dto.getTitle(), "Untitled question"));
+        item.setRequirement(dto.getRequirement());
+        item.setScore(dto.getScore() != null ? dto.getScore() : 0);
+        item.setUploadRequired(dto.getUploadRequired() != null ? dto.getUploadRequired() : true);
+        item.setUpdatedAt(now);
+
+        if (item.getId() == null) {
+            questionBankItemMapper.insert(item);
+        } else {
+            questionBankItemMapper.updateById(item);
+        }
+        return item;
+    }
+
+    private DraftResponse toDraftResponse(HomeworkDraft draft) {
+        DraftResponse response = new DraftResponse();
+        response.setId(draft.getId());
+        response.setTaskName(draft.getTaskName());
+        response.setDescription(draft.getDescription());
+        response.setDeadline(draft.getDeadline());
+        response.setAllowLate(draft.getAllowLate());
+        response.setLatePenalty(draft.getLatePenalty());
+        response.setStatus(draft.getStatus());
+        response.setCreatedAt(draft.getCreatedAt());
+        response.setUpdatedAt(draft.getUpdatedAt());
+        response.setQuestions(draftQuestionMapper.selectByDraftId(draft.getId()).stream()
+                .map(HomeworkDraftQuestion::getQuestionId)
+                .map(questionBankItemMapper::selectById)
+                .filter(Objects::nonNull)
+                .map(this::toQuestionDTO)
+                .toList());
+        return response;
+    }
+
+    private DraftQuestionDTO toQuestionDTO(QuestionBankItem item) {
+        DraftQuestionDTO dto = new DraftQuestionDTO();
+        dto.setId(item.getId());
+        dto.setTitle(item.getTitle());
+        dto.setRequirement(item.getRequirement());
+        dto.setScore(item.getScore());
+        dto.setUploadRequired(item.getUploadRequired());
+        return dto;
+    }
+
+    private String buildDescriptionFromDraft(HomeworkDraft draft) {
+        List<DraftQuestionDTO> questions = toDraftResponse(draft).getQuestions();
+        StringBuilder html = new StringBuilder();
+        for (int i = 0; i < questions.size(); i++) {
+            DraftQuestionDTO question = questions.get(i);
+            html.append("""
+                <section class="assignment-question">
+                  <h3>\u9898\u76ee %d: %s</h3>
+                  <div class="assignment-question-body">%s</div>
+                  <p><strong>\u5206\u503c:</strong>%d; <strong>\u63d0\u4ea4\u65b9\u5f0f:</strong>%s</p>
+                </section>
+                """.formatted(
+                    i + 1,
+                    escapeHtml(blankToDefault(question.getTitle(), "")),
+                    question.getRequirement() != null ? question.getRequirement() : "",
+                    defaultInt(question.getScore(), 0),
+                    defaultBool(question.getUploadRequired(), true)
+                            ? "\u6309\u9898\u4e0a\u4f20\u9644\u4ef6"
+                            : "\u5728\u7ebf\u4f5c\u7b54"
+                ));
+        }
+        return html.toString();
+    }
+
+    private String escapeHtml(String value) {
+        return value
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&#039;");
+    }
+
+    private String blankToDefault(String value, String defaultValue) {
+        return value == null || value.isBlank() ? defaultValue : value;
+    }
+
+    private Boolean defaultBool(Boolean value, Boolean defaultValue) {
+        return value != null ? value : defaultValue;
+    }
+
+    private Integer defaultInt(Integer value, Integer defaultValue) {
+        return value != null ? value : defaultValue;
+    }
 
     private Long getCurrentUserId() {
         var auth = SecurityContextHolder.getContext().getAuthentication();

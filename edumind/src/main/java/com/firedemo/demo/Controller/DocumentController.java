@@ -18,6 +18,8 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -38,6 +40,7 @@ public class DocumentController {
     private final TeachingMaterialGenerator materialGenerator;
     private final PreviewTaskMapper previewTaskMapper;
     private final InteractionMapper interactionMapper;
+    private final ObjectMapper objectMapper;
 
     /**
      * 上传文档并自动处理（切割+向量化）
@@ -272,10 +275,29 @@ public class DocumentController {
                 .toList();
 
         List<Map<String, Object>> quizzes = interactionMapper.findDraftsByDocId(docId).stream()
-                .map(i -> Map.<String, Object>of(
-                        "id", i.getId(), "type", "quiz", "quizType", i.getType(),
-                        "title", i.getTitle(), "knowledgePoint", i.getKnowledgePoint() != null ? i.getKnowledgePoint() : "",
-                        "status", i.getStatus(), "createdAt", i.getCreatedAt() != null ? i.getCreatedAt().toString() : ""))
+                .map(i -> {
+                    Map<String, Object> m = new HashMap<>();
+                    m.put("id", i.getId());
+                    m.put("type", "quiz");
+                    m.put("quizType", i.getType());
+                    m.put("title", i.getTitle());
+                    m.put("knowledgePoint", i.getKnowledgePoint() != null ? i.getKnowledgePoint() : "");
+                    m.put("correctKey", i.getCorrectKey() != null ? i.getCorrectKey() : "");
+                    m.put("timeLimit", i.getTimeLimit() != null ? i.getTimeLimit() : 0);
+                    m.put("status", i.getStatus());
+                    m.put("createdAt", i.getCreatedAt() != null ? i.getCreatedAt().toString() : "");
+                    // 解析 options JSON 字符串为对象列表
+                    if (i.getOptions() != null && !i.getOptions().isEmpty()) {
+                        try {
+                            m.put("options", objectMapper.readValue(i.getOptions(), List.class));
+                        } catch (Exception e) {
+                            m.put("options", List.of());
+                        }
+                    } else {
+                        m.put("options", List.of());
+                    }
+                    return m;
+                })
                 .toList();
 
         return ResponseEntity.ok(Map.of("previews", previews, "quizzes", quizzes));
@@ -303,16 +325,25 @@ public class DocumentController {
         Long classId = body.get("classId") instanceof Number n ? n.longValue() : null;
         if (classId == null) return ResponseEntity.badRequest().body(Map.of("error", "请选择班级"));
 
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> optionsRaw = (List<Map<String, Object>>) body.get("options");
+        List<GenerateMaterialsResponse.OptionItem> options = null;
+        if (optionsRaw != null) {
+            options = optionsRaw.stream().map(m -> GenerateMaterialsResponse.OptionItem.builder()
+                    .key((String) m.get("key")).text((String) m.get("text")).build()).toList();
+        }
+
         GenerateMaterialsResponse.QuizItem item = GenerateMaterialsResponse.QuizItem.builder()
                 .type((String) body.get("type"))
                 .title((String) body.get("title"))
+                .options(options)
                 .correctKey((String) body.get("correctKey"))
                 .knowledgePoint((String) body.get("knowledgePoint"))
                 .difficulty((String) body.get("difficulty"))
                 .timeLimit(body.get("timeLimit") instanceof Number n ? n.intValue() : null)
                 .build();
         String docId = (String) body.get("docId");
-        GenerateMaterialsResponse.QuizItem saved = materialGenerator.saveQuiz(item, classId, docId);
+        GenerateMaterialsResponse.QuizItem saved = materialGenerator.saveQuiz(item, classId, docId, userId);
         return ResponseEntity.ok(Map.of("savedId", saved.getSavedId()));
     }
 

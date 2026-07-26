@@ -1,7 +1,7 @@
 package com.firedemo.demo.live.service;
 
 import com.firedemo.demo.Entity.*;
-import com.firedemo.demo.Service.OneBotHttpService;
+import com.firedemo.demo.infrastructure.onebot.OneBotWebSocketClient;
 import com.firedemo.demo.mapper.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -14,14 +14,14 @@ import java.util.stream.Collectors;
  * 课堂直播 → OneBot QQ 通知服务
  * <p>
  * 负责将课堂事件（开课、互动关闭、结课）通过 QQ 私聊/群消息推送给学生。
- * 所有 QQ 发送都是异步的（OneBotHttpService 内部用 WebClient subscribe），不阻塞主流程。
+ * 所有 QQ 发送都通过 WebSocket 双向连接，不阻塞主流程。
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class LiveNotificationService {
 
-    private final OneBotHttpService oneBotHttpService;
+    private final OneBotWebSocketClient oneBot;
     private final StudentQqBindingMapper qqBindingMapper;
     private final ClassStudentMapper classStudentMapper;
     private final ClassInfoMapper classInfoMapper;
@@ -34,7 +34,8 @@ public class LiveNotificationService {
     // ==================== 1. 未答题 QQ 提醒 ====================
 
     /**
-     * 互动关闭时，对未作答的学生发送 QQ 私聊提醒，同时群内发汇总。
+     * 互动关闭时，对未作答的学生发送 QQ 私聊提醒。
+     * 同一课堂内每人最多提醒 3 次，超出后不再打扰。
      */
     public void notifyUnanswered(Interaction interaction, ClassroomSession session) {
         List<InteractionResponse> responses = responseMapper.findByInteractionId(interaction.getId());
@@ -51,34 +52,33 @@ public class LiveNotificationService {
 
         if (unresponded.isEmpty()) return;
 
-        // 逐个私聊提醒
+        // 统计该课堂每个学生已错过的互动次数（含本次），超过 3 次不再提醒
+        List<Interaction> allInteractions = interactionMapper.findBySessionId(session.getId());
+        int totalInteractions = allInteractions.size();
+        List<InteractionResponse> allResponses = responseMapper.findBySessionId(session.getId());
+        Map<String, Long> respondedCountByStudent = allResponses.stream()
+                .collect(Collectors.groupingBy(InteractionResponse::getStudentId, Collectors.counting()));
+
         int sent = 0;
+        int skipped = 0;
         for (ClassStudent cs : unresponded) {
+            long responded = respondedCountByStudent.getOrDefault(cs.getStudentId(), 0L);
+            int missed = totalInteractions - (int) responded;
+            if (missed > 3) {
+                skipped++;
+                continue;
+            }
             String qq = qqBindingMapper.selectQqByStudentId(cs.getStudentId());
             if (qq != null && !qq.isEmpty()) {
-                oneBotHttpService.sendPrivateMessage(qq, String.format(
-                        "同学%s你好，课堂互动「%s」已结束，你还没有作答。下次记得积极参与哦！",
-                        cs.getStudentName(), interaction.getTitle()));
+                oneBot.sendPrivateMessage(qq, String.format(
+                        "同学%s你好，课堂互动「%s」已结束，你还没有作答。"
+                        + "这已是第%d次未参与，超过3次将不再提醒哦！",
+                        cs.getStudentName(), interaction.getTitle(), missed));
                 sent++;
             }
         }
-        log.info("未答题提醒已发送: interactionId={}, 未答{}人, QQ私聊{}人",
-                interaction.getId(), unresponded.size(), sent);
-
-        // 群内汇总
-        String groupId = classInfoMapper.selectQqGroupIdById(session.getClassId());
-        if (groupId != null && !groupId.isEmpty()) {
-            List<String> names = unresponded.stream()
-                    .limit(10)
-                    .map(cs -> cs.getStudentName() + "(" + cs.getStudentId() + ")")
-                    .toList();
-            String suffix = unresponded.size() > 10
-                    ? String.format("等%d人", unresponded.size()) : "";
-            oneBotHttpService.sendGroupMessage(groupId, String.format(
-                    "⏰ 互动「%s」已结束，%d位同学未作答：%s%s",
-                    interaction.getTitle(), unresponded.size(),
-                    String.join("、", names), suffix));
-        }
+        log.info("未答题提醒: interactionId={}, 未答{}人, QQ私聊{}人, 超限跳过{}人",
+                interaction.getId(), unresponded.size(), sent, skipped);
     }
 
     // ==================== 2. 课堂结束总结 ====================
@@ -157,7 +157,7 @@ public class LiveNotificationService {
                 sb.append(String.format("\n\n缺席: %s%s", absentNames, suffix));
             }
             sb.append("\n\n每个人将收到个性化复习包，请注意查收私聊 📩");
-            oneBotHttpService.sendGroupMessage(groupId, sb.toString());
+            oneBot.sendGroupMessage(groupId, sb.toString());
         }
 
         // ============ 个性化复习私聊 ============
@@ -168,7 +168,7 @@ public class LiveNotificationService {
         for (var a : absent) {
             String qq = qqBindingMapper.selectQqByStudentId(a.get("studentId"));
             if (qq != null && !qq.isEmpty()) {
-                oneBotHttpService.sendPrivateMessage(qq, String.format(
+                oneBot.sendPrivateMessage(qq, String.format(
                         "同学%s你好，你错过了今天的课堂「%s」。课堂进行了%d次互动练习，建议课后找老师补上。",
                         a.get("studentName"), session.getTitle(), totalInteractions));
                 sent++;
@@ -206,7 +206,7 @@ public class LiveNotificationService {
                     responsesByStudent.getOrDefault(cs.getStudentId(), List.of()),
                     confusionsByStudent.getOrDefault(cs.getStudentId(), List.of()),
                     interactions);
-            oneBotHttpService.sendPrivateMessage(qq, msg);
+            oneBot.sendPrivateMessage(qq, msg);
             sent++;
         }
         log.info("个性化复习包已发送: sessionId={}, 发送{}人", session.getId(), sent);
@@ -297,7 +297,7 @@ public class LiveNotificationService {
         ClassInfo classInfo = classInfoMapper.selectById(session.getClassId());
         String className = classInfo != null ? classInfo.getName() : "课堂";
 
-        oneBotHttpService.sendGroupMessage(groupId, String.format(
+        oneBot.sendGroupMessage(groupId, String.format(
                 "📚 老师已开启「%s」课堂\n\n" +
                 "🏷 课堂码：%s\n" +
                 "📝 课程：%s\n\n" +
@@ -321,7 +321,7 @@ public class LiveNotificationService {
         }
 
         String className = classInfo != null ? classInfo.getName() : "班级";
-        oneBotHttpService.sendGroupMessage(groupId, String.format(
+        oneBot.sendGroupMessage(groupId, String.format(
                 "📖 老师发布了新的预习任务\n\n" +
                 "📝 主题：%s\n" +
                 "📚 知识点：%s\n" +

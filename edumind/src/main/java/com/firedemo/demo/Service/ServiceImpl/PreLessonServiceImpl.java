@@ -5,11 +5,13 @@ import com.firedemo.demo.DTO.DashboardMetricsDTO;
 import com.firedemo.demo.DTO.FrequentErrorDTO;
 import com.firedemo.demo.DTO.KnowledgeMasteryDTO;
 import com.firedemo.demo.DTO.StudentOverviewDTO;
+import com.firedemo.demo.Entity.AiSuggestionCache;
 import com.firedemo.demo.Entity.ClassInfo;
 import com.firedemo.demo.Entity.ClassroomSession;
 import com.firedemo.demo.Service.DashboardService;
 import com.firedemo.demo.Service.OpenClawService;
 import com.firedemo.demo.Service.PreLessonService;
+import com.firedemo.demo.mapper.AiSuggestionCacheMapper;
 import com.firedemo.demo.mapper.ClassInfoMapper;
 import com.firedemo.demo.mapper.ClassroomSessionMapper;
 import com.firedemo.demo.mapper.InteractionMapper;
@@ -35,6 +37,7 @@ public class PreLessonServiceImpl implements PreLessonService {
     private final InteractionMapper interactionMapper;
     private final InteractionResponseMapper responseMapper;
     private final OpenClawService openClawService;
+    private final AiSuggestionCacheMapper suggestionCacheMapper;
 
     @Override
     public PreLessonDTO getPreLessonOverview(Long classId) {
@@ -85,8 +88,14 @@ public class PreLessonServiceImpl implements PreLessonService {
         // ── 3. 分层分组 ──
         List<PreLessonDTO.TierGroup> tieredGroups = buildTieredGroups(students);
 
-        // ── 4. AI 备课建议（先返规则版，异步生成 AI 版） ──
-        String aiSuggestion = buildFallback(weakPoints);
+        // ── 4. AI 备课建议（优先缓存，无缓存时返规则版） ──
+        AiSuggestionCache cached = suggestionCacheMapper.selectById(classId);
+        String aiSuggestion;
+        if (cached != null && cached.getSuggestion() != null && !cached.getSuggestion().isBlank()) {
+            aiSuggestion = cached.getSuggestion();
+        } else {
+            aiSuggestion = buildFallback(weakPoints);
+        }
 
         return PreLessonDTO.builder()
                 .classId(classId).className(className)
@@ -193,7 +202,15 @@ public class PreLessonServiceImpl implements PreLessonService {
         }
         if (totalAnswers > 0) liveCorrectRate = Math.round(totalCorrect * 1000.0 / totalAnswers) / 10.0;
 
-        return generateSuggestion(className, metrics, weakPoints, liveSessions, liveCorrectRate, students);
+        String suggestion = generateSuggestion(className, metrics, weakPoints, liveSessions, liveCorrectRate, students);
+
+        // 持久化缓存
+        suggestionCacheMapper.upsert(AiSuggestionCache.builder()
+                .classId(classId)
+                .suggestion(suggestion)
+                .build());
+
+        return suggestion;
     }
 
     // ==================== private helpers ====================
