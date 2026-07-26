@@ -1,2 +1,0 @@
-# Mockito inline mock maker is required for mocking final classes on Java 21
-mock-maker-inline
