@@ -73,6 +73,7 @@ jobs:
             -Dspring.datasource.url=jdbc:postgresql://localhost:5432/postgres \
             -Dspring.datasource.username=postgres \
             -Dspring.datasource.password=postgres \
+            -Dspring.flyway.enabled=true \
             -Dedumind.live.token-secret=ci-test-secret-key-must-be-at-least-256-bits-for-jjwt!! \
             --batch-mode
         env:
