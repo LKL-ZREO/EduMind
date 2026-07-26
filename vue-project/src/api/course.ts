@@ -33,11 +33,14 @@ export async function createCourse(data: {
   throw new Error(res.data.message || '创建失败')
 }
 
-export async function updateCourse(id: number, data: {
-  name?: string
-  systemPrompt?: string
-  knowledgeScope?: string
-}): Promise<void> {
+export async function updateCourse(
+  id: number,
+  data: {
+    name?: string
+    systemPrompt?: string
+    knowledgeScope?: string
+  },
+): Promise<void> {
   const res = await request.put(`/courses/${id}`, data)
   if (res.data.code === 200) return
   throw new Error(res.data.message || '保存失败')

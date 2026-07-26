@@ -1,26 +1,17 @@
 <script setup lang="ts">
 import { RouterLink, RouterView, useRouter, useRoute } from 'vue-router'
-import { computed, watch } from 'vue'
+import { computed, onMounted, watch } from 'vue'
+import { useAuthStore } from '@/stores/auth'
 
 const router = useRouter()
 const route = useRoute()
+const authStore = useAuthStore()
 
 // 登录状态
-const isLoggedIn = computed(() => !!localStorage.getItem('token'))
+const isLoggedIn = computed(() => authStore.isAuthenticated)
 
 // 用户名
-const username = computed(() => {
-  const userStr = localStorage.getItem('user')
-  if (userStr) {
-    try {
-      const user = JSON.parse(userStr)
-      return user.username || '教师'
-    } catch {
-      return '教师'
-    }
-  }
-  return '教师'
-})
+const username = computed(() => authStore.user?.username || '教师')
 
 // 是否是老师端（显示导航栏）
 const showNav = computed(() => {
@@ -28,19 +19,24 @@ const showNav = computed(() => {
 })
 
 // 登出
-function logout() {
-  localStorage.removeItem('token')
-  localStorage.removeItem('user')
-  router.push('/login')
+async function logout() {
+  await authStore.logout()
+  await router.push('/login')
 }
 
+onMounted(() => authStore.ensureInitialized())
+
 // 未登录时访问教师端 → 跳登录
-watch(isLoggedIn, (loggedIn) => {
-  const path = router.currentRoute.value.path
-  if (!loggedIn && path.startsWith('/teacher')) {
-    router.push('/login')
-  }
-}, { immediate: true })
+watch(
+  [isLoggedIn, () => authStore.initialized],
+  ([loggedIn, initialized]) => {
+    const path = router.currentRoute.value.path
+    if (initialized && !loggedIn && path.startsWith('/teacher')) {
+      router.push('/login')
+    }
+  },
+  { immediate: true },
+)
 </script>
 
 <template>
@@ -120,13 +116,13 @@ watch(isLoggedIn, (loggedIn) => {
   --text-muted: #909399;
   --border-base: #e4e7ed;
   --border-light: #ebeef5;
-  --color-primary: #409EFF;
+  --color-primary: #409eff;
   --color-primary-hover: #337ecc;
-  --color-success: #67C23A;
-  --color-warning: #E6A23C;
-  --color-danger: #F56C6C;
-  --shadow-card: 0 2px 12px rgba(0,0,0,.06);
-  --shadow-hover: 0 4px 20px rgba(0,0,0,.1);
+  --color-success: #67c23a;
+  --color-warning: #e6a23c;
+  --color-danger: #f56c6c;
+  --shadow-card: 0 2px 12px rgba(0, 0, 0, 0.06);
+  --shadow-hover: 0 4px 20px rgba(0, 0, 0, 0.1);
 }
 
 .app-container {
@@ -135,7 +131,11 @@ watch(isLoggedIn, (loggedIn) => {
   flex-direction: column;
   background-color: var(--bg-body);
   color: var(--text-primary);
-  font-family: "Microsoft Yahei", -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family:
+    'Microsoft Yahei',
+    -apple-system,
+    BlinkMacSystemFont,
+    sans-serif;
 }
 
 /* 学生端/登录注册页全屏 */
@@ -160,7 +160,7 @@ watch(isLoggedIn, (loggedIn) => {
   height: 56px;
   display: flex;
   align-items: center;
-  box-shadow: 0 1px 4px rgba(0,0,0,.04);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
 }
 
 .wrapper {
@@ -198,7 +198,7 @@ watch(isLoggedIn, (loggedIn) => {
   border-radius: 4px;
   text-decoration: none;
   font-size: 14px;
-  transition: all .2s;
+  transition: all 0.2s;
 }
 
 .header-actions .logout:hover {

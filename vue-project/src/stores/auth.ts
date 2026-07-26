@@ -1,60 +1,93 @@
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import request from '@/api/request'
+import { getApiErrorMessage } from '@/api/errors'
+import type { ApiResponse } from '@/api/types'
 
-type User = {
+export type AuthenticatedUser = {
   id: number
   username: string
-  email: string
+  email: string | null
 }
 
+type AuthResponse = AuthenticatedUser & { sessionId?: string }
+
 export const useAuthStore = defineStore('auth', () => {
-  const user = ref<User | null>(null)
-  const token = ref<string | null>(localStorage.getItem('token'))
+  const user = ref<AuthenticatedUser | null>(null)
+  const initialized = ref(false)
+  const isAuthenticated = computed(() => user.value !== null)
+  let initialization: Promise<void> | null = null
 
-  // load persisted user
-  try {
-    const raw = localStorage.getItem('auth:user')
-    if (raw) user.value = JSON.parse(raw) as User
-  } catch {
-    localStorage.removeItem('auth:user')
+  // Remove credentials left by the former JWT implementation.
+  localStorage.removeItem('token')
+  localStorage.removeItem('user')
+  localStorage.removeItem('auth:user')
+
+  function setUser(value: AuthenticatedUser | null) {
+    user.value = value
   }
 
-  function persistUser() {
-    if (user.value) localStorage.setItem('auth:user', JSON.stringify(user.value))
-    else localStorage.removeItem('auth:user')
-  }
+  async function ensureInitialized() {
+    if (initialized.value) return
+    if (initialization) return initialization
 
-  function persistToken(value: string | null) {
-    token.value = value
-    if (value) localStorage.setItem('token', value)
-    else localStorage.removeItem('token')
+    initialization = request
+      .get('/auth/me')
+      .then((response) => {
+        const result = response.data as ApiResponse<AuthenticatedUser>
+        if (result.code === 200) setUser(result.data)
+        else setUser(null)
+      })
+      .catch(() => setUser(null))
+      .finally(() => {
+        initialized.value = true
+        initialization = null
+      })
+    return initialization
   }
 
   async function login(payload: { username: string; password: string }) {
-    const res = await request.post('/auth/login', payload)
-    const data = res.data
-    if (data.code !== 200) throw new Error(data.message || '登录失败')
+    try {
+      const response = await request.post<ApiResponse<AuthResponse>>('/auth/login', payload)
+      const data = response.data
+      if (data.code !== 200) throw new Error(data.message || '登录失败')
 
-    const { id, username, email, token: jwt, sessionId } = data.data
-    user.value = { id, username, email }
-    persistUser()
-    persistToken(jwt)
-    if (sessionId) localStorage.setItem('sessionId', sessionId)
+      const { id, username, email, sessionId } = data.data
+      setUser({ id, username, email: email ?? null })
+      initialized.value = true
+      if (sessionId) localStorage.setItem('sessionId', sessionId)
+    } catch (error: unknown) {
+      throw new Error(getApiErrorMessage(error, '登录失败'))
+    }
   }
 
   async function register(payload: { username: string; email: string; password: string }) {
-    const res = await request.post('/auth/register', payload)
-    const data = res.data
-    if (data.code !== 200) throw new Error(data.message || '注册失败')
+    try {
+      const response = await request.post<ApiResponse<null>>('/auth/register', payload)
+      const data = response.data
+      if (data.code !== 200) throw new Error(data.message || '注册失败')
+    } catch (error: unknown) {
+      throw new Error(getApiErrorMessage(error, '注册失败'))
+    }
   }
 
-  function logout() {
-    user.value = null
-    persistUser()
-    persistToken(null)
-    localStorage.removeItem('sessionId')
+  async function logout() {
+    try {
+      await request.post('/auth/logout')
+    } finally {
+      setUser(null)
+      initialized.value = true
+      localStorage.removeItem('sessionId')
+    }
   }
 
-  return { user, token, login, register, logout }
+  return {
+    user,
+    initialized,
+    isAuthenticated,
+    ensureInitialized,
+    login,
+    register,
+    logout,
+  }
 })

@@ -58,7 +58,21 @@ jobs:
             -Dspring.datasource.username=postgres \
             -Dspring.datasource.password=postgres \
             -Dspring.flyway.enabled=false \
-            -Djwt.secret=ci-test-secret-key-must-be-at-least-256-bits-for-jjwt!! \
+            -Dedumind.live.token-secret=ci-test-secret-key-must-be-at-least-256-bits-for-jjwt!! \
+            --batch-mode
+        env:
+          OPENCLAW_API_KEY: ci-test-key
+          MCP_API_KEY: ci-test-key
+
+      - name: Session security integration tests
+        run: |
+          cd edumind
+          ./mvnw test -Dgroups=integration -DexcludedGroups= \
+            -Dspring.profiles.active=test \
+            -Dspring.datasource.url=jdbc:postgresql://localhost:5432/postgres \
+            -Dspring.datasource.username=postgres \
+            -Dspring.datasource.password=postgres \
+            -Dedumind.live.token-secret=ci-test-secret-key-must-be-at-least-256-bits-for-jjwt!! \
             --batch-mode
         env:
           OPENCLAW_API_KEY: ci-test-key
@@ -95,6 +109,9 @@ jobs:
 
       - name: Type check
         run: cd vue-project && npx vue-tsc --build
+
+      - name: Format check
+        run: cd vue-project && npm run format:check
 
       - name: Lint
         run: cd vue-project && npm run lint

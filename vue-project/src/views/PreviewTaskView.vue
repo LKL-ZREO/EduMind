@@ -27,16 +27,18 @@
           <!-- 选择题 -->
           <div v-if="q.options" class="quiz-opts">
             <button
-              v-for="o in q.options" :key="o.key"
+              v-for="o in q.options"
+              :key="o.key"
               class="quiz-opt"
               :class="{
                 selected: selections[qi] === o.key,
                 correct: revealed[qi] && o.key === q.correctKey,
-                wrong: revealed[qi] && selections[qi] === o.key && o.key !== q.correctKey
+                wrong: revealed[qi] && selections[qi] === o.key && o.key !== q.correctKey,
               }"
               @click="selectOption(qi, o.key)"
             >
-              <b>{{ o.key }}</b>. {{ o.text }}
+              <b>{{ o.key }}</b
+              >. {{ o.text }}
             </button>
           </div>
 
@@ -93,46 +95,157 @@ onMounted(async () => {
       const res = await getPreviewTask(id)
       task.value = res.data
     }
-  } catch { /* 404 */ }
-  finally { loading.value = false }
+  } catch {
+    /* 404 */
+  } finally {
+    loading.value = false
+  }
 })
 </script>
 
 <style scoped>
-.preview-view-page { max-width: 720px; margin: 0 auto; padding: 20px; }
-.loading-state, .error-state { text-align: center; padding: 80px 0; color: #909399; font-size: 15px; }
-
-.view-header { margin-bottom: 20px; }
-.view-header h1 { font-size: 22px; margin: 0 0 8px; }
-.header-meta { display: flex; gap: 10px; align-items: center; }
-.create-time { font-size: 12px; color: #909399; }
-
-.guide-card, .quiz-card, .discuss-card {
-  background: #fff; border-radius: 10px; padding: 24px; margin-bottom: 16px;
-  box-shadow: 0 1px 6px rgba(0,0,0,.04);
+.preview-view-page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 20px;
 }
-.guide-card h2, .quiz-card h2, .discuss-card h2 { font-size: 16px; margin: 0 0 12px; }
-.guide-body { font-size: 14px; line-height: 1.8; color: #303133; }
-.guide-body :deep(p) { margin: 0 0 8px; }
-.guide-body :deep(ul) { padding-left: 20px; }
-.guide-body :deep(li) { margin-bottom: 4px; }
+.loading-state,
+.error-state {
+  text-align: center;
+  padding: 80px 0;
+  color: #909399;
+  font-size: 15px;
+}
 
-.quiz-hint { font-size: 13px; color: #909399; margin-bottom: 16px; }
-.quiz-item { padding: 12px; margin-bottom: 12px; background: #fafafa; border-radius: 8px; border-left: 3px solid #409eff; }
-.quiz-q { font-size: 14px; font-weight: 500; margin: 0 0 10px; }
+.view-header {
+  margin-bottom: 20px;
+}
+.view-header h1 {
+  font-size: 22px;
+  margin: 0 0 8px;
+}
+.header-meta {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.create-time {
+  font-size: 12px;
+  color: #909399;
+}
 
-.quiz-opts { display: flex; flex-direction: column; gap: 6px; }
-.quiz-opt { display: flex; align-items: center; gap: 6px; padding: 10px 14px; border: 2px solid #e4e7ed; border-radius: 8px; background: #fff; cursor: pointer; font-size: 13px; text-align: left; transition: all .15s; }
-.quiz-opt:hover { border-color: #409eff; }
-.quiz-opt.selected { border-color: #409eff; background: #ecf5ff; }
-.quiz-opt.correct { border-color: #67c23a; background: #f0f9eb; }
-.quiz-opt.wrong { border-color: #f56c6c; background: #fef0f0; }
+.guide-card,
+.quiz-card,
+.discuss-card {
+  background: #fff;
+  border-radius: 10px;
+  padding: 24px;
+  margin-bottom: 16px;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.04);
+}
+.guide-card h2,
+.quiz-card h2,
+.discuss-card h2 {
+  font-size: 16px;
+  margin: 0 0 12px;
+}
+.guide-body {
+  font-size: 14px;
+  line-height: 1.8;
+  color: #303133;
+}
+.guide-body :deep(p) {
+  margin: 0 0 8px;
+}
+.guide-body :deep(ul) {
+  padding-left: 20px;
+}
+.guide-body :deep(li) {
+  margin-bottom: 4px;
+}
 
-.quiz-open { margin-top: 6px; }
-.open-answer { font-size: 13px; color: #67c23a; margin: 0; }
+.quiz-hint {
+  font-size: 13px;
+  color: #909399;
+  margin-bottom: 16px;
+}
+.quiz-item {
+  padding: 12px;
+  margin-bottom: 12px;
+  background: #fafafa;
+  border-radius: 8px;
+  border-left: 3px solid #409eff;
+}
+.quiz-q {
+  font-size: 14px;
+  font-weight: 500;
+  margin: 0 0 10px;
+}
 
-.quiz-explanation { font-size: 13px; color: #409eff; margin-top: 8px; padding: 8px 10px; background: #ecf5ff; border-radius: 6px; }
+.quiz-opts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.quiz-opt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 14px;
+  border: 2px solid #e4e7ed;
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 13px;
+  text-align: left;
+  transition: all 0.15s;
+}
+.quiz-opt:hover {
+  border-color: #409eff;
+}
+.quiz-opt.selected {
+  border-color: #409eff;
+  background: #ecf5ff;
+}
+.quiz-opt.correct {
+  border-color: #67c23a;
+  background: #f0f9eb;
+}
+.quiz-opt.wrong {
+  border-color: #f56c6c;
+  background: #fef0f0;
+}
 
-.discuss-text { font-size: 15px; color: #e6a23c; margin: 0; padding: 12px; background: #fdf6ec; border-radius: 8px; line-height: 1.6; }
-.discuss-hint { font-size: 12px; color: #909399; margin: 10px 0 0; }
+.quiz-open {
+  margin-top: 6px;
+}
+.open-answer {
+  font-size: 13px;
+  color: #67c23a;
+  margin: 0;
+}
+
+.quiz-explanation {
+  font-size: 13px;
+  color: #409eff;
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: #ecf5ff;
+  border-radius: 6px;
+}
+
+.discuss-text {
+  font-size: 15px;
+  color: #e6a23c;
+  margin: 0;
+  padding: 12px;
+  background: #fdf6ec;
+  border-radius: 8px;
+  line-height: 1.6;
+}
+.discuss-hint {
+  font-size: 12px;
+  color: #909399;
+  margin: 10px 0 0;
+}
 </style>

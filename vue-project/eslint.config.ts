@@ -20,6 +20,14 @@ export default defineConfigWithVueTs(
   ...pluginVue.configs['flat/essential'],
   vueTsConfigs.recommended,
 
+  // Dashboard is the only legacy Options API page left; keep the exception local until it is split.
+  {
+    files: ['src/views/Dashboard.vue'],
+    rules: {
+      'vue/block-lang': 'off',
+    },
+  },
+
   ...pluginOxlint.buildFromOxlintConfigFile('.oxlintrc.json'),
 
   skipFormatting,

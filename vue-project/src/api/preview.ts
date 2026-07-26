@@ -25,7 +25,11 @@ export interface PreviewTaskDTO {
 }
 
 /** 教师：AI 生成预习任务 */
-export async function createPreviewTask(data: { classId: number; knowledgePoint: string; topic?: string }) {
+export async function createPreviewTask(data: {
+  classId: number
+  knowledgePoint: string
+  topic?: string
+}) {
   const res = await request.post('/preview/create', data)
   return res.data
 }

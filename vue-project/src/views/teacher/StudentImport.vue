@@ -3,12 +3,14 @@ import { ref, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import request from '@/api/request'
+import { getApiErrorMessage } from '@/api/errors'
+import type { ApiResponse } from '@/api/types'
 import * as XLSX from 'xlsx'
 
 const route = useRoute()
 const classId = Number(route.params.id)
 
-const props = defineProps<{
+defineProps<{
   visible: boolean
 }>()
 
@@ -31,9 +33,8 @@ const importing = ref(false)
 const dragOver = ref(false)
 const showConfirm = ref(false)
 
-const validCount = computed(() => students.value.filter(s => s.valid).length)
-const invalidCount = computed(() => students.value.filter(s => !s.valid).length)
-
+const validCount = computed(() => students.value.filter((s) => s.valid).length)
+const invalidCount = computed(() => students.value.filter((s) => !s.valid).length)
 
 // ==================== 文件解析 ====================
 function handleFile(file: File) {
@@ -47,12 +48,15 @@ function handleFile(file: File) {
   students.value = []
 
   const reader = new FileReader()
-  reader.onload = (e) => {
+  reader.onload = () => {
     try {
-      const data = new Uint8Array(e.target!.result as ArrayBuffer)
+      if (!(reader.result instanceof ArrayBuffer)) throw new Error('无法读取文件内容')
+      const data = new Uint8Array(reader.result)
       const workbook = XLSX.read(data, { type: 'array' })
-      const sheet = workbook.Sheets[workbook.SheetNames[0]]
-      const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 })
+      const firstSheetName = workbook.SheetNames[0]
+      const sheet = firstSheetName ? workbook.Sheets[firstSheetName] : undefined
+      if (!sheet) throw new Error('工作簿中没有可读取的工作表')
+      const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1 })
 
       if (rows.length < 2) {
         ElMessage.warning('文件为空或格式不正确，请确保第一行为表头（学号, 姓名）')
@@ -60,12 +64,16 @@ function handleFile(file: File) {
       }
 
       // 智能识别列：找"学号"和"姓名"列
-      const header = rows[0].map((h: any) => String(h || '').trim())
+      const headerRow = rows[0]
+      if (!headerRow) return
+      const header = headerRow.map((value) => String(value || '').trim())
       const idColIdx = header.findIndex((h: string) =>
-        ['学号', 'studentid', 'student_id', 'student id', 'id', '编号'].includes(h.toLowerCase())
+        ['学号', 'studentid', 'student_id', 'student id', 'id', '编号'].includes(h.toLowerCase()),
       )
       const nameColIdx = header.findIndex((h: string) =>
-        ['姓名', 'name', 'studentname', 'student_name', 'student name', '名字'].includes(h.toLowerCase())
+        ['姓名', 'name', 'studentname', 'student_name', 'student name', '名字'].includes(
+          h.toLowerCase(),
+        ),
       )
 
       if (idColIdx === -1) {
@@ -82,7 +90,7 @@ function handleFile(file: File) {
 
       for (let i = 1; i < rows.length; i++) {
         const row = rows[i]
-        if (!row || row.every((cell: any) => !String(cell).trim())) continue
+        if (!row || row.every((cell) => !String(cell).trim())) continue
 
         const sid = String(row[idColIdx] || '').trim()
         const sname = String(row[nameColIdx] || '').trim()
@@ -105,9 +113,8 @@ function handleFile(file: File) {
       if (result.length === 0) {
         ElMessage.warning('未解析到任何数据行')
       }
-    } catch (err) {
+    } catch {
       ElMessage.error('文件解析失败，请检查文件格式')
-      console.error(err)
     }
   }
 
@@ -117,7 +124,8 @@ function handleFile(file: File) {
 function onFileInput(e: Event) {
   const input = e.target as HTMLInputElement
   if (!input.files?.length) return
-  handleFile(input.files[0])
+  const file = input.files[0]
+  if (file) handleFile(file)
   input.value = ''
 }
 
@@ -151,12 +159,17 @@ async function doImport() {
   importing.value = true
   try {
     const payload = {
-      students: students.value.filter(s => s.valid).map(s => ({
-        studentId: s.studentId,
-        studentName: s.studentName,
-      })),
+      students: students.value
+        .filter((s) => s.valid)
+        .map((s) => ({
+          studentId: s.studentId,
+          studentName: s.studentName,
+        })),
     }
-    const res = await request.post(`/teacher/classes/${classId}/students/import`, payload)
+    const res = await request.post<ApiResponse<{ imported: number; skipped: number }>>(
+      `/teacher/classes/${classId}/students/import`,
+      payload,
+    )
     if (res.data.code === 200) {
       const r = res.data.data
       ElMessage.success(`成功导入 ${r.imported} 名学生（${r.skipped} 条跳过）`)
@@ -166,8 +179,8 @@ async function doImport() {
     } else {
       ElMessage.error(res.data.message || '导入失败')
     }
-  } catch (e: any) {
-    ElMessage.error(e.response?.data?.message || e.message || '导入失败')
+  } catch (error: unknown) {
+    ElMessage.error(getApiErrorMessage(error, '导入失败'))
   } finally {
     importing.value = false
   }
@@ -189,11 +202,7 @@ function downloadTemplate() {
 </script>
 
 <template>
-  <div
-    v-if="visible"
-    class="import-overlay"
-    @click.self="!showConfirm && emit('close')"
-  >
+  <div v-if="visible" class="import-overlay" @click.self="!showConfirm && emit('close')">
     <div class="import-dialog">
       <div class="import-header">
         <h3>📥 批量导入学生</h3>
@@ -216,21 +225,14 @@ function downloadTemplate() {
             <p class="drop-or">或</p>
             <label class="btn-browse">
               选择文件
-              <input
-                type="file"
-                accept=".xlsx,.xls,.csv"
-                hidden
-                @change="onFileInput"
-              />
+              <input type="file" accept=".xlsx,.xls,.csv" hidden @change="onFileInput" />
             </label>
             <p class="drop-hint">支持 .xlsx / .xls / .csv 格式</p>
           </div>
 
           <div class="template-hint">
             <p>💡 确保 Excel 文件第一行为表头，包含「学号」和「姓名」列</p>
-            <button class="btn-template" @click="downloadTemplate">
-              📎 下载导入模板
-            </button>
+            <button class="btn-template" @click="downloadTemplate">📎 下载导入模板</button>
           </div>
         </div>
 
@@ -243,7 +245,9 @@ function downloadTemplate() {
               <span class="badge-count">
                 共 {{ students.length }} 行，
                 <span class="valid-text">✅ {{ validCount }}</span>
-                <span v-if="invalidCount"> / <span class="invalid-text">⚠️ {{ invalidCount }}</span></span>
+                <span v-if="invalidCount">
+                  / <span class="invalid-text">⚠️ {{ invalidCount }}</span></span
+                >
               </span>
             </div>
             <div class="preview-actions">
@@ -255,10 +259,10 @@ function downloadTemplate() {
             <table class="preview-table">
               <thead>
                 <tr>
-                  <th style="width:50px">#</th>
+                  <th style="width: 50px">#</th>
                   <th>学号</th>
                   <th>姓名</th>
-                  <th style="width:60px">状态</th>
+                  <th style="width: 60px">状态</th>
                   <th>备注</th>
                 </tr>
               </thead>
@@ -295,11 +299,7 @@ function downloadTemplate() {
 
           <div class="preview-footer">
             <button class="btn-cancel" @click="clearFile">取消</button>
-            <button
-              class="btn-primary"
-              :disabled="validCount === 0"
-              @click="confirmImport"
-            >
+            <button class="btn-primary" :disabled="validCount === 0" @click="confirmImport">
               导入 {{ validCount }} 名学生
             </button>
           </div>
@@ -310,7 +310,9 @@ function downloadTemplate() {
       <div v-if="showConfirm" class="confirm-overlay" @click.self="showConfirm = false">
         <div class="confirm-dialog">
           <h4>确认导入</h4>
-          <p>将导入 <strong>{{ validCount }}</strong> 名学生到当前班级</p>
+          <p>
+            将导入 <strong>{{ validCount }}</strong> 名学生到当前班级
+          </p>
           <p v-if="invalidCount" class="warn-text">⚠️ {{ invalidCount }} 行数据格式异常将被跳过</p>
           <div class="confirm-btns">
             <button class="btn-cancel" @click="showConfirm = false">再检查一下</button>
@@ -331,7 +333,7 @@ function downloadTemplate() {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, .4);
+  background: rgba(0, 0, 0, 0.4);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -345,7 +347,7 @@ function downloadTemplate() {
   width: 90%;
   max-width: 680px;
   max-height: 85vh;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, .1);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
   display: flex;
   flex-direction: column;
 }
@@ -409,7 +411,7 @@ function downloadTemplate() {
 }
 
 .drop-zone.drag-over {
-  border-color: #409EFF;
+  border-color: #409eff;
   background: rgba(255, 125, 0, 0.05);
 }
 
@@ -433,7 +435,7 @@ function downloadTemplate() {
 .btn-browse {
   display: inline-block;
   padding: 9px 24px;
-  background: #409EFF;
+  background: #409eff;
   color: #fff;
   border-radius: 8px;
   cursor: pointer;
@@ -480,8 +482,8 @@ function downloadTemplate() {
 }
 
 .btn-template:hover {
-  border-color: #409EFF;
-  color: #409EFF;
+  border-color: #409eff;
+  color: #409eff;
 }
 
 /* ===== 预览区域 ===== */
@@ -543,8 +545,8 @@ function downloadTemplate() {
 }
 
 .btn-retry:hover {
-  border-color: #409EFF;
-  color: #409EFF;
+  border-color: #409eff;
+  color: #409eff;
 }
 
 /* 预览表格 */
@@ -604,7 +606,8 @@ function downloadTemplate() {
   font-size: 0.75rem;
 }
 
-.status-ok, .status-err {
+.status-ok,
+.status-err {
   font-size: 0.85rem;
 }
 
@@ -667,7 +670,7 @@ function downloadTemplate() {
 }
 
 .confirm-dialog strong {
-  color: #409EFF;
+  color: #409eff;
 }
 
 .warn-text {
@@ -700,7 +703,7 @@ function downloadTemplate() {
 
 .btn-primary {
   padding: 8px 20px;
-  background: #409EFF;
+  background: #409eff;
   border: none;
   border-radius: 8px;
   color: #303133;

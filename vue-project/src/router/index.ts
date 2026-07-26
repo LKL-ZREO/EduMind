@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteLocationNormalized } from 'vue-router'
 import { useChatStore } from '../stores/chat'
+import { useAuthStore } from '../stores/auth'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -17,86 +18,110 @@ const router = createRouter({
       path: '/login',
       name: 'login',
       component: () => import('../views/LoginView.vue'),
-      meta: { requiresGuest: true }
+      meta: { requiresGuest: true },
     },
     {
       path: '/register',
       name: 'register',
       component: () => import('../views/RegisterView.vue'),
-      meta: { requiresGuest: true }
+      meta: { requiresGuest: true },
     },
     {
       path: '/teacher/chat',
       name: 'chat',
       component: () => import('../views/AIChat.vue'),
-      meta: { requiresAuth: true }
+      meta: { requiresAuth: true },
     },
     {
       path: '/teacher/docs',
       name: 'docs',
       component: () => import('../views/KnowledgeBase.vue'),
-      meta: { requiresAuth: true }
+      meta: { requiresAuth: true },
     },
     {
       path: '/teacher/classes',
       name: 'classes',
       component: () => import('../views/teacher/ClassList.vue'),
-      meta: { requiresAuth: true }
+      meta: { requiresAuth: true },
     },
     {
       path: '/teacher/classes/:id',
       name: 'classManage',
       component: () => import('../views/teacher/ClassManage.vue'),
-      meta: { requiresAuth: true }
+      meta: { requiresAuth: true },
     },
     {
       path: '/teacher/tasks',
       name: 'tasks',
       component: () => import('../views/TaskManage.vue'),
-      meta: { requiresAuth: true }
+      meta: { requiresAuth: true },
     },
     {
       path: '/teacher/tasks/:id',
       name: 'taskDetail',
       component: () => import('../views/TaskDetail.vue'),
-      meta: { requiresAuth: true }
+      meta: { requiresAuth: true },
     },
     {
       path: '/view/submission/:id',
       name: 'submissionView',
       component: () => import('../views/SubmissionView.vue'),
-      meta: { requiresAuth: true }
+      meta: { requiresAuth: true },
     },
     {
       path: '/teacher/data',
       name: 'data',
       component: () => import('../views/Dashboard.vue'),
-      meta: { requiresAuth: true }
+      meta: { requiresAuth: true },
     },
     // 课堂实时互动
-    { path: '/teacher/live/:classId', name: 'liveTeacher', component: () => import('../views/teacher/LiveDashboard.vue'), meta: { requiresAuth: true } },
+    {
+      path: '/teacher/live/:classId',
+      name: 'liveTeacher',
+      component: () => import('../views/teacher/LiveDashboard.vue'),
+      meta: { requiresAuth: true },
+    },
     { path: '/live/join', name: 'liveJoin', component: () => import('../views/LiveJoin.vue') },
-    { path: '/live/:sessionCode', name: 'liveStudent', component: () => import('../views/StudentLive.vue') },
+    {
+      path: '/live/:sessionCode',
+      name: 'liveStudent',
+      component: () => import('../views/StudentLive.vue'),
+    },
     // 备课学情仪表盘
-    { path: '/teacher/pre-lesson', name: 'preLesson', component: () => import('../views/teacher/PreLessonDashboard.vue'), meta: { requiresAuth: true } },
+    {
+      path: '/teacher/pre-lesson',
+      name: 'preLesson',
+      component: () => import('../views/teacher/PreLessonDashboard.vue'),
+      meta: { requiresAuth: true },
+    },
     // 预习任务
-    { path: '/teacher/preview/create', name: 'previewCreate', component: () => import('../views/teacher/PreviewTaskCreate.vue'), meta: { requiresAuth: true } },
-    { path: '/preview/:taskId', name: 'previewView', component: () => import('../views/PreviewTaskView.vue') },
+    {
+      path: '/teacher/preview/create',
+      name: 'previewCreate',
+      component: () => import('../views/teacher/PreviewTaskCreate.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/preview/:taskId',
+      name: 'previewView',
+      component: () => import('../views/PreviewTaskView.vue'),
+    },
     {
       path: '/:catchAll(.*)*',
       name: 'not-found',
-      redirect: '/'
-    }
+      redirect: '/',
+    },
   ],
 })
 
 // 全局路由守卫
-router.beforeEach((to: RouteLocationNormalized) => {
-  const requiresAuth = to.matched.some(record => record.meta.requiresAuth)
-  const requiresGuest = to.matched.some(record => record.meta.requiresGuest)
+router.beforeEach(async (to: RouteLocationNormalized) => {
+  const requiresAuth = to.matched.some((record) => record.meta.requiresAuth)
+  const requiresGuest = to.matched.some((record) => record.meta.requiresGuest)
 
-  const token = localStorage.getItem('token')
-  const isLoggedIn = !!token
+  const authStore = useAuthStore()
+  await authStore.ensureInitialized()
+  const isLoggedIn = authStore.isAuthenticated
 
   // 老师端页面 → 必须登录
   if (requiresAuth && !isLoggedIn) {
@@ -108,7 +133,7 @@ router.beforeEach((to: RouteLocationNormalized) => {
     return { name: 'chat' }
   }
 
-  // 学生端页面（/）→ 直接放行，无需 token
+  // 学生端页面（/）→ 直接放行，无需教师 Session
   return true
 })
 

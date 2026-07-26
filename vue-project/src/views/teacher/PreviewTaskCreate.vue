@@ -9,18 +9,27 @@
     <div class="form-card">
       <el-form label-width="80px" :model="form" @submit.prevent>
         <el-form-item label="班级">
-          <el-select v-model="form.classId" placeholder="选择班级" style="width:100%">
+          <el-select v-model="form.classId" placeholder="选择班级" style="width: 100%">
             <el-option v-for="c in classList" :key="c.id" :label="c.name" :value="c.id" />
           </el-select>
         </el-form-item>
         <el-form-item label="知识点">
-          <el-input v-model="form.knowledgePoint" placeholder="例：二次函数、指针与内存管理、光合作用" />
+          <el-input
+            v-model="form.knowledgePoint"
+            placeholder="例：二次函数、指针与内存管理、光合作用"
+          />
         </el-form-item>
         <el-form-item label="主题">
           <el-input v-model="form.topic" placeholder="可选，自定义预习标题，留空则自动生成" />
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" size="large" :loading="generating" :disabled="!canSubmit" @click="handleGenerate">
+          <el-button
+            type="primary"
+            size="large"
+            :loading="generating"
+            :disabled="!canSubmit"
+            @click="handleGenerate"
+          >
             🤖 {{ generating ? 'AI 生成中...' : 'AI 生成预习任务' }}
           </el-button>
         </el-form-item>
@@ -83,11 +92,16 @@ import { getDashboardClasses } from '../../api/dashboard'
 import { createPreviewTask, type PreviewTaskDTO } from '../../api/preview'
 import { ElMessage } from 'element-plus'
 import { marked } from 'marked'
+import { getApiErrorMessage } from '../../api/errors'
 
 const route = useRoute()
 
 const classList = ref<{ id: number; name: string }[]>([])
-const form = ref({ classId: Number(route.query.classId) || null as number | null, knowledgePoint: '', topic: '' })
+const form = ref({
+  classId: Number(route.query.classId) || (null as number | null),
+  knowledgePoint: '',
+  topic: '',
+})
 const generating = ref(false)
 const result = ref<PreviewTaskDTO | null>(null)
 
@@ -110,49 +124,155 @@ async function handleGenerate() {
     })
     result.value = res.data
     ElMessage.success('预习任务已生成并推送到QQ群')
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.message || '生成失败')
-  } finally { generating.value = false }
+  } catch (error: unknown) {
+    ElMessage.error(getApiErrorMessage(error, '生成失败'))
+  } finally {
+    generating.value = false
+  }
 }
 
 onMounted(async () => {
   try {
     const res = await getDashboardClasses()
     classList.value = res.data || []
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 })
 </script>
 
 <style scoped>
-.preview-create-page { max-width: 800px; margin: 0 auto; padding: 20px; }
-.page-header { margin-bottom: 20px; }
-.page-header h1 { font-size: 20px; margin: 8px 0 0; }
-.subtitle { color: #909399; font-size: 13px; }
-.btn-back { border: none; background: none; color: #409eff; cursor: pointer; font-size: 14px; padding: 0; }
-.form-card { background: #fff; border-radius: 10px; padding: 24px; box-shadow: 0 1px 6px rgba(0,0,0,.04); }
+.preview-create-page {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 20px;
+}
+.page-header {
+  margin-bottom: 20px;
+}
+.page-header h1 {
+  font-size: 20px;
+  margin: 8px 0 0;
+}
+.subtitle {
+  color: #909399;
+  font-size: 13px;
+}
+.btn-back {
+  border: none;
+  background: none;
+  color: #409eff;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0;
+}
+.form-card {
+  background: #fff;
+  border-radius: 10px;
+  padding: 24px;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.04);
+}
 
-.result-section { margin-top: 24px; }
-.result-section h2 { font-size: 18px; margin-bottom: 16px; }
-.preview-card { background: #fff; border-radius: 10px; padding: 24px; box-shadow: 0 1px 6px rgba(0,0,0,.04); }
-.card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-.card-header h3 { font-size: 17px; margin: 0; }
+.result-section {
+  margin-top: 24px;
+}
+.result-section h2 {
+  font-size: 18px;
+  margin-bottom: 16px;
+}
+.preview-card {
+  background: #fff;
+  border-radius: 10px;
+  padding: 24px;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.04);
+}
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+.card-header h3 {
+  font-size: 17px;
+  margin: 0;
+}
 
-.guide-section, .questions-section, .discussion-section { margin-bottom: 20px; }
-.guide-section h4, .questions-section h4, .discussion-section h4 { font-size: 14px; color: #606266; margin: 0 0 10px; }
-.guide-text { font-size: 14px; line-height: 1.8; color: #303133; }
-.guide-text :deep(p) { margin: 0 0 8px; }
-.guide-text :deep(ul) { padding-left: 20px; }
+.guide-section,
+.questions-section,
+.discussion-section {
+  margin-bottom: 20px;
+}
+.guide-section h4,
+.questions-section h4,
+.discussion-section h4 {
+  font-size: 14px;
+  color: #606266;
+  margin: 0 0 10px;
+}
+.guide-text {
+  font-size: 14px;
+  line-height: 1.8;
+  color: #303133;
+}
+.guide-text :deep(p) {
+  margin: 0 0 8px;
+}
+.guide-text :deep(ul) {
+  padding-left: 20px;
+}
 
-.question-card { padding: 12px; margin-bottom: 10px; background: #fafafa; border-radius: 8px; border-left: 3px solid #409eff; }
-.q-title { font-size: 14px; font-weight: 500; margin: 0 0 8px; }
-.q-options { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 8px; }
-.q-opt { font-size: 13px; color: #606266; }
-.q-answer { font-size: 13px; color: #67c23a; }
-.answer-label { color: #67c23a; }
-.answer-exp { color: #909399; font-size: 12px; }
+.question-card {
+  padding: 12px;
+  margin-bottom: 10px;
+  background: #fafafa;
+  border-radius: 8px;
+  border-left: 3px solid #409eff;
+}
+.q-title {
+  font-size: 14px;
+  font-weight: 500;
+  margin: 0 0 8px;
+}
+.q-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.q-opt {
+  font-size: 13px;
+  color: #606266;
+}
+.q-answer {
+  font-size: 13px;
+  color: #67c23a;
+}
+.answer-label {
+  color: #67c23a;
+}
+.answer-exp {
+  color: #909399;
+  font-size: 12px;
+}
 
-.discussion-section p { font-size: 14px; color: #e6a23c; margin: 0; padding: 10px; background: #fdf6ec; border-radius: 6px; }
+.discussion-section p {
+  font-size: 14px;
+  color: #e6a23c;
+  margin: 0;
+  padding: 10px;
+  background: #fdf6ec;
+  border-radius: 6px;
+}
 
-.card-footer { display: flex; justify-content: space-between; align-items: center; padding-top: 16px; border-top: 1px solid #eee; }
-.create-time { font-size: 12px; color: #909399; }
+.card-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 16px;
+  border-top: 1px solid #eee;
+}
+.create-time {
+  font-size: 12px;
+  color: #909399;
+}
 </style>

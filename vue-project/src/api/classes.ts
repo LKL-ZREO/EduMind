@@ -19,20 +19,19 @@ export async function getClassDetail(classId: number) {
   return res.data
 }
 
-export async function createClass(data: {
-  name: string
-  courseId?: number
-  description?: string
-}) {
+export async function createClass(data: { name: string; courseId?: number; description?: string }) {
   const res = await request.post('/teacher/classes', data)
   return res.data
 }
 
-export async function updateClass(classId: number, data: {
-  name?: string
-  courseId?: number
-  description?: string
-}) {
+export async function updateClass(
+  classId: number,
+  data: {
+    name?: string
+    courseId?: number
+    description?: string
+  },
+) {
   const res = await request.put(`/teacher/classes/${classId}`, data)
   return res.data
 }
@@ -52,7 +51,10 @@ export async function removeStudent(classId: number, studentId: string) {
   return res.data
 }
 
-export async function importStudents(classId: number, students: { studentId: string; studentName: string }[]) {
+export async function importStudents(
+  classId: number,
+  students: { studentId: string; studentName: string }[],
+) {
   const res = await request.post(`/teacher/classes/${classId}/students/import`, { students })
   return res.data
 }

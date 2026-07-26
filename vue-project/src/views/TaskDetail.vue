@@ -60,7 +60,9 @@
                 <td>{{ i + 1 }}</td>
                 <td>{{ s.studentName }}</td>
                 <td>
-                  <span v-if="s.score != null" :class="scoreClass(s.score)">{{ s.finalScore != null ? s.finalScore : s.score }}</span>
+                  <span v-if="s.score != null" :class="scoreClass(s.score)">{{
+                    s.finalScore != null ? s.finalScore : s.score
+                  }}</span>
                   <span v-else class="no-score">-</span>
                 </td>
                 <td>
@@ -86,149 +88,173 @@
   </div>
 </template>
 
-<script>
+<script setup lang="ts">
 import * as echarts from 'echarts'
+import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useClassStore } from '@/stores/class'
 import request from '@/api/request'
+import type { ApiResponse } from '@/api/types'
 import { ElMessage } from 'element-plus'
 
-export default {
-  setup() {
-    const classStore = useClassStore()
-    return { classStore }
-  },
-  name: 'TaskDetail',
-  data() {
-    return {
-      taskId: null,
-      task: null,
-      className: '',
-      loading: true
+interface ScoreDistribution {
+  excellent: number
+  good: number
+  medium: number
+  pass: number
+  fail: number
+}
+
+interface TaskSubmission {
+  submissionId: number
+  studentName: string
+  score: number | null
+  finalScore: number | null
+  isLate: boolean
+  submittedAt: string | null
+}
+
+interface TaskDetail {
+  classId: number
+  taskName: string
+  deadline: string
+  allowLate: boolean
+  latePenalty: number
+  submittedCount: number
+  totalSubmissions: number
+  avgScore: number
+  distribution: ScoreDistribution
+  submissions: TaskSubmission[]
+}
+
+const route = useRoute()
+const router = useRouter()
+const classStore = useClassStore()
+const task = ref<TaskDetail | null>(null)
+const className = ref('')
+const loading = ref(true)
+const chartRef = ref<HTMLElement | null>(null)
+let chart: echarts.ECharts | null = null
+
+function goBack() {
+  router.push('/teacher/tasks')
+}
+
+async function loadDetail() {
+  loading.value = true
+  try {
+    const taskId = String(route.params.id)
+    const response = await request.get<ApiResponse<TaskDetail>>(`/tasks/${taskId}`)
+    if (response.data.code !== 200) {
+      task.value = null
+      return
     }
-  },
-
-  mounted() {
-    this.taskId = this.$route.params.id
-    this.loadDetail()
-  },
-
-  beforeUnmount() {
-    if (this.chart) this.chart.dispose()
-  },
-
-  methods: {
-    goBack() {
-      this.$router.push('/teacher/tasks')
-    },
-
-    async loadDetail() {
-      this.loading = true
-      try {
-        const res = await request.get(`/tasks/${this.taskId}`)
-        if (res.data.code === 200) {
-          this.task = res.data.data
-          await this.classStore.fetchClassList()
-          const cls = this.classStore.classList.find(c => c.id === this.task.classId)
-          this.className = cls ? cls.name : '未知'
-        } else {
-          this.task = null
-        }
-      } catch (e) {
-        console.error('加载作业详情失败', e)
-        this.task = null
-      } finally {
-        this.loading = false
-        this.$nextTick(() => this.renderChart())
-      }
-    },
-
-    renderChart() {
-
-      if (!this.task?.distribution) return
-      const container = this.$refs.chartRef
-      if (!container) return
-
-      if (this.chart) this.chart.dispose()
-
-      const dist = this.task.distribution
-      const chart = echarts.init(container)
-      this.chart = chart
-
-      chart.setOption({
-        tooltip: { trigger: 'axis' },
-        grid: { left: '3%', right: '4%', bottom: '10%', containLabel: true },
-        xAxis: {
-          type: 'category',
-          data: ['优秀(90+)', '良好(80-89)', '中等(70-79)', '及格(60-69)', '不及格(<60)'],
-          axisLabel: { color: '#bbb' }
-        },
-        yAxis: {
-          type: 'value',
-          min: 0,
-          minInterval: 1,
-          axisLabel: { color: '#bbb' }
-        },
-        series: [{
-          type: 'bar',
-          data: [
-            dist.excellent || 0,
-            dist.good || 0,
-            dist.medium || 0,
-            dist.pass || 0,
-            dist.fail || 0
-          ],
-          itemStyle: {
-            borderRadius: [4, 4, 0, 0],
-            color: {
-              type: 'linear',
-              x: 0, y: 0, x2: 0, y2: 1,
-              colorStops: [
-                { offset: 0, color: '#409EFF' },
-                { offset: 1, color: '#cc6400' }
-              ]
-            }
-          },
-          label: {
-            show: true,
-            position: 'top',
-            color: '#ccc'
-          }
-        }]
-      })
-
-      window.addEventListener('resize', () => chart.resize())
-    },
-
-    formatDate(dateStr) {
-      if (!dateStr) return ''
-      const d = new Date(dateStr)
-      const pad = n => String(n).padStart(2, '0')
-      return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
-    },
-
-    formatDateTime(dateStr) {
-      if (!dateStr) return '-'
-      const d = new Date(dateStr)
-      const pad = n => String(n).padStart(2, '0')
-      return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
-    },
-
-    scoreClass(score) {
-      if (score >= 90) return 'score-excellent'
-      if (score >= 80) return 'score-good'
-      if (score >= 60) return 'score-pass'
-      return 'score-fail'
-    },
-
-    viewDetail(s) {
-      if (!s.submissionId) {
-        ElMessage.warning('数据未加载完成，请刷新页面后重试')
-        return
-      }
-      window.open(`/view/submission/${s.submissionId}`, '_blank')
-    }
+    task.value = response.data.data
+    await classStore.fetchClassList()
+    className.value =
+      classStore.classList.find((item) => item.id === task.value?.classId)?.name ?? '未知'
+  } catch {
+    task.value = null
+  } finally {
+    loading.value = false
+    await nextTick()
+    renderChart()
   }
 }
+
+function renderChart() {
+  if (!task.value?.distribution || !chartRef.value) return
+  chart?.dispose()
+  const dist = task.value.distribution
+  chart = echarts.init(chartRef.value)
+
+  chart.setOption({
+    tooltip: { trigger: 'axis' },
+    grid: { left: '3%', right: '4%', bottom: '10%', containLabel: true },
+    xAxis: {
+      type: 'category',
+      data: ['优秀(90+)', '良好(80-89)', '中等(70-79)', '及格(60-69)', '不及格(<60)'],
+      axisLabel: { color: '#bbb' },
+    },
+    yAxis: {
+      type: 'value',
+      min: 0,
+      minInterval: 1,
+      axisLabel: { color: '#bbb' },
+    },
+    series: [
+      {
+        type: 'bar',
+        data: [
+          dist.excellent || 0,
+          dist.good || 0,
+          dist.medium || 0,
+          dist.pass || 0,
+          dist.fail || 0,
+        ],
+        itemStyle: {
+          borderRadius: [4, 4, 0, 0],
+          color: {
+            type: 'linear',
+            x: 0,
+            y: 0,
+            x2: 0,
+            y2: 1,
+            colorStops: [
+              { offset: 0, color: '#409EFF' },
+              { offset: 1, color: '#cc6400' },
+            ],
+          },
+        },
+        label: {
+          show: true,
+          position: 'top',
+          color: '#ccc',
+        },
+      },
+    ],
+  })
+}
+
+function resizeChart() {
+  chart?.resize()
+}
+
+function formatDate(date: string) {
+  return formatDateTime(date)
+}
+
+function formatDateTime(date: string) {
+  if (!date) return '-'
+  const value = new Date(date)
+  const pad = (number: number) => String(number).padStart(2, '0')
+  return `${pad(value.getMonth() + 1)}-${pad(value.getDate())} ${pad(value.getHours())}:${pad(value.getMinutes())}`
+}
+
+function scoreClass(score: number) {
+  if (score >= 90) return 'score-excellent'
+  if (score >= 80) return 'score-good'
+  if (score >= 60) return 'score-pass'
+  return 'score-fail'
+}
+
+function viewDetail(submission: TaskSubmission) {
+  if (!submission.submissionId) {
+    ElMessage.warning('数据未加载完成，请刷新页面后重试')
+    return
+  }
+  window.open(`/view/submission/${submission.submissionId}`, '_blank')
+}
+
+onMounted(() => {
+  window.addEventListener('resize', resizeChart)
+  void loadDetail()
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', resizeChart)
+  chart?.dispose()
+})
 </script>
 
 <style scoped>
@@ -300,7 +326,7 @@ export default {
 .card-num {
   font-size: 28px;
   font-weight: bold;
-  color: #409EFF;
+  color: #409eff;
 }
 
 .card-label {
@@ -395,15 +421,27 @@ export default {
   color: #606266;
 }
 
-.score-excellent { color: #52c41a; font-weight: 600; }
-.score-good { color: #1890ff; font-weight: 600; }
-.score-pass { color: #d46b08; font-weight: 600; }
-.score-fail { color: #cf1322; font-weight: 600; }
+.score-excellent {
+  color: #52c41a;
+  font-weight: 600;
+}
+.score-good {
+  color: #1890ff;
+  font-weight: 600;
+}
+.score-pass {
+  color: #d46b08;
+  font-weight: 600;
+}
+.score-fail {
+  color: #cf1322;
+  font-weight: 600;
+}
 
 .btn-link {
   background: none;
   border: 1px solid #dcdfe6;
-  color: #409EFF;
+  color: #409eff;
   cursor: pointer;
   padding: 4px 12px;
   border-radius: 4px;
@@ -411,6 +449,6 @@ export default {
 }
 
 .btn-link:hover {
-  background: rgba(64,158,255,.12);
+  background: rgba(64, 158, 255, 0.12);
 }
 </style>

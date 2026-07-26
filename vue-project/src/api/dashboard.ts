@@ -1,7 +1,13 @@
 import request from './request'
+import type { ApiResponse } from './types'
+
+export interface DashboardClass {
+  id: number
+  name: string
+}
 
 export async function getDashboardClasses() {
-  const res = await request.get('/dashboard/classes')
+  const res = await request.get<ApiResponse<DashboardClass[]>>('/dashboard/classes')
   return res.data
 }
 
@@ -102,7 +108,9 @@ export interface TimelineDTO {
 }
 
 export async function getTimeline(classId: number, limit = 15) {
-  const res = await request.get('/dashboard/timeline', { params: { classId, limit } })
+  const res = await request.get<ApiResponse<TimelineDTO>>('/dashboard/timeline', {
+    params: { classId, limit },
+  })
   return res.data
 }
 
@@ -111,9 +119,9 @@ export interface CalendarPlan {
   id?: number
   classId: number
   weekNumber: number
-  plannedDate?: string
+  plannedDate?: string | null
   topic: string
-  knowledgePoints?: string
+  knowledgePoints?: string | null
   status?: string
 }
 
@@ -123,7 +131,10 @@ export async function getTeachingCalendar(classId: number) {
 }
 
 export async function addCalendarPlan(plan: CalendarPlan) {
-  const res = await request.post('/dashboard/teaching-calendar/add', plan)
+  const res = await request.post<ApiResponse<CalendarPlan>>(
+    '/dashboard/teaching-calendar/add',
+    plan,
+  )
   return res.data
 }
 
@@ -163,12 +174,17 @@ export interface PreLessonOverview {
 }
 
 export async function getPreLessonOverview(classId: number) {
-  const res = await request.get('/dashboard/pre-lesson', { params: { classId } })
+  const res = await request.get<ApiResponse<PreLessonOverview>>('/dashboard/pre-lesson', {
+    params: { classId },
+  })
   return res.data
 }
 
 /** AI 备课建议（独立接口，加载较慢，前端异步调用） */
 export async function getPreLessonSuggestion(classId: number) {
-  const res = await request.get('/dashboard/pre-lesson/suggestion', { params: { classId } })
+  const res = await request.get<ApiResponse<{ suggestion: string }>>(
+    '/dashboard/pre-lesson/suggestion',
+    { params: { classId } },
+  )
   return res.data
 }

@@ -78,7 +78,7 @@ export async function moveDirectory(id: number, targetParentId: number | null) {
 
 export async function uploadDocument(formData: FormData) {
   const res = await request.post('/documents/upload', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' }
+    headers: { 'Content-Type': 'multipart/form-data' },
   })
   return res.data
 }
