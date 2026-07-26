@@ -331,6 +331,7 @@ public class OneBotWebSocketClient {
 
         @Override
         public CompletionStage<?> onClose(WebSocket ws, int statusCode, String reason) {
+            // TODO: Replace blocking recursive reconnects with scheduled backoff and heartbeat monitoring.
             log.warn("OneBot WebSocket 断开: code={}, reason={}", statusCode, reason);
             buffer.setLength(0);
             if (running) {
