@@ -68,7 +68,7 @@ jobs:
       - name: Session security integration tests
         run: |
           cd edumind
-          ./mvnw test -Dgroups=integration -DexcludedGroups= \
+          ./mvnw test -Dgroups=integration -Dsurefire.excluded-groups=none \
             -Dspring.profiles.active=test \
             -Dspring.datasource.url=jdbc:postgresql://localhost:5432/postgres \
             -Dspring.datasource.username=postgres \

@@ -13,6 +13,7 @@ import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.Base64;
@@ -20,6 +21,7 @@ import java.util.List;
 
 @Slf4j
 @Component
+@ConditionalOnProperty(name = "edumind.llm.backend", havingValue = "built-in", matchIfMissing = true)
 public class LangChain4jVisionModelClient implements VisionModelClient {
 
     private final ChatModel visionChatModel;
