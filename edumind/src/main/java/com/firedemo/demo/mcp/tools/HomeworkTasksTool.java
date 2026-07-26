@@ -2,8 +2,9 @@ package com.firedemo.demo.mcp.tools;
 
 import com.firedemo.demo.Entity.ClassInfo;
 import com.firedemo.demo.Entity.HomeworkTask;
-import com.firedemo.demo.Service.ClassService;
 import com.firedemo.demo.Service.HomeworkTaskService;
+import com.firedemo.demo.agent.context.AgentExecutionContext;
+import com.firedemo.demo.mcp.ToolAccessPolicy;
 import com.firedemo.demo.mcp.ToolDefinition;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -21,7 +22,7 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class HomeworkTasksTool implements ToolDefinition {
 
-    private final ClassService classService;
+    private final ToolAccessPolicy toolAccessPolicy;
     private final HomeworkTaskService homeworkTaskService;
 
     @Override
@@ -46,14 +47,14 @@ public class HomeworkTasksTool implements ToolDefinition {
     }
 
     @Override
-    public String execute(Map<String, Object> arguments) {
+    public String execute(Map<String, Object> arguments, AgentExecutionContext context) {
         String className = (String) arguments.get("className");
         log.info("MCP Tool queryHomeworkTasks: className={}", className);
 
         try {
-            ClassInfo classInfo = classService.getClassByName(className);
+            ClassInfo classInfo = toolAccessPolicy.findOwnedClass(context, className);
             if (classInfo == null) {
-                return "未找到班级「" + className + "」，请确认班级名称是否正确。";
+                return "未找到班级「" + className + "」或当前用户无权访问。";
             }
             Long classId = classInfo.getId();
 

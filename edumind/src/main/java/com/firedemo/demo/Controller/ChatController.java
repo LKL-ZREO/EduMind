@@ -1,6 +1,10 @@
 package com.firedemo.demo.Controller;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.firedemo.demo.Service.*;
+import com.firedemo.demo.agent.context.AgentChannel;
+import com.firedemo.demo.agent.context.AgentExecutionContext;
+import com.firedemo.demo.agent.context.AgentExecutionContextFactory;
 import com.firedemo.demo.common.annotation.RateLimit;
 import com.firedemo.demo.common.annotation.RateLimit.Dimension;
 import com.firedemo.demo.common.annotation.RateLimit.TimeUnit;
@@ -8,21 +12,29 @@ import com.firedemo.demo.Entity.ChatHistory;
 import com.firedemo.demo.Entity.ClassInfo;
 import com.firedemo.demo.Entity.User;
 import com.firedemo.demo.mapper.ClassInfoMapper;
-import jakarta.servlet.http.HttpServletResponse;
+import com.firedemo.demo.vision.VisualAsset;
+import com.firedemo.demo.vision.VisualAssetService;
+import com.firedemo.demo.vision.VisualObservation;
+import com.firedemo.demo.vision.VisionTask;
+import com.firedemo.demo.vision.VisionUnderstandingService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import java.io.IOException;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import reactor.core.publisher.Flux;
 
 @Slf4j
 @RestController
@@ -35,16 +47,20 @@ public class ChatController {
     private final ChatHistoryService chatHistoryService;
     private final UserService userService;
     private final ClassInfoMapper classInfoMapper;
+    private final VisualAssetService visualAssetService;
+    private final VisionUnderstandingService visionUnderstandingService;
+    private final ObjectMapper objectMapper;
+    private final AgentExecutionContextFactory executionContextFactory;
 
     @GetMapping("/health")
     public ResponseEntity<Map<String, Object>> health() {
-        boolean openclawHealthy = openClawService.checkConnection();
+        boolean llmHealthy = openClawService.checkConnection();
         Map<String, Object> health = Map.of(
-                "status", openclawHealthy ? "UP" : "DEGRADED",
+                "status", llmHealthy ? "UP" : "DEGRADED",
                 "timestamp", Instant.now().toString(),
-                "openclaw", openclawHealthy ? "UP" : "DOWN"
+                "llm", llmHealthy ? "UP" : "DOWN"
         );
-        return ResponseEntity.status(openclawHealthy ? 200 : 503).body(health);
+        return ResponseEntity.status(llmHealthy ? 200 : 503).body(health);
     }
 
     @GetMapping("/history")
@@ -68,17 +84,12 @@ public class ChatController {
     @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public ResponseEntity<StreamingResponseBody> streamMessage(
             @RequestParam String message,
-            @RequestParam(required = false) String sessionId,
-            HttpServletResponse httpResponse) {
+            @RequestParam(required = false) String sessionId) {
 
         log.debug("收到流式消息: {}, sessionId: {}", message, sessionId);
-        httpResponse.setHeader("Connection", "close");
-
         Long userId = getCurrentUserId();
         boolean newSession = (sessionId == null || sessionId.isEmpty());
         if (newSession) sessionId = UUID.randomUUID().toString();
-
-        saveChatHistory(userId, sessionId, "user", message, null);
 
         List<Map<String, Object>> history = new ArrayList<>();
         if (sessionId != null) {
@@ -87,62 +98,167 @@ public class ChatController {
                 history.add(Map.of("role", h.getRole(), "content", h.getContent()));
             }
         }
+        saveChatHistory(userId, sessionId, "user", message, null);
 
         Long courseId = resolveCourseId(userId);
-        openClawService.registerSessionContext(sessionId, userId, courseId);
+        AgentExecutionContext context = executionContextFactory.create(
+                sessionId, userId, courseId, AgentChannel.WEB);
+        openClawService.registerSessionContext(context);
 
-        String finalSessionId = sessionId;
-        boolean isNewSession = newSession;
-        StreamingResponseBody responseBody = outputStream -> {
-            StringBuilder responseBuilder = new StringBuilder();
-            try {
-                if (isNewSession) {
-                    String sessionEvent = "data: {\"type\":\"session\",\"sessionId\":\"" + finalSessionId + "\"}\n\n";
-                    outputStream.write(sessionEvent.getBytes());
-                    outputStream.flush();
-                }
-                openClawService.streamChat(message, history, finalSessionId)
-                        .doOnNext(chunk -> {
-                            try {
-                                responseBuilder.append(chunk);
-                                outputStream.write(("data: " + chunk + "\n\n").getBytes());
-                                outputStream.flush();
-                            } catch (IOException e) {
-                                throw new RuntimeException(e);
-                            }
-                        })
-                        .doOnComplete(() -> {
-                            if (userId != null && !responseBuilder.isEmpty()) {
-                                saveChatHistory(userId, finalSessionId, "assistant",
-                                        responseBuilder.toString(), "OpenClaw");
-                            }
-                            try {
-                                outputStream.write("data: [DONE]\n\n".getBytes());
-                                outputStream.flush();
-                            } catch (IOException e) {
-                                log.error("写入结束标记失败", e);
-                            }
-                        })
-                        .blockLast(java.time.Duration.ofMinutes(5));
-            } catch (Exception e) {
-                log.error("流式响应异常", e);
-                if (userId != null && !responseBuilder.isEmpty()) {
-                    saveChatHistory(userId, finalSessionId, "assistant",
-                            responseBuilder.toString(), "OpenClaw");
-                }
-                try {
-                    outputStream.write("data: {\"error\":\"服务暂时不可用\"}\n\n".getBytes());
-                    outputStream.flush();
-                } catch (IOException ex) { /* 客户端可能已断开 */ }
-            }
-        };
-
-        return ResponseEntity.ok()
-                .header("X-Accel-Buffering", "no")
-                .body(responseBody);
+        Flux<String> stream = openClawService.streamChat(message, history, context);
+        return sseResponse(stream, sessionId, newSession, userId);
     }
 
     // ============ 私有方法 ============
+
+    @RateLimit(dimensions = {Dimension.GLOBAL, Dimension.IP}, count = 10, interval = 60, timeUnit = TimeUnit.SECONDS)
+    @PostMapping(value = "/multimodal", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<Map<String, Object>> multimodalMessage(
+            @RequestParam("message") String message,
+            @RequestParam(value = "sessionId", required = false) String sessionId,
+            @RequestParam("file") MultipartFile file) throws IOException {
+
+        Long userId = getCurrentUserId();
+        boolean newSession = sessionId == null || sessionId.isBlank();
+        if (newSession) sessionId = UUID.randomUUID().toString();
+
+        String contentType = file.getContentType();
+        if (contentType == null || !contentType.startsWith("image/")) {
+            return ResponseEntity.badRequest().body(Map.of("error", "仅支持图片多模态输入"));
+        }
+
+        Long courseId = resolveCourseId(userId);
+        AgentExecutionContext context = executionContextFactory.create(
+                sessionId, userId, courseId, AgentChannel.WEB);
+        openClawService.registerSessionContext(context);
+
+        VisualAsset asset = visualAssetService.importBytes(file.getBytes(), contentType);
+        VisualObservation observation = visionUnderstandingService.analyze(
+                asset.assetId(), VisionTask.DESCRIBE, message);
+
+        String agentMessage = """
+                用户上传了一张图片，系统视觉模块已完成分析。
+                assetId: %s
+                视觉分析结果:
+                %s
+
+                用户问题:
+                %s
+                """.formatted(asset.assetId(), observation.summary(), message);
+
+        String userContent = "[图片] " + (file.getOriginalFilename() != null ? file.getOriginalFilename() : "")
+                + "\n" + message;
+        saveChatHistory(userId, sessionId, "user", userContent, null);
+
+        String answer = openClawService.chat(agentMessage, context, null);
+        saveChatHistory(userId, sessionId, "assistant", answer, "built-in");
+
+        return ResponseEntity.ok(Map.of(
+                "content", answer,
+                "sessionId", sessionId,
+                "newSession", newSession
+        ));
+    }
+
+    @RateLimit(dimensions = {Dimension.GLOBAL, Dimension.IP}, count = 10, interval = 60, timeUnit = TimeUnit.SECONDS)
+    @PostMapping(value = "/multimodal/stream", consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
+            produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public ResponseEntity<StreamingResponseBody> multimodalStreamMessage(
+            @RequestParam("message") String message,
+            @RequestParam(value = "sessionId", required = false) String sessionId,
+            @RequestParam("file") MultipartFile file) throws IOException {
+
+        Long userId = getCurrentUserId();
+        boolean newSession = sessionId == null || sessionId.isBlank();
+        if (newSession) sessionId = UUID.randomUUID().toString();
+
+        String contentType = file.getContentType();
+        if (contentType == null || !contentType.startsWith("image/")) {
+            return ResponseEntity.badRequest().build();
+        }
+
+        Long courseId = resolveCourseId(userId);
+        AgentExecutionContext context = executionContextFactory.create(
+                sessionId, userId, courseId, AgentChannel.WEB);
+        openClawService.registerSessionContext(context);
+
+        VisualAsset asset = visualAssetService.importBytes(file.getBytes(), contentType);
+        VisualObservation observation = visionUnderstandingService.analyze(
+                asset.assetId(), VisionTask.DESCRIBE, message);
+        String agentMessage = """
+                用户上传了一张图片，系统视觉模块已完成分析。
+                assetId: %s
+                视觉分析结果:
+                %s
+
+                用户问题:
+                %s
+                """.formatted(asset.assetId(), observation.summary(), message);
+
+        String userContent = "[图片] " + (file.getOriginalFilename() != null ? file.getOriginalFilename() : "")
+                + "\n" + message;
+        saveChatHistory(userId, sessionId, "user", userContent, null);
+
+        Flux<String> stream = openClawService.streamChat(agentMessage, context, null);
+        return sseResponse(stream, sessionId, newSession, userId);
+    }
+
+    private ResponseEntity<StreamingResponseBody> sseResponse(Flux<String> stream,
+                                                               String sessionId,
+                                                               boolean newSession,
+                                                               Long userId) {
+        StreamingResponseBody body = outputStream -> writeStream(
+                outputStream, stream, sessionId, newSession, userId);
+        return ResponseEntity.ok()
+                .contentType(MediaType.TEXT_EVENT_STREAM)
+                .header("Cache-Control", "no-cache, no-transform")
+                .header("X-Accel-Buffering", "no")
+                .body(body);
+    }
+
+    private void writeStream(OutputStream outputStream,
+                             Flux<String> stream,
+                             String sessionId,
+                             boolean newSession,
+                             Long userId) {
+        StringBuilder response = new StringBuilder();
+        try {
+            if (newSession) {
+                writeSse(outputStream, "session", Map.of("sessionId", sessionId));
+            }
+            stream.doOnNext(chunk -> {
+                        try {
+                            response.append(chunk);
+                            writeSse(outputStream, "token", Map.of("content", chunk));
+                        } catch (IOException e) {
+                            throw new RuntimeException(e);
+                        }
+                    })
+                    .blockLast(java.time.Duration.ofMinutes(5));
+
+            if (userId != null && !response.isEmpty()) {
+                saveChatHistory(userId, sessionId, "assistant", response.toString(), "built-in");
+            }
+            writeSse(outputStream, "done", Map.of());
+        } catch (Exception e) {
+            log.error("流式响应异常: sessionId={}", sessionId, e);
+            if (userId != null && !response.isEmpty()) {
+                saveChatHistory(userId, sessionId, "assistant", response.toString(), "built-in");
+            }
+            try {
+                writeSse(outputStream, "error", Map.of("message", "服务暂时不可用"));
+            } catch (IOException ignored) {
+                // The client may already have disconnected.
+            }
+        }
+    }
+
+    private void writeSse(OutputStream outputStream, String event, Object payload) throws IOException {
+        String frame = "event: " + event + "\n"
+                + "data: " + objectMapper.writeValueAsString(payload) + "\n\n";
+        outputStream.write(frame.getBytes(StandardCharsets.UTF_8));
+        outputStream.flush();
+    }
 
     private Long resolveCourseId(Long userId) {
         if (userId == null) return null;

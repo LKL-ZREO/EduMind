@@ -12,7 +12,7 @@ import java.util.Set;
  * 三个调用入口：
  * <ul>
  *   <li>QQ Bot (OnebotRagController) → {@code userId} / {@code accessibleKbIds} 由调用方提前解析</li>
- *   <li>MCP Tool (KnowledgeSearchTool) → 同上，通过 session/groupId/qq 解析</li>
+ *   <li>MCP Tool (KnowledgeSearchTool) → 从显式 AgentExecutionContext 获取</li>
  *   <li>Web Chat (DocumentServiceImpl) → 同上</li>
  * </ul>
  * <p>
