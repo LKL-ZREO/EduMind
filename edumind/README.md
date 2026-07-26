@@ -22,12 +22,11 @@
 └──┬────────┬──────────┬──────────┬───────────────────┘
    │        │          │          │
    ▼        ▼          ▼          ▼
-┌──────┐ ┌──────┐ ┌────────┐ ┌──────────┐
-│PG +  │ │Redis │ │MinIO   │ │OpenClaw  │
-│pgvec │ │Stream│ │(S3)    │ │(AI网关)  │
-│tor   │ │      │ │        │ │127.0.0.1 │
-└──────┘ └──────┘ └────────┘ │:18789    │
-                             └──────────┘
+┌──────┐ ┌──────┐ ┌────────┐
+│PG +  │ │Redis │ │MinIO   │
+│pgvec │ │Stream│ │(S3)    │
+│tor   │ │      │ │        │
+└──────┘ └──────┘ └────────┘
 ┌──────────┐
 │ OneBot   │
 │ (NapCat) │
@@ -38,12 +37,13 @@
 
 本项目（docker-compose）自动启动：PostgreSQL、Redis、MinIO、Nginx、应用。
 
-以下两个服务需要**另行启动**：
+以下服务需要**另行启动**：
 
 | 服务 | 说明 | 安装指南 |
 |------|------|---------|
-| **OpenClaw** | AI 网关，统一管理 LLM API Key、模型路由、Tool Calling | 见下方 |
 | **OneBot / NapCat** | QQ 机器人客户端，将 QQ 消息转发到 HTTP | 见下方 |
+
+> **LLM 调用**：默认直连模型 API（Kimi 等），无需额外网关。也可通过 `edumind.llm.backend=openclaw` 切回 OpenClaw 网关。
 
 ---
 
@@ -66,8 +66,8 @@ cp .env.example .env
 
 ```bash
 DB_PASS=你的数据库密码
-JWT_SECRET=$(openssl rand -base64 32)   # 随机生成
-OPENCLAW_API_KEY=你的AI网关API密钥
+LIVE_SESSION_TOKEN_SECRET=$(openssl rand -base64 32)   # 学生课堂范围令牌
+LLM_API_KEY=你的LLM API密钥（如 Kimi API Key）
 ONEBOT_TOKEN=你的QQ机器人token
 ```
 
@@ -79,11 +79,17 @@ docker compose up -d
 
 自动启动：PostgreSQL (+pgvector) + Redis + MinIO + Nginx + 应用。
 
-### 4. 启动 OpenClaw（AI 网关）
+### 4. （可选）使用 OpenClaw 网关
 
-OpenClaw 是独立的 AI 网关，需要单独安装运行。配置好 LLM 后，EduMind 通过 `localhost:18789` 调用它。
+默认使用直连 LLM API。如需通过 OpenClaw 网关，在 `.env` 中设置：
 
-参考 OpenClaw 文档配置模型和 API Key，确保启动后能访问：
+```bash
+EDUMIND_LLM_BACKEND=openclaw
+OPENCLAW_API_KEY=你的OpenClaw API Key
+OPENCLAW_BASE_URL=http://localhost:18789/v1
+```
+
+然后启动 OpenClaw 网关，确保能访问：
 
 ```bash
 curl http://localhost:18789/v1/models
@@ -130,9 +136,13 @@ npm run dev
 | `DB_HOST` | 数据库地址 | `localhost` |
 | `REDIS_HOST` | Redis 地址 | `localhost` |
 | `REDIS_PORT` | Redis 端口 | `6379` |
-| `JWT_SECRET` | JWT 签名密钥（至少 32 字节） | **必填** |
-| `OPENCLAW_API_KEY` | OpenClaw API Key | **必填** |
-| `OPENCLAW_BASE_URL` | OpenClaw 地址 | `http://localhost:18789/v1` |
+| `LIVE_SESSION_TOKEN_SECRET` | 学生课堂范围令牌签名密钥（至少 32 字节） | **必填** |
+| `LLM_API_KEY` | LLM API Key（直连模型） | **必填** |
+| `LLM_BASE_URL` | LLM API 地址 | `https://api.moonshot.cn/v1` |
+| `LLM_MODEL` | LLM 模型名 | `kimi-k2-0701-preview` |
+| `EDUMIND_LLM_BACKEND` | LLM 后端模式（`built-in`/`openclaw`） | `built-in` |
+| `OPENCLAW_API_KEY` | OpenClaw API Key（仅 openclaw 模式） | 可选 |
+| `OPENCLAW_BASE_URL` | OpenClaw 地址（仅 openclaw 模式） | `http://localhost:18789/v1` |
 | `ONEBOT_TOKEN` | QQ 机器人 Token | **必填** |
 | `ONEBOT_HTTP_URL` | OneBot HTTP 地址 | `http://127.0.0.1:3000` |
 | `STORAGE_TYPE` | 文件存储类型 | `local`（`s3` 用 MinIO） |
@@ -183,7 +193,7 @@ edumind/
 │   │   ├── SmartChunkService   # 文档智能切割
 │   │   └── RagService          # 统一检索入口
 │   ├── Service/            # 业务服务
-│   └── utils/              # 工具类 (JWT / 过滤器)
+│   └── utils/              # 工具类与 Session 请求过滤器
 ├── src/main/resources/
 │   ├── db/migration/       # Flyway 数据库迁移脚本
 │   ├── prompts/            # LLM Prompt 模板

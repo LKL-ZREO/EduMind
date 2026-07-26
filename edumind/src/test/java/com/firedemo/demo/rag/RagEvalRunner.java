@@ -2,6 +2,9 @@ package com.firedemo.demo.rag;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.firedemo.demo.eval.model.EvalCase;
+import com.firedemo.demo.eval.model.EvalResponse;
+import com.firedemo.demo.eval.service.EvalService;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -19,27 +22,34 @@ import java.util.stream.Collectors;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * RAG 检索质量评测 — 真实管线版本。
+ * RAG 检索 + 生成质量评测。
  *
- * <p>连接本地 PostgreSQL（profile=local），走完整 RAG 管线：
- * Embedding → 向量检索 → 关键词检索 → RRF 融合 → Reranker 精排，
- * 使用 rag-eval-dataset.json 评测并输出 Keyword Recall、Content Coverage、MRR。</p>
+ * <p>两个测试方法：
+ * <ol>
+ *   <li>{@code evaluateRealPipeline()} — 检索层指标（Keyword Recall, Content Coverage, MRR）</li>
+ *   <li>{@code evaluateGenerationQuality()} — 生成层指标（Faithfulness, AnswerRelevancy）
+ *       通过 LLM-as-Judge 评分</li>
+ * </ol>
  *
- * <p><b>前提条件：</b>本地 PostgreSQL 中已索引 C 语言课件文档（通过 DocumentService 导入）。</p>
+ * <p>前提：本地 PostgreSQL 中已索引文档 + rag-eval-dataset.json 有数据。</p>
  *
- * <p>默认跳过（需要本地 DB + 模型），手动跑：<pre>
- *   ./mvnw test -Dtest="RagEvalRunner" -DEVALUATION_ENABLED=true
+ * <p>运行：
+ * <pre>
+ *   ./mvnw test -Dtest="RagEvalRunner" -DEVALUATION_ENABLED=true -Dspring.profiles.active=local
  * </pre></p>
  */
 @SpringBootTest
 @ActiveProfiles("local")
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @EnabledIfEnvironmentVariable(named = "EVALUATION_ENABLED", matches = "true")
-@DisplayName("RAG 检索质量评测（真实管线）")
+@DisplayName("RAG 质量评测（检索 + LLM-as-Judge）")
 class RagEvalRunner {
 
     @Autowired
     private RagService ragService;
+
+    @Autowired
+    private EvalService evalService;
 
     private List<EvalCase> cases;
 
@@ -52,15 +62,23 @@ class RagEvalRunner {
         }
 
         System.out.println("\n========================================");
-        System.out.println("  RAG 真实管线评测");
+        System.out.println("  RAG 质量评测");
         System.out.println("  查询数: " + cases.size());
         System.out.println("  管线: Embedding → pgvector → Keyword → RRF → Reranker");
+        System.out.println("  Judge: LLM-as-Judge (纯 Java)");
         System.out.println("========================================\n");
     }
 
+    // ======================== 检索层指标 ========================
+
     @Test
-    @DisplayName("全管线检索质量")
+    @DisplayName("检索质量（Keyword Recall, Content Coverage, MRR, Hit Rate）")
     void evaluateRealPipeline() {
+        if (cases.isEmpty()) {
+            System.out.println("  [跳过] 无评测数据\n");
+            return;
+        }
+
         int totalKeywords = 0, hitKeywords = 0;
         int totalContent = 0, hitContent = 0;
         double mrrSum = 0;
@@ -71,43 +89,38 @@ class RagEvalRunner {
         System.out.println("  " + "-".repeat(70));
 
         for (EvalCase c : cases) {
-            // 走完整 RAG 管线
             RagResult result = ragService.search(RagSearchRequest.builder()
-                    .query(c.query)
+                    .query(c.getQuery())
                     .topK(5)
                     .enableReranker(true)
                     .build());
 
-            // 拼接 top-5 内容
             String concatenated = result.getResults().stream()
                     .map(sc -> sc.chunk().getContent())
                     .collect(Collectors.joining(" "));
 
-            // 关键词命中
             int kwHit = 0;
-            for (String kw : c.expectedKeywords) {
+            for (String kw : c.getExpectedKeywords()) {
                 if (concatenated.toLowerCase().contains(kw.toLowerCase())) {
                     kwHit++;
                 }
             }
-            totalKeywords += c.expectedKeywords.size();
+            totalKeywords += c.getExpectedKeywords().size();
             hitKeywords += kwHit;
 
-            // 内容片段命中（模糊匹配）
             int cHit = 0;
-            for (String expected : c.expectedContent) {
+            for (String expected : c.getExpectedContent()) {
                 if (containsFuzzy(concatenated, expected)) {
                     cHit++;
                 }
             }
-            totalContent += c.expectedContent.size();
+            totalContent += c.getExpectedContent().size();
             hitContent += cHit;
 
-            // MRR
             double rr = 0;
             for (int rank = 0; rank < result.getResults().size(); rank++) {
                 boolean hit = false;
-                for (String expected : c.expectedContent) {
+                for (String expected : c.getExpectedContent()) {
                     if (containsFuzzy(result.getResults().get(rank).chunk().getContent(), expected)) {
                         hit = true;
                         break;
@@ -119,8 +132,8 @@ class RagEvalRunner {
             if (kwHit > 0) queriesWithHits++;
 
             System.out.printf("  %-4d %-28s %8d %8d %8d %8.3f%n",
-                    c.id, truncate(c.query, 28), kwHit,
-                    c.expectedKeywords.size(), cHit, rr);
+                    c.getId(), truncate(c.getQuery(), 28), kwHit,
+                    c.getExpectedKeywords().size(), cHit, rr);
         }
 
         double kwRecall = (double) hitKeywords / Math.max(1, totalKeywords);
@@ -128,19 +141,45 @@ class RagEvalRunner {
         double mrr = mrrSum / cases.size();
         double hitRate = 100.0 * queriesWithHits / cases.size();
 
-        System.out.println("\n  ========================================");
-        System.out.printf("  命中率(≥1 keyword): %.0f%%%n", hitRate);
-        System.out.printf("  Keyword Recall@5:   %.1f%% (%d/%d)%n",
-                kwRecall * 100, hitKeywords, totalKeywords);
-        System.out.printf("  Content Coverage@5: %.1f%% (%d/%d)%n",
-                cCoverage * 100, hitContent, totalContent);
-        System.out.printf("  MRR:                %.3f%n", mrr);
-        System.out.println("  ========================================\n");
+        System.out.println("\n  ╔══════════════════════════════╗");
+        System.out.printf("  ║  检索层指标                   ║%n");
+        System.out.println("  ╠══════════════════════════════╣");
+        System.out.printf("  ║  Hit Rate(≥1 kw):   %5.0f%%  ║%n", hitRate);
+        System.out.printf("  ║  Keyword Recall@5:  %5.1f%%  ║%n", kwRecall * 100);
+        System.out.printf("  ║  ContentCoverage@5: %5.1f%%  ║%n", cCoverage * 100);
+        System.out.printf("  ║  MRR:               %7.3f  ║%n", mrr);
+        System.out.println("  ╚══════════════════════════════╝\n");
 
-        // CI 门槛
         assertThat(kwRecall).as("Keyword Recall@5 应 ≥ 30%").isGreaterThanOrEqualTo(0.30);
         assertThat(hitRate).as("命中率应 ≥ 60%").isGreaterThanOrEqualTo(60.0);
     }
+
+    // ======================== 生成层指标（LLM-as-Judge） ========================
+
+    @Test
+    @DisplayName("生成质量（LLM-as-Judge: Faithfulness + AnswerRelevancy）")
+    void evaluateGenerationQuality() {
+        if (cases.isEmpty()) {
+            System.out.println("  [跳过] 无评测数据\n");
+            return;
+        }
+
+        EvalResponse response = evalService.runEvaluation(
+                List.of("faithfulness", "answer_relevancy"),
+                5,      // topK
+                true,   // enableReranker
+                true    // generateAnswers
+        );
+
+        // CI 门槛
+        if (response.isOk() && response.faithfulness() != null) {
+            assertThat(response.faithfulness())
+                    .as("Faithfulness 应 ≥ 0.70")
+                    .isGreaterThanOrEqualTo(0.70);
+        }
+    }
+
+    // ======================== 工具方法 ========================
 
     private static boolean containsFuzzy(String text, String snippet) {
         String clean1 = text.replaceAll("[\\s，。！？、\"'（）《》]", "");
@@ -167,13 +206,5 @@ class RagEvalRunner {
 
     private static String truncate(String s, int max) {
         return s.length() <= max ? s : s.substring(0, max - 2) + "..";
-    }
-
-    public static class EvalCase {
-        public int id;
-        public String query;
-        public List<String> expectedKeywords;
-        public List<String> expectedContent;
-        public int minChunksToCover;
     }
 }

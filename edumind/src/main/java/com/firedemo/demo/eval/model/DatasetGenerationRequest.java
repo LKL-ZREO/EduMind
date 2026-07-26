@@ -1,0 +1,19 @@
+package com.firedemo.demo.eval.model;
+
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+import java.util.List;
+
+/**
+ * 数据集生成请求。
+ */
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class DatasetGenerationRequest {
+
+    private List<String> docIds;
+    private int questionCount = 5;
+}
