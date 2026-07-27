@@ -1,5 +1,6 @@
 package com.firedemo.demo.agent.langchain4j;
 
+import com.firedemo.demo.agent.memory.AgentMemoryId;
 import dev.langchain4j.service.MemoryId;
 import dev.langchain4j.service.UserMessage;
 import dev.langchain4j.invocation.InvocationParameters;
@@ -15,11 +16,11 @@ public interface TeachingAgent {
     /**
      * 带会话记忆和工具访问的对话。
      *
-     * @param memoryId    会话 ID（映射到 @MemoryId，用于 ChatMemory 隔离）
+     * @param memoryId    用户范围内的会话 ID（映射到 @MemoryId，用于 ChatMemory 隔离）
      * @param userMessage 用户消息
      * @return AI 回答（含工具调用结果）
      */
-    String chat(@MemoryId String memoryId,
+    String chat(@MemoryId AgentMemoryId memoryId,
                 @UserMessage String userMessage,
                 InvocationParameters invocationParameters);
 }

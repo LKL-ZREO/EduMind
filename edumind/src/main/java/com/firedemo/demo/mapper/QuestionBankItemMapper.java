@@ -12,18 +12,20 @@ import java.util.List;
 public interface QuestionBankItemMapper extends BaseMapper<QuestionBankItem> {
 
     @Select("""
-        SELECT *
-        FROM question_bank_item
-        WHERE teacher_id = #{teacherId}
-          AND (
-            #{keyword} IS NULL
-            OR #{keyword} = ''
-            OR title ILIKE CONCAT('%', #{keyword}, '%')
-            OR requirement ILIKE CONCAT('%', #{keyword}, '%')
-          )
-        ORDER BY updated_at DESC
-        LIMIT 200
-    """)
+            <script>
+            SELECT *
+            FROM question_bank_item
+            WHERE teacher_id = #{teacherId}
+            <if test="keyword != null and keyword != ''">
+              AND (
+                title ILIKE CONCAT('%', #{keyword}, '%')
+                OR requirement ILIKE CONCAT('%', #{keyword}, '%')
+              )
+            </if>
+            ORDER BY updated_at DESC
+            LIMIT 200
+            </script>
+            """)
     List<QuestionBankItem> searchByTeacher(
             @Param("teacherId") Long teacherId,
             @Param("keyword") String keyword

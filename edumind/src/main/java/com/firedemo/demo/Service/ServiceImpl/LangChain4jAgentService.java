@@ -4,6 +4,8 @@ import com.firedemo.demo.Service.OpenClawService;
 import com.firedemo.demo.agent.context.AgentExecutionContext;
 import com.firedemo.demo.agent.context.AgentRunTrace;
 import com.firedemo.demo.agent.langchain4j.*;
+import com.firedemo.demo.agent.memory.AgentMemoryId;
+import com.firedemo.demo.agent.memory.PersistentAgentChatMemoryProvider;
 import com.firedemo.demo.common.exception.BusinessException;
 import com.firedemo.demo.common.exception.ErrorCode;
 import com.firedemo.demo.config.properties.LlmProperties;
@@ -13,8 +15,6 @@ import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
-import dev.langchain4j.memory.ChatMemory;
-import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.chat.response.ChatResponse;
@@ -72,6 +72,7 @@ public class LangChain4jAgentService implements OpenClawService {
     private final McpSessionStore mcpSessionStore;
     private final CourseMapper courseMapper;
     private final LlmProperties llmProperties;
+    private final PersistentAgentChatMemoryProvider memoryProvider;
 
     // ── 一次性构建的 Agent 实例 ──
     private TeachingAgent sessionAgent;           // 带工具 + ChatMemory（per sessionId）
@@ -83,13 +84,15 @@ public class LangChain4jAgentService implements OpenClawService {
                                    LangChain4jToolBridge toolBridge,
                                    McpSessionStore mcpSessionStore,
                                    CourseMapper courseMapper,
-                                   LlmProperties llmProperties) {
+                                   LlmProperties llmProperties,
+                                   PersistentAgentChatMemoryProvider memoryProvider) {
         this.chatModel = chatModel;
         this.streamingModel = streamingModel;
         this.toolBridge = toolBridge;
         this.mcpSessionStore = mcpSessionStore;
         this.courseMapper = courseMapper;
         this.llmProperties = llmProperties;
+        this.memoryProvider = memoryProvider;
     }
 
     @PostConstruct
@@ -99,11 +102,7 @@ public class LangChain4jAgentService implements OpenClawService {
                 .chatModel(chatModel)
                 .systemMessageProvider(this::resolveSystemPrompt)
                 .tools(toolBridge)
-                .chatMemoryProvider(memoryId ->
-                        MessageWindowChatMemory.builder()
-                                .maxMessages(20)
-                                .id(memoryId)
-                                .build())
+                .chatMemoryProvider(memoryProvider)
                 .maxSequentialToolsInvocations(llmProperties.getMaxSteps())
                 .build();
 
@@ -118,11 +117,7 @@ public class LangChain4jAgentService implements OpenClawService {
                 .streamingChatModel(streamingModel)
                 .systemMessageProvider(this::resolveSystemPrompt)
                 .tools(toolBridge)
-                .chatMemoryProvider(memoryId ->
-                        MessageWindowChatMemory.builder()
-                                .maxMessages(20)
-                                .id(memoryId)
-                                .build())
+                .chatMemoryProvider(memoryProvider)
                 .maxSequentialToolsInvocations(llmProperties.getMaxSteps())
                 .build();
 
@@ -156,16 +151,21 @@ public class LangChain4jAgentService implements OpenClawService {
         log.info("LC4j chat: sessionId={}, msg={}", context.sessionId(), truncate(message, 50));
 
         AgentRunTrace trace = new AgentRunTrace(context);
+        AgentMemoryId memoryId = AgentMemoryId.from(context);
         try {
             String result = sessionAgent.chat(
-                    context.sessionId(), message, AgentInvocationParameters.create(context, trace));
+                    memoryId, message, AgentInvocationParameters.create(context, trace));
 
             // P0-1 自我反思：仅在工具被调用过 + 回答篇幅足够时触发，
             // 避免简单问候/闲聊场景下白白增加延迟
             if (llmProperties.isSelfReflection()
                     && trace.hasToolCalls()
                     && result.length() >= 100) {
-                result = performSelfReflection(context.sessionId(), result);
+                String draft = result;
+                result = performSelfReflection(memoryId, draft);
+                if (!Objects.equals(draft, result)) {
+                    memoryProvider.replaceLastAiMessage(memoryId, draft, result);
+                }
             } else if (trace.hasToolCalls() && result.length() < 100) {
                 log.debug("跳过自我反思: 回答过短 ({} 字 < 100)", result.length());
             }
@@ -188,35 +188,9 @@ public class LangChain4jAgentService implements OpenClawService {
                 context.sessionId(), truncate(message, 50));
 
         AgentRunTrace trace = new AgentRunTrace(context);
+        AgentMemoryId memoryId = AgentMemoryId.from(context);
         TokenStream tokenStream = streamingAgent.chat(
-                context.sessionId(), message, AgentInvocationParameters.create(context, trace));
-        return toFlux(tokenStream)
-                .doFinally(signalType -> logRunTrace(context, trace));
-    }
-
-    @Override
-    @Timed(value = "llm.stream", histogram = true)
-    @CircuitBreaker(name = "llm", fallbackMethod = "streamChatFallback")
-    public Flux<String> streamChat(String message,
-                                   List<Map<String, Object>> history,
-                                   AgentExecutionContext context) {
-        Objects.requireNonNull(context, "execution context is required");
-        log.info("LC4j SSE stream with history: sessionId={}, historyLen={}, msg={}",
-                context.sessionId(), history != null ? history.size() : 0, truncate(message, 50));
-
-        // 带历史的流式：构建一个预填充 ChatMemory 的一次性 Agent
-        AgentRunTrace trace = new AgentRunTrace(context);
-
-        StreamingTeachingAgent historyAgent = AiServices.builder(StreamingTeachingAgent.class)
-                .streamingChatModel(streamingModel)
-                .systemMessageProvider(this::resolveSystemPrompt)
-                .tools(toolBridge)
-                .chatMemory(buildSeededMemory(history))
-                .maxSequentialToolsInvocations(llmProperties.getMaxSteps())
-                .build();
-
-        TokenStream tokenStream = historyAgent.chat(
-                context.sessionId(), message, AgentInvocationParameters.create(context, trace));
+                memoryId, message, AgentInvocationParameters.create(context, trace));
         return toFlux(tokenStream)
                 .doFinally(signalType -> logRunTrace(context, trace));
     }
@@ -228,6 +202,11 @@ public class LangChain4jAgentService implements OpenClawService {
     @Override
     public void registerSessionContext(AgentExecutionContext context) {
         mcpSessionStore.put(context);
+    }
+
+    @Override
+    public void clearMemory(Long userId) {
+        memoryProvider.clearByUserId(userId);
     }
 
     // ========================================================================
@@ -276,7 +255,7 @@ public class LangChain4jAgentService implements OpenClawService {
             """;
 
     private String resolveSystemPrompt(Object memoryId) {
-        String sessionId = memoryId instanceof String s ? s : null;
+        String sessionId = memoryId instanceof AgentMemoryId id ? id.sessionId() : null;
         if (sessionId != null && !sessionId.isEmpty()) {
             Long courseId = mcpSessionStore.getCourseId(sessionId);
             if (courseId != null) {
@@ -312,13 +291,13 @@ public class LangChain4jAgentService implements OpenClawService {
      * 自我反思：拿到 AiServices 最终回答后，用 ChatModel 再做一轮质量审查。
      * 失败降级返回原始草稿。
      */
-    private String performSelfReflection(String sessionId, String draft) {
+    private String performSelfReflection(AgentMemoryId memoryId, String draft) {
         log.info("LC4j 自我反思: draftLen={}", draft.length());
         long start = System.currentTimeMillis();
 
         try {
             List<ChatMessage> messages = List.of(
-                    SystemMessage.from(resolveSystemPrompt(sessionId)),
+                    SystemMessage.from(resolveSystemPrompt(memoryId)),
                     AiMessage.from(draft),
                     UserMessage.from(SELF_REFLECTION_PROMPT)
             );
@@ -385,27 +364,6 @@ public class LangChain4jAgentService implements OpenClawService {
                 .doOnError(e -> log.error("Flux 流错误: {}", e.getMessage()));
     }
 
-    // ========================================================================
-    //  预填充 ChatMemory（用于带历史消息的流式调用）
-    // ========================================================================
-
-    private ChatMemory buildSeededMemory(List<Map<String, Object>> history) {
-        MessageWindowChatMemory memory = MessageWindowChatMemory.withMaxMessages(20);
-        if (history != null) {
-            for (Map<String, Object> h : history) {
-                String role = (String) h.get("role");
-                String content = (String) h.get("content");
-                if (content == null) continue;
-                if ("user".equals(role)) {
-                    memory.add(UserMessage.from(content));
-                } else if ("assistant".equals(role)) {
-                    memory.add(AiMessage.from(content));
-                }
-            }
-        }
-        return memory;
-    }
-
     private void logRunTrace(AgentExecutionContext context, AgentRunTrace trace) {
         log.info("Agent run completed: traceId={}, sessionId={}, channel={}, toolCalls={}, elapsedMs={}",
                 trace.traceId(), context.sessionId(), context.channel(),
@@ -434,14 +392,6 @@ public class LangChain4jAgentService implements OpenClawService {
     private String chatFallback(String message, String status, Throwable t) {
         log.warn("LLM 服务熔断/降级: error={}", t.getMessage());
         throw new BusinessException(ErrorCode.AI_SERVICE_ERROR);
-    }
-
-    @SuppressWarnings("unused")
-    private Flux<String> streamChatFallback(String message, List<Map<String, Object>> history,
-                                            AgentExecutionContext context, Throwable t) {
-        log.warn("LLM 流式服务熔断/降级: sessionId={}, error={}",
-                context.sessionId(), t.getMessage());
-        return Flux.just("AI 服务暂时不可用，请稍后重试。");
     }
 
     @SuppressWarnings("unused")

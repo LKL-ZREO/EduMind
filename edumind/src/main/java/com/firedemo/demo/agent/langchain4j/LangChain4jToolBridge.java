@@ -2,6 +2,7 @@ package com.firedemo.demo.agent.langchain4j;
 
 import com.firedemo.demo.agent.context.AgentExecutionContext;
 import com.firedemo.demo.agent.context.AgentRunTrace;
+import com.firedemo.demo.agent.observability.AgentToolMetrics;
 import com.firedemo.demo.mcp.ToolDefinition;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
@@ -31,10 +32,13 @@ import java.util.stream.Collectors;
 public class LangChain4jToolBridge {
 
     private final Map<String, ToolDefinition> toolMap;
+    private final AgentToolMetrics toolMetrics;
 
-    public LangChain4jToolBridge(List<ToolDefinition> toolDefinitions) {
+    public LangChain4jToolBridge(List<ToolDefinition> toolDefinitions,
+                                 AgentToolMetrics toolMetrics) {
         this.toolMap = toolDefinitions.stream()
                 .collect(Collectors.toMap(ToolDefinition::name, t -> t));
+        this.toolMetrics = toolMetrics;
         log.info("LangChain4j ToolBridge 初始化: 已注册 {} 个工具 — {}",
                 toolDefinitions.size(),
                 toolDefinitions.stream().map(ToolDefinition::name).toList());
@@ -122,7 +126,8 @@ public class LangChain4jToolBridge {
         log.info("Tool call: name={}", toolName);
         try {
             log.debug("ToolBridge 执行: name={}, args={}", toolName, args);
-            return trace.traceToolCall(toolName, () -> tool.execute(toolArgs, context));
+            return toolMetrics.record(toolName,
+                    () -> trace.traceToolCall(toolName, () -> tool.execute(toolArgs, context)));
         } catch (Exception e) {
             log.error("ToolBridge 工具执行失败: name={}", toolName, e);
             return "工具执行出错: " + e.getMessage();

@@ -30,7 +30,6 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -74,6 +73,7 @@ public class ChatController {
     public ResponseEntity<Map<String, String>> clearHistory() {
         Long userId = getCurrentUserId();
         if (userId == null) return ResponseEntity.status(401).build();
+        openClawService.clearMemory(userId);
         chatHistoryService.deleteByUserId(userId);
         String newSessionId = UUID.randomUUID().toString();
         log.info("用户 {} 清空了对话历史，新 sessionId: {}", userId, newSessionId);
@@ -91,13 +91,6 @@ public class ChatController {
         boolean newSession = (sessionId == null || sessionId.isEmpty());
         if (newSession) sessionId = UUID.randomUUID().toString();
 
-        List<Map<String, Object>> history = new ArrayList<>();
-        if (sessionId != null) {
-            List<ChatHistory> recent = chatHistoryService.getHistory(sessionId, 10);
-            for (ChatHistory h : recent) {
-                history.add(Map.of("role", h.getRole(), "content", h.getContent()));
-            }
-        }
         saveChatHistory(userId, sessionId, "user", message, null);
 
         Long courseId = resolveCourseId(userId);
@@ -105,7 +98,7 @@ public class ChatController {
                 sessionId, userId, courseId, AgentChannel.WEB);
         openClawService.registerSessionContext(context);
 
-        Flux<String> stream = openClawService.streamChat(message, history, context);
+        Flux<String> stream = openClawService.streamChat(message, context, null);
         return sseResponse(stream, sessionId, newSession, userId);
     }
 

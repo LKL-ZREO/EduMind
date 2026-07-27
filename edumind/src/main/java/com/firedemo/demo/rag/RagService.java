@@ -4,13 +4,19 @@ import com.firedemo.demo.Entity.Course;
 import com.firedemo.demo.Entity.DocumentChunk;
 import com.firedemo.demo.Service.CourseService;
 import io.micrometer.core.annotation.Timed;
-import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.stream.Collectors;
+
+import static com.firedemo.demo.rag.RagMetrics.CandidateSource;
+import static com.firedemo.demo.rag.RagMetrics.RewriteOutcome;
+import static com.firedemo.demo.rag.RagMetrics.RewriteReason;
+import static com.firedemo.demo.rag.RagMetrics.SearchOutcome;
+import static com.firedemo.demo.rag.RagMetrics.Stage;
 
 /**
  * RAG 统一检索入口 —— 所有检索路径的唯一实现
@@ -38,6 +44,7 @@ public class RagService {
     private final RerankerService rerankerService;
     private final QueryRewriter queryRewriter;
     private final CourseService courseService;
+    private final RagMetrics ragMetrics;
 
     /** 每路检索的候选倍数（多取一些参与 RRF 融合） */
     private static final int CANDIDATE_MULTIPLIER = 3;
@@ -50,13 +57,15 @@ public class RagService {
                       RrfFusionService rrfFusionService,
                       RerankerService rerankerService,
                       QueryRewriter queryRewriter,
-                      CourseService courseService) {
+                      CourseService courseService,
+                      RagMetrics ragMetrics) {
         this.embeddingService = embeddingService;
         this.vectorStoreService = vectorStoreService;
         this.rrfFusionService = rrfFusionService;
         this.rerankerService = rerankerService;
         this.queryRewriter = queryRewriter;
         this.courseService = courseService;
+        this.ragMetrics = ragMetrics;
     }
 
     /**
@@ -71,91 +80,106 @@ public class RagService {
 
         try {
             // ====== ① Embedding ======
-            trace.step("embed");
-            float[] queryEmbedding = embeddingService.embedQuery(originalQuery);
-            trace.endStep();
+            float[] queryEmbedding = ragMetrics.recordStage(
+                    trace, Stage.EMBEDDING, () -> embeddingService.embedQuery(originalQuery));
 
             // ====== ② 向量检索（永远用原始 query） ======
-            trace.step("vector");
             int candidateCount = request.getTopK() * CANDIDATE_MULTIPLIER;
-            List<DocumentChunk> vectorResults = vectorStoreService.similaritySearch(
-                    queryEmbedding, candidateCount, request.getUserId(), request.getAccessibleKbIds());
-            trace.set("vectorHits", vectorResults.size()).endStep();
+            List<DocumentChunk> vectorResults = ragMetrics.recordStage(
+                    trace, Stage.VECTOR, () -> vectorStoreService.similaritySearch(
+                            queryEmbedding, candidateCount,
+                            request.getUserId(), request.getAccessibleKbIds()));
+            trace.set("vectorHits", vectorResults.size());
+            ragMetrics.recordCandidates(CandidateSource.VECTOR, vectorResults.size());
 
             // ====== ③ 关键词检索 ======
             boolean needsRewrite = queryRewriter.needsRewrite(originalQuery);
             String keywordQuery = originalQuery;
             boolean queryRewritten = false;
 
-            trace.step("keyword");
             if (needsRewrite) {
-                try {
-                    keywordQuery = queryRewriter.rewrite(originalQuery);
-                    if (!keywordQuery.equals(originalQuery)) {
-                        queryRewritten = true;
-                        log.debug("Query rewritten: \"{}\" → \"{}\"", originalQuery, keywordQuery);
-                    }
-                } catch (RuntimeException e) {
-                    log.debug("Query rewrite failed, using original: {}", e.getMessage());
+                keywordQuery = rewriteQuery(originalQuery, trace, RewriteReason.INITIAL);
+                if (!Objects.equals(keywordQuery, originalQuery)) {
+                    queryRewritten = true;
+                    log.debug("Query rewritten: \"{}\" → \"{}\"", originalQuery, keywordQuery);
                 }
             }
-            List<VectorStoreService.ScoredChunk> keywordScored = vectorStoreService.keywordSearch(
-                    keywordQuery, candidateCount, request.getUserId(), request.getAccessibleKbIds());
+            String effectiveKeywordQuery = keywordQuery;
+            List<VectorStoreService.ScoredChunk> keywordScored = ragMetrics.recordStage(
+                    trace, Stage.KEYWORD, () -> vectorStoreService.keywordSearch(
+                            effectiveKeywordQuery, candidateCount,
+                            request.getUserId(), request.getAccessibleKbIds()));
             List<DocumentChunk> keywordResults = keywordScored.stream()
                     .map(VectorStoreService.ScoredChunk::chunk)
                     .collect(Collectors.toList());
-            trace.set("keywordHits", keywordResults.size()).endStep();
+            trace.set("keywordHits", keywordResults.size());
+            ragMetrics.recordCandidates(CandidateSource.KEYWORD, keywordResults.size());
 
             // ====== ④ 合并候选 ======
             if (vectorResults.isEmpty() && keywordResults.isEmpty()) {
                 long elapsed = System.currentTimeMillis() - start;
+                ragMetrics.recordCandidates(CandidateSource.FINAL, 0);
+                ragMetrics.recordSearchOutcome(SearchOutcome.EMPTY);
                 log.info("RAG Trace: {}", trace.finish(0));
                 return RagResult.empty(originalQuery, trace, elapsed);
             }
 
             // ====== ⑤ RRF 融合 ======
-            trace.step("rrf");
-            List<RrfFusionService.ScoredChunk> fused = rrfFusionService.fuse(vectorResults, keywordResults);
-            trace.set("rrfFused", fused.size()).endStep();
+            List<RrfFusionService.ScoredChunk> fused = ragMetrics.recordStage(
+                    trace, Stage.RRF, () -> rrfFusionService.fuse(vectorResults, keywordResults));
+            trace.set("rrfFused", fused.size());
+            ragMetrics.recordCandidates(CandidateSource.FUSED, fused.size());
 
             // ====== ⑥ Reranker 精排 ======
             List<RrfFusionService.ScoredChunk> finalResults = fused;
             if (request.isEnableReranker() && rerankerService.isModelReady()) {
-                trace.step("reranker");
-                finalResults = rerankerService.rerank(originalQuery, fused, request.getTopK(), trace);
-                trace.endStep();
+                finalResults = ragMetrics.recordStage(
+                        trace, Stage.RERANKER,
+                        () -> rerankerService.rerank(originalQuery, fused, request.getTopK(), trace));
 
                 // ====== ⑦ 低置信度兜底 ======
                 if (!queryRewritten && !finalResults.isEmpty()) {
                     double topScore = finalResults.get(0).score();
                     if (topScore < LOW_CONFIDENCE_THRESHOLD) {
-                        log.info("RAG low confidence (top={}), triggering rewrite fallback", String.format("%.2f", topScore));
-                        try {
-                            String rewritten = queryRewriter.rewrite(originalQuery);
-                            if (!rewritten.equals(originalQuery)) {
-                                queryRewritten = true;
+                        log.info("RAG low confidence (top={}), triggering rewrite fallback",
+                                String.format("%.2f", topScore));
+                        String rewritten = rewriteQuery(
+                                originalQuery, trace, RewriteReason.LOW_CONFIDENCE);
+                        if (!Objects.equals(rewritten, originalQuery)) {
+                            queryRewritten = true;
+                            keywordQuery = rewritten;
 
+                            try {
                                 // 追加一轮关键词检索
-                                List<VectorStoreService.ScoredChunk> extraKeyword = vectorStoreService.keywordSearch(
-                                        rewritten, candidateCount, request.getUserId(), request.getAccessibleKbIds());
+                                List<VectorStoreService.ScoredChunk> extraKeyword = ragMetrics.recordStage(
+                                        trace, Stage.KEYWORD, () -> vectorStoreService.keywordSearch(
+                                                rewritten, candidateCount,
+                                                request.getUserId(), request.getAccessibleKbIds()));
+                                ragMetrics.recordCandidates(
+                                        CandidateSource.EXTRA_KEYWORD, extraKeyword.size());
+
                                 if (!extraKeyword.isEmpty()) {
                                     List<DocumentChunk> extraResults = extraKeyword.stream()
                                             .map(VectorStoreService.ScoredChunk::chunk)
                                             .collect(Collectors.toList());
 
-                                    // 合并 + 重新 RRF
                                     List<DocumentChunk> allVector = new ArrayList<>(vectorResults);
                                     List<DocumentChunk> allKeyword = new ArrayList<>(keywordResults);
                                     allKeyword.addAll(extraResults);
 
-                                    List<RrfFusionService.ScoredChunk> refusion = rrfFusionService.fuse(allVector, allKeyword);
+                                    List<RrfFusionService.ScoredChunk> refusion = ragMetrics.recordStage(
+                                            trace, Stage.RRF,
+                                            () -> rrfFusionService.fuse(allVector, allKeyword));
+                                    ragMetrics.recordCandidates(CandidateSource.FUSED, refusion.size());
 
-                                    // 重新 Reranker
-                                    finalResults = rerankerService.rerank(originalQuery, refusion, request.getTopK(), trace);
+                                    finalResults = ragMetrics.recordStage(
+                                            trace, Stage.RERANKER,
+                                            () -> rerankerService.rerank(
+                                                    originalQuery, refusion, request.getTopK(), trace));
                                 }
+                            } catch (RuntimeException e) {
+                                log.debug("Low-confidence retrieval fallback failed: {}", e.getMessage());
                             }
-                        } catch (RuntimeException e) {
-                            log.debug("Low-confidence rewrite fallback failed: {}", e.getMessage());
                         }
                     }
                 }
@@ -166,6 +190,7 @@ public class RagService {
 
             // ====== ⑧ 格式化返回 ======
             long elapsed = System.currentTimeMillis() - start;
+            ragMetrics.recordCandidates(CandidateSource.FINAL, finalResults.size());
             log.info("RAG Trace: {}", trace.finish(0));
 
             RagResult.RagResultBuilder builder = RagResult.builder()
@@ -198,12 +223,35 @@ public class RagService {
                     break;
             }
 
-            return builder.build();
+            RagResult result = builder.build();
+            ragMetrics.recordSearchOutcome(
+                    finalResults.isEmpty() ? SearchOutcome.EMPTY : SearchOutcome.SUCCESS);
+            return result;
 
         } catch (RuntimeException e) {
             log.error("RAG search failed", e);
+            ragMetrics.recordSearchOutcome(SearchOutcome.ERROR);
             long elapsed = System.currentTimeMillis() - start;
             return RagResult.empty(originalQuery, trace, elapsed);
+        }
+    }
+
+    private String rewriteQuery(String originalQuery,
+                                RagTrace trace,
+                                RewriteReason reason) {
+        try {
+            String rewritten = ragMetrics.recordRewrite(
+                    trace, () -> queryRewriter.rewrite(originalQuery));
+            boolean changed = rewritten != null
+                    && !rewritten.isBlank()
+                    && !Objects.equals(rewritten, originalQuery);
+            ragMetrics.recordRewriteOutcome(
+                    reason, changed ? RewriteOutcome.CHANGED : RewriteOutcome.UNCHANGED);
+            return changed ? rewritten : originalQuery;
+        } catch (RuntimeException e) {
+            ragMetrics.recordRewriteOutcome(reason, RewriteOutcome.ERROR);
+            log.debug("RAG query rewrite failed: reason={}, error={}", reason, e.getMessage());
+            return originalQuery;
         }
     }
 

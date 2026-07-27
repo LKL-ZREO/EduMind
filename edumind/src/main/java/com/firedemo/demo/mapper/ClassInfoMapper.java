@@ -24,9 +24,18 @@ public interface ClassInfoMapper extends BaseMapper<ClassInfo> {
     /**
      * 按名称查询当前教师在指定课程下可访问的班级。
      */
-    @Select("SELECT * FROM class_info " +
-            "WHERE name = #{name} AND teacher_id = #{teacherId} " +
-            "AND (#{courseId} IS NULL OR course_id = #{courseId}) LIMIT 1")
+    @Select("""
+            <script>
+            SELECT *
+            FROM class_info
+            WHERE name = #{name}
+              AND teacher_id = #{teacherId}
+            <if test="courseId != null">
+              AND course_id = #{courseId}
+            </if>
+            LIMIT 1
+            </script>
+            """)
     ClassInfo selectOwnedByName(@Param("name") String name,
                                 @Param("teacherId") Long teacherId,
                                 @Param("courseId") Long courseId);

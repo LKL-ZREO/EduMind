@@ -21,12 +21,23 @@ public interface ChatHistoryMapper extends BaseMapper<ChatHistory> {
     /**
      * 查询会话历史记录
      *
+     * @param userId    用户ID
      * @param sessionId 会话ID
      * @param limit     限制条数
      * @return 历史记录列表
      */
-    @Select("SELECT * FROM chat_history WHERE session_id = #{sessionId} ORDER BY created_at ASC LIMIT #{limit}")
-    List<ChatHistory> selectBySessionId(@Param("sessionId") String sessionId, @Param("limit") int limit);
+    @Select("""
+            SELECT * FROM (
+                SELECT * FROM chat_history
+                WHERE user_id = #{userId} AND session_id = #{sessionId}
+                ORDER BY created_at DESC, id DESC
+                LIMIT #{limit}
+            ) recent
+            ORDER BY created_at ASC, id ASC
+            """)
+    List<ChatHistory> selectBySessionId(@Param("userId") Long userId,
+                                        @Param("sessionId") String sessionId,
+                                        @Param("limit") int limit);
 
     /**
      * 查询用户的所有会话ID（按最近活动时间排序）

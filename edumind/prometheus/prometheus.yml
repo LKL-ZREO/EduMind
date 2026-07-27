@@ -23,6 +23,11 @@ scrape_configs:
       - targets: ["host.docker.internal:8080"]
         labels:
           service: "edumind-backend"
+          deployment: "host"
+      - targets: ["app:8080"]
+        labels:
+          service: "edumind-backend"
+          deployment: "compose"
 
   - job_name: "prometheus"
     static_configs:
