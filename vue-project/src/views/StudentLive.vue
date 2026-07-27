@@ -124,7 +124,11 @@
             </div>
             <div
               class="explanation-body"
-              v-html="confusionState(store.currentInteraction.interactionId)?.explanation"
+              v-html="
+                renderTextWithBreaks(
+                  confusionState(store.currentInteraction.interactionId)?.explanation,
+                )
+              "
             ></div>
           </div>
         </div>
@@ -177,7 +181,7 @@
               </div>
               <div
                 class="explanation-body"
-                v-html="confusionState(h.interactionId)?.explanation"
+                v-html="renderTextWithBreaks(confusionState(h.interactionId)?.explanation)"
               ></div>
             </div>
           </div>
@@ -222,6 +226,7 @@ import request from '../api/request'
 import { getApiErrorMessage } from '../api/errors'
 import type { ApiResponse } from '../api/types'
 import { ElMessage } from 'element-plus'
+import { renderTextWithBreaks } from '@/utils/safeHtml'
 
 const route = useRoute()
 const store = useLiveSessionStore()
@@ -361,7 +366,7 @@ async function handleConfused(interactionId: number) {
     ) // LLM 生成需要时间，30s 超时
     if (res.data?.code === 200) {
       state.kp = res.data.data.knowledgePoint
-      state.explanation = res.data.data.explanation.replace(/\n/g, '<br>')
+      state.explanation = res.data.data.explanation
       state.confused = true
     } else {
       ElMessage.error(res.data?.message || '标记失败')

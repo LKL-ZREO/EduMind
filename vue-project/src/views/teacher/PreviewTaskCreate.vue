@@ -49,7 +49,7 @@
         <!-- 导读 -->
         <section class="guide-section">
           <h4>📖 课前导读</h4>
-          <div class="guide-text markdown-body" v-html="renderMd(result.guideText)"></div>
+          <div class="guide-text markdown-body" v-html="renderMarkdown(result.guideText)"></div>
         </section>
 
         <!-- 自测题 -->
@@ -91,8 +91,8 @@ import { useRoute } from 'vue-router'
 import { getDashboardClasses } from '../../api/dashboard'
 import { createPreviewTask, type PreviewTaskDTO } from '../../api/preview'
 import { ElMessage } from 'element-plus'
-import { marked } from 'marked'
 import { getApiErrorMessage } from '../../api/errors'
+import { renderMarkdown } from '@/utils/safeHtml'
 
 const route = useRoute()
 
@@ -106,11 +106,6 @@ const generating = ref(false)
 const result = ref<PreviewTaskDTO | null>(null)
 
 const canSubmit = computed(() => form.value.classId && form.value.knowledgePoint.trim())
-
-function renderMd(text: string) {
-  if (!text) return ''
-  return marked.parse(text) as string
-}
 
 async function handleGenerate() {
   if (!canSubmit.value) return
