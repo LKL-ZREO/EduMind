@@ -301,8 +301,10 @@ public class DashboardController {
     }
 
     @DeleteMapping("/teaching-calendar/{id}")
+    @PreAuthorize("@sec.isTeachingCalendarOwner(#id)")
     public Result<Void> deletePlan(@PathVariable Long id) {
-        teachingCalendarMapper.deletePlan(id);
+        int deleted = teachingCalendarMapper.deletePlan(id, getCurrentUserId());
+        if (deleted == 0) throw new com.firedemo.demo.common.exception.BusinessException(ErrorCode.DATA_NOT_FOUND);
         return Result.success(null);
     }
 

@@ -6,6 +6,7 @@ import com.firedemo.demo.Entity.Document;
 import com.firedemo.demo.Entity.DocumentChunk;
 import com.firedemo.demo.common.exception.BusinessException;
 import com.firedemo.demo.common.exception.ErrorCode;
+import com.firedemo.demo.config.OwnershipGuard;
 import com.firedemo.demo.Service.DocumentService;
 import com.firedemo.demo.Service.FileStorageService;
 import com.firedemo.demo.mapper.DirectoryNodeMapper;
@@ -50,6 +51,7 @@ public class DocumentServiceImpl implements DocumentService {
     private final SmartChunkService chunkService;
     private final VectorStoreService vectorStoreService;
     private final RagService ragService;
+    private final OwnershipGuard ownershipGuard;
 
     @Value("${storage.upload-dir:${user.home}/.homework-grader/uploads}")
     private String uploadDir;
@@ -57,6 +59,7 @@ public class DocumentServiceImpl implements DocumentService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public String uploadDocument(Long userId, MultipartFile file, Long kbId) {
+        requireAccess(kbId == null || ownershipGuard.canAccessKnowledgeBase(userId, kbId));
         String docId = UUID.randomUUID().toString().replace("-", "");
         String originalFilename = file.getOriginalFilename();
 
@@ -107,9 +110,10 @@ public class DocumentServiceImpl implements DocumentService {
     @Transactional(rollbackFor = Exception.class)
     public boolean deleteDocument(String docId, Long userId) {
         Document document = documentMapper.selectByDocId(docId);
-        if (document == null || !Objects.equals(document.getUserId(), userId)) {
+        if (document == null) {
             return false;
         }
+        requireAccess(ownershipGuard.canWriteDocument(userId, docId));
 
         // 删除向量库中的 chunk
         try {
@@ -196,23 +200,24 @@ public class DocumentServiceImpl implements DocumentService {
     }
 
     @Override
-    public List<DirectoryNode> getDirectoryTreeByKbId(Long kbId) {
+    public List<DirectoryNode> getDirectoryTreeByKbId(Long userId, Long kbId) {
+        requireAccess(ownershipGuard.canAccessKnowledgeBase(userId, kbId));
         return directoryNodeMapper.selectByKbId(kbId);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Long createFolder(Long userId, Long parentId, String label, Long kbId) {
+        requireAccess(kbId == null || ownershipGuard.canAccessKnowledgeBase(userId, kbId));
         // 校验父节点存在性及归属
         if (parentId != null) {
             DirectoryNode parent = directoryNodeMapper.selectById(parentId);
             if (parent == null) {
                 throw new IllegalArgumentException("父节点不存在");
             }
-            // 共享知识库下的节点，所有成员可操作
-            if (parent.getKbId() == null && !Objects.equals(parent.getUserId(), userId)) {
-                throw new IllegalArgumentException("无权访问");
-            }
+            requireAccess(ownershipGuard.canAccessDirectoryNode(userId, parentId));
+            if (!Objects.equals(parent.getKbId(), kbId))
+                throw new IllegalArgumentException("父节点与知识库不匹配");
             if (!"folder".equals(parent.getNodeType())) {
                 throw new IllegalArgumentException("只能在文件夹下创建子文件夹");
             }
@@ -249,9 +254,7 @@ public class DocumentServiceImpl implements DocumentService {
         if (node == null) {
             throw new IllegalArgumentException("节点不存在");
         }
-        if (node.getKbId() == null && !Objects.equals(node.getUserId(), userId)) {
-            throw new IllegalArgumentException("无权操作");
-        }
+        requireAccess(ownershipGuard.canAccessDirectoryNode(userId, nodeId));
         node.setLabel(label);
         directoryNodeMapper.updateById(node);
         log.info("Node renamed: id={}, label={}", nodeId, label);
@@ -264,9 +267,7 @@ public class DocumentServiceImpl implements DocumentService {
         if (node == null) {
             throw new IllegalArgumentException("节点不存在");
         }
-        if (node.getKbId() == null && !Objects.equals(node.getUserId(), userId)) {
-            throw new IllegalArgumentException("无权操作");
-        }
+        requireAccess(ownershipGuard.canAccessDirectoryNode(userId, nodeId));
 
         // 递归删除所有子节点
         List<DirectoryNode> descendants = directoryNodeMapper.selectDescendants(nodeId);
@@ -301,9 +302,7 @@ public class DocumentServiceImpl implements DocumentService {
         if (node == null) {
             throw new IllegalArgumentException("节点不存在");
         }
-        if (node.getKbId() == null && !Objects.equals(node.getUserId(), userId)) {
-            throw new IllegalArgumentException("无权操作");
-        }
+        requireAccess(ownershipGuard.canAccessDirectoryNode(userId, nodeId));
 
         // 不能移到自己或自己的子节点下
         if (targetParentId != null) {
@@ -317,9 +316,11 @@ public class DocumentServiceImpl implements DocumentService {
             }
 
             DirectoryNode target = directoryNodeMapper.selectById(targetParentId);
-            if (target == null || !Objects.equals(target.getUserId(), userId)) {
+            if (target == null || !ownershipGuard.canAccessDirectoryNode(userId, targetParentId)) {
                 throw new IllegalArgumentException("目标节点不存在或无权访问");
             }
+            if (!Objects.equals(node.getKbId(), target.getKbId()))
+                throw new IllegalArgumentException("不能跨知识库移动节点");
             if (!"folder".equals(target.getNodeType())) {
                 throw new IllegalArgumentException("目标节点不是文件夹");
             }
@@ -367,6 +368,10 @@ public class DocumentServiceImpl implements DocumentService {
     @Override
     public List<Map<String, Object>> getSharedTree(Long userId) {
         return directoryNodeMapper.selectSharedByOthersWithName(userId);
+    }
+
+    private void requireAccess(boolean allowed) {
+        if (!allowed) throw new BusinessException(ErrorCode.FORBIDDEN);
     }
 
 }

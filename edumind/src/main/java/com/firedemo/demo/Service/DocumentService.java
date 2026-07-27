@@ -76,7 +76,7 @@ public interface DocumentService {
     /**
      * 获取共享知识库目录树
      */
-    List<DirectoryNode> getDirectoryTreeByKbId(Long kbId);
+    List<DirectoryNode> getDirectoryTreeByKbId(Long userId, Long kbId);
 
     /**
      * 创建文件夹
