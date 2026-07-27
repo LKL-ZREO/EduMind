@@ -9,9 +9,6 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import reactor.core.publisher.Flux;
 
-import java.util.List;
-import java.util.Map;
-
 @Configuration
 public class AgentServiceConfiguration {
 
@@ -38,16 +35,13 @@ public class AgentServiceConfiguration {
             }
 
             @Override
-            public Flux<String> streamChat(
-                    String message,
-                    List<Map<String, Object>> history,
-                    AgentExecutionContext context) {
-                return Flux.error(unavailable());
+            public void registerSessionContext(AgentExecutionContext context) {
+                // No remote agent session exists for the disabled backend.
             }
 
             @Override
-            public void registerSessionContext(AgentExecutionContext context) {
-                // No remote agent session exists for the disabled backend.
+            public void clearMemory(Long userId) {
+                // No Agent memory exists for the disabled backend.
             }
 
             @Override

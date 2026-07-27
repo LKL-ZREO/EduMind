@@ -1,5 +1,6 @@
 package com.firedemo.demo.agent.langchain4j;
 
+import com.firedemo.demo.config.observability.HeliconeHeadersFactory;
 import com.firedemo.demo.config.properties.LlmProperties;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
@@ -20,9 +21,13 @@ import org.springframework.context.annotation.Configuration;
 public class LangChain4jConfig {
 
     private final LlmProperties llmProperties;
+    private final HeliconeHeadersFactory heliconeHeadersFactory;
 
-    public LangChain4jConfig(LlmProperties llmProperties) {
+    public LangChain4jConfig(LlmProperties llmProperties,
+                             HeliconeHeadersFactory heliconeHeadersFactory) {
+        llmProperties.validateForBuiltIn();
         this.llmProperties = llmProperties;
+        this.heliconeHeadersFactory = heliconeHeadersFactory;
     }
 
     /**
@@ -30,13 +35,16 @@ public class LangChain4jConfig {
      */
     @Bean
     public ChatModel chatLanguageModel() {
-        log.info("创建 OpenAiChatModel: baseUrl={}, model={}, temperature={}, timeout={}",
-                llmProperties.getBaseUrl(), llmProperties.resolveTextModel(),
-                llmProperties.getTemperature(), llmProperties.getReadTimeout());
+        String providerBaseUrl = llmProperties.getBaseUrl();
+        log.info("创建 OpenAiChatModel: baseUrl={}, model={}, temperature={}, timeout={}, helicone={}",
+                heliconeHeadersFactory.resolveBaseUrl(providerBaseUrl),
+                llmProperties.resolveTextModel(), llmProperties.getTemperature(),
+                llmProperties.getReadTimeout(), heliconeHeadersFactory.isEnabled());
 
         return OpenAiChatModel.builder()
-                .baseUrl(llmProperties.getBaseUrl())
+                .baseUrl(heliconeHeadersFactory.resolveBaseUrl(providerBaseUrl))
                 .apiKey(llmProperties.getApiKey())
+                .customHeaders(heliconeHeadersFactory.create(providerBaseUrl, "text"))
                 .modelName(llmProperties.resolveTextModel())
                 .temperature(llmProperties.getTemperature())
                 .timeout(llmProperties.getReadTimeout())
@@ -48,13 +56,16 @@ public class LangChain4jConfig {
 
     @Bean
     public ChatModel visionChatLanguageModel() {
-        log.info("Create vision OpenAiChatModel: baseUrl={}, model={}, temperature={}, timeout={}",
-                llmProperties.resolveVisionBaseUrl(), llmProperties.resolveVisionModel(),
-                llmProperties.resolveVisionTemperature(), llmProperties.getReadTimeout());
+        String providerBaseUrl = llmProperties.resolveVisionBaseUrl();
+        log.info("Create vision OpenAiChatModel: baseUrl={}, model={}, temperature={}, timeout={}, helicone={}",
+                heliconeHeadersFactory.resolveBaseUrl(providerBaseUrl),
+                llmProperties.resolveVisionModel(), llmProperties.resolveVisionTemperature(),
+                llmProperties.getReadTimeout(), heliconeHeadersFactory.isEnabled());
 
         return OpenAiChatModel.builder()
-                .baseUrl(llmProperties.resolveVisionBaseUrl())
+                .baseUrl(heliconeHeadersFactory.resolveBaseUrl(providerBaseUrl))
                 .apiKey(llmProperties.resolveVisionApiKey())
+                .customHeaders(heliconeHeadersFactory.create(providerBaseUrl, "vision"))
                 .modelName(llmProperties.resolveVisionModel())
                 .temperature(llmProperties.resolveVisionTemperature())
                 .timeout(llmProperties.getReadTimeout())
@@ -69,13 +80,16 @@ public class LangChain4jConfig {
      */
     @Bean
     public StreamingChatModel streamingChatLanguageModel() {
-        log.info("创建 OpenAiStreamingChatModel: baseUrl={}, model={}, temperature={}",
-                llmProperties.getBaseUrl(), llmProperties.resolveTextModel(),
-                llmProperties.getTemperature());
+        String providerBaseUrl = llmProperties.getBaseUrl();
+        log.info("创建 OpenAiStreamingChatModel: baseUrl={}, model={}, temperature={}, helicone={}",
+                heliconeHeadersFactory.resolveBaseUrl(providerBaseUrl),
+                llmProperties.resolveTextModel(), llmProperties.getTemperature(),
+                heliconeHeadersFactory.isEnabled());
 
         return OpenAiStreamingChatModel.builder()
-                .baseUrl(llmProperties.getBaseUrl())
+                .baseUrl(heliconeHeadersFactory.resolveBaseUrl(providerBaseUrl))
                 .apiKey(llmProperties.getApiKey())
+                .customHeaders(heliconeHeadersFactory.create(providerBaseUrl, "streaming"))
                 .modelName(llmProperties.resolveTextModel())
                 .temperature(llmProperties.getTemperature())
                 .timeout(llmProperties.getReadTimeout())

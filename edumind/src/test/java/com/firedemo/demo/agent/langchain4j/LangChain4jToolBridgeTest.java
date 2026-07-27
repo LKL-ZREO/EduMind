@@ -3,9 +3,11 @@ package com.firedemo.demo.agent.langchain4j;
 import com.firedemo.demo.agent.context.AgentChannel;
 import com.firedemo.demo.agent.context.AgentExecutionContext;
 import com.firedemo.demo.agent.context.AgentRunTrace;
+import com.firedemo.demo.agent.observability.AgentToolMetrics;
 import com.firedemo.demo.mcp.ToolDefinition;
 import dev.langchain4j.agent.tool.ToolSpecifications;
 import dev.langchain4j.invocation.InvocationParameters;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -21,7 +23,8 @@ class LangChain4jToolBridgeTest {
 
     @Test
     void trustedInvocationParametersAreExcludedFromTheModelToolSchema() {
-        LangChain4jToolBridge bridge = new LangChain4jToolBridge(List.of());
+        LangChain4jToolBridge bridge = new LangChain4jToolBridge(
+                List.of(), new AgentToolMetrics(new SimpleMeterRegistry()));
 
         var searchSpecification = ToolSpecifications.toolSpecificationsFrom(bridge).stream()
                 .filter(specification -> "searchKnowledge".equals(specification.name()))
@@ -34,6 +37,7 @@ class LangChain4jToolBridgeTest {
 
     @Test
     void passesTrustedInvocationContextWithoutAddingItToModelArguments() throws Exception {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
         ToolDefinition tool = new ToolDefinition() {
             @Override public String name() { return "searchKnowledge"; }
             @Override public String description() { return "test"; }
@@ -44,7 +48,8 @@ class LangChain4jToolBridgeTest {
                 return context.userId() + ":" + context.traceId();
             }
         };
-        LangChain4jToolBridge bridge = new LangChain4jToolBridge(List.of(tool));
+        LangChain4jToolBridge bridge = new LangChain4jToolBridge(
+                List.of(tool), new AgentToolMetrics(registry));
         AgentExecutionContext first = context("first", 101L);
         AgentExecutionContext second = context("second", 202L);
         AgentRunTrace firstTrace = new AgentRunTrace(first);
@@ -62,6 +67,44 @@ class LangChain4jToolBridgeTest {
 
         assertThat(firstTrace.toolCallCount()).isEqualTo(1);
         assertThat(secondTrace.toolCallCount()).isEqualTo(1);
+        assertThat(registry.find(AgentToolMetrics.TOOL_DURATION)
+                .tags("tool", "searchKnowledge", "outcome", "success")
+                .timer())
+                .isNotNull()
+                .extracting(timer -> timer.count())
+                .isEqualTo(2L);
+    }
+
+    @Test
+    void recordsToolFailuresEvenWhenBridgeReturnsFriendlyErrorText() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        ToolDefinition tool = new ToolDefinition() {
+            @Override public String name() { return "searchKnowledge"; }
+            @Override public String description() { return "test"; }
+            @Override public Map<String, Object> inputSchema() { return Map.of(); }
+            @Override
+            public String execute(Map<String, Object> arguments, AgentExecutionContext context) {
+                throw new IllegalStateException("search unavailable");
+            }
+        };
+        LangChain4jToolBridge bridge = new LangChain4jToolBridge(
+                List.of(tool), new AgentToolMetrics(registry));
+        AgentExecutionContext context = context("failed", 101L);
+        AgentRunTrace trace = new AgentRunTrace(context);
+
+        String result = bridge.searchKnowledge("pointer", 3, parameters(context, trace));
+
+        assertThat(result).contains("工具执行出错");
+        assertThat(trace.toolCalls()).singleElement().satisfies(call -> {
+            assertThat(call.success()).isFalse();
+            assertThat(call.failureType()).isEqualTo("IllegalStateException");
+        });
+        assertThat(registry.find(AgentToolMetrics.TOOL_DURATION)
+                .tags("tool", "searchKnowledge", "outcome", "error")
+                .timer())
+                .isNotNull()
+                .extracting(timer -> timer.count())
+                .isEqualTo(1L);
     }
 
     private InvocationParameters parameters(AgentExecutionContext context, AgentRunTrace trace) {

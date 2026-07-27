@@ -7,11 +7,11 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -32,8 +32,8 @@ class RagServiceTest {
     @Mock private QueryRewriter queryRewriter;
     @Mock private CourseService courseService;
 
-    @InjectMocks
     private RagService ragService;
+    private SimpleMeterRegistry meterRegistry;
 
     private static final float[] FAKE_EMBEDDING = new float[128];
 
@@ -46,6 +46,15 @@ class RagServiceTest {
 
     @BeforeEach
     void setUp() {
+        meterRegistry = new SimpleMeterRegistry();
+        ragService = new RagService(
+                embeddingService,
+                vectorStoreService,
+                rrfFusionService,
+                rerankerService,
+                queryRewriter,
+                courseService,
+                new RagMetrics(meterRegistry));
         when(embeddingService.embedQuery(anyString())).thenReturn(FAKE_EMBEDDING);
         when(queryRewriter.needsRewrite(anyString())).thenReturn(false);
         // 默认：模型就绪，精排直接透传（不过滤、不重排）
@@ -86,6 +95,16 @@ class RagServiceTest {
             assertThat(result.getResults()).isNotEmpty();
             verify(rrfFusionService).fuse(anyList(), anyList());
             verify(rerankerService).rerank(anyString(), anyList(), anyInt(), any());
+            assertThat(meterRegistry.find(RagMetrics.STAGE_DURATION)
+                    .tags("stage", "embedding", "outcome", "success")
+                    .timer()).isNotNull();
+            assertThat(meterRegistry.find(RagMetrics.STAGE_DURATION)
+                    .tags("stage", "reranker", "outcome", "success")
+                    .timer()).isNotNull();
+            assertThat(meterRegistry.find(RagMetrics.CANDIDATES)
+                    .tag("source", "final").summary().totalAmount()).isEqualTo(4.0);
+            assertThat(meterRegistry.find(RagMetrics.SEARCHES)
+                    .tag("outcome", "success").counter().count()).isEqualTo(1.0);
         }
 
         @Test
@@ -142,6 +161,8 @@ class RagServiceTest {
             assertThat(result).isNotNull();
             assertThat(result.getResults()).isEmpty();
             verify(rrfFusionService, never()).fuse(anyList(), anyList());
+            assertThat(meterRegistry.find(RagMetrics.SEARCHES)
+                    .tag("outcome", "empty").counter().count()).isEqualTo(1.0);
         }
     }
 
@@ -183,6 +204,15 @@ class RagServiceTest {
             assertThatCode(() -> ragService.search(RagSearchRequest.builder()
                     .query("xxx").topK(3).build()))
                     .doesNotThrowAnyException();
+            assertThat(meterRegistry.find(RagMetrics.STAGE_DURATION)
+                    .tags("stage", "rewrite", "outcome", "error")
+                    .timer().count()).isEqualTo(2L);
+            assertThat(meterRegistry.find(RagMetrics.REWRITES)
+                    .tags("reason", "initial", "outcome", "error")
+                    .counter().count()).isEqualTo(1.0);
+            assertThat(meterRegistry.find(RagMetrics.REWRITES)
+                    .tags("reason", "low_confidence", "outcome", "error")
+                    .counter().count()).isEqualTo(1.0);
         }
     }
 

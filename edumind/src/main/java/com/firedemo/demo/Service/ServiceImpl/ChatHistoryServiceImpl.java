@@ -58,8 +58,11 @@ public class ChatHistoryServiceImpl implements ChatHistoryService {
     }
 
     @Override
-    public List<ChatHistory> getHistory(String sessionId, int limit) {
-        return chatHistoryMapper.selectBySessionId(sessionId, limit);
+    public List<ChatHistory> getHistory(Long userId, String sessionId, int limit) {
+        if (userId == null || sessionId == null || sessionId.isBlank() || limit <= 0) {
+            return List.of();
+        }
+        return chatHistoryMapper.selectBySessionId(userId, sessionId, limit);
     }
 
     @Override
@@ -74,8 +77,8 @@ public class ChatHistoryServiceImpl implements ChatHistoryService {
     }
 
     @Override
-    public String buildContextPrompt(String sessionId, int limit) {
-        List<ChatHistory> histories = getHistory(sessionId, limit);
+    public String buildContextPrompt(Long userId, String sessionId, int limit) {
+        List<ChatHistory> histories = getHistory(userId, sessionId, limit);
         if (histories.isEmpty()) {
             return "";
         }
