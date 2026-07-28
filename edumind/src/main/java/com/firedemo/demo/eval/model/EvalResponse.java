@@ -31,11 +31,11 @@ public class EvalResponse {
     }
 
     public Double faithfulness() {
-        return summary != null ? summary.get("faithfulness") : null;
+        return summary != null ? summary.getOrDefault("faithfulness", summary.get("faithfulness_pct")) : null;
     }
 
     public Double answerRelevancy() {
-        return summary != null ? summary.get("answer_relevancy") : null;
+        return summary != null ? summary.getOrDefault("answer_relevancy", summary.get("answer_relevancy_pct")) : null;
     }
 
     public Double contextPrecision() {

@@ -189,6 +189,12 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
+        <!-- LLM malformed JSON repair fallback (strict Jackson parsing remains the fast path) -->
+        <dependency>
+            <groupId>io.github.du00cs</groupId>
+            <artifactId>json-repairj</artifactId>
+            <version>0.50.0</version>
+        </dependency>
         <!-- 已移除 Redis Test -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

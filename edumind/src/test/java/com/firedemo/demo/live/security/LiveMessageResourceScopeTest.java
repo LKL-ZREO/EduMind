@@ -6,6 +6,7 @@ import com.firedemo.demo.DTO.StudentResponseDTO;
 import com.firedemo.demo.Entity.Interaction;
 import com.firedemo.demo.Service.OpenClawService;
 import com.firedemo.demo.common.exception.BusinessException;
+import com.firedemo.demo.infrastructure.ai.StructuredOutputInvoker;
 import com.firedemo.demo.live.handler.QASessionHandler;
 import com.firedemo.demo.live.service.InteractionService;
 import com.firedemo.demo.live.service.LiveNotificationService;
@@ -49,6 +50,7 @@ class LiveMessageResourceScopeTest {
                 mock(SimpMessagingTemplate.class),
                 new ObjectMapper(),
                 mock(OpenClawService.class),
+                mock(StructuredOutputInvoker.class),
                 mock(LiveNotificationService.class));
     }
 

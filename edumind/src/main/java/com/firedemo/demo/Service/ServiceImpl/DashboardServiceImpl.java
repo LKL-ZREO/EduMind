@@ -1,12 +1,11 @@
 package com.firedemo.demo.Service.ServiceImpl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.firedemo.demo.DTO.ClassInfoDTO;
 import com.firedemo.demo.DTO.DashboardMetricsDTO;
 import com.firedemo.demo.DTO.FrequentErrorDTO;
 import com.firedemo.demo.DTO.KnowledgeMasteryDTO;
+import com.firedemo.demo.DTO.KnowledgeReclassificationResult;
 import com.firedemo.demo.DTO.ScoreDistributionDTO;
 import com.firedemo.demo.DTO.StudentOverviewDTO;
 import com.firedemo.demo.DTO.TeacherKnowledgeDTO;
@@ -17,7 +16,8 @@ import com.firedemo.demo.Entity.TeacherKnowledge;
 import com.firedemo.demo.Entity.User;
 import com.firedemo.demo.Service.DashboardService;
 import com.firedemo.demo.Service.OpenClawService;
-import com.firedemo.demo.common.util.JsonUtil;
+import com.firedemo.demo.infrastructure.ai.StructuredOutputInvoker;
+import com.firedemo.demo.infrastructure.ai.StructuredOutputValidationException;
 import com.firedemo.demo.mapper.ClassInfoMapper;
 import com.firedemo.demo.mapper.HomeworkEvaluationMapper;
 import com.firedemo.demo.mapper.SubmissionErrorMapper;
@@ -68,7 +68,7 @@ public class DashboardServiceImpl implements DashboardService {
     private final TeacherKnowledgeMapper teacherKnowledgeMapper;
     private final SubmissionErrorMapper submissionErrorMapper;
     private final OpenClawService openClawService;
-    private final ObjectMapper objectMapper;
+    private final StructuredOutputInvoker structuredOutputInvoker;
     private final CacheManager cacheManager;
 
     @PostConstruct
@@ -469,17 +469,16 @@ public class DashboardServiceImpl implements DashboardService {
 
         String prompt = buildReclassifyPrompt(unclassified, kpNames);
         try {
-            String response = openClawService.chat(prompt, "reclassify_" + classId);
-            String jsonStr = JsonUtil.extractJson(response);
-            JsonNode root = objectMapper.readTree(jsonStr);
-            JsonNode results = root.get("results");
-            if (results == null || !results.isArray()) return;
+            KnowledgeReclassificationResult response = structuredOutputInvoker.invoke(
+                    p -> openClawService.chat(p, "reclassify_" + classId), prompt,
+                    KnowledgeReclassificationResult.class, "knowledge-reclassification",
+                    result -> validateReclassification(result, unclassified.size(), Set.copyOf(kpNames)));
 
             int reclassified = 0;
             List<SubmissionError> batch = new ArrayList<>();
-            for (JsonNode r : results) {
-                int index = r.get("index").asInt();
-                String kp = r.get("knowledgePoint").asText();
+            for (KnowledgeReclassificationResult.Item item : response.getResults()) {
+                int index = item.getIndex();
+                String kp = item.getKnowledgePoint();
                 if (!"其他".equals(kp) && index >= 0 && index < unclassified.size()) {
                     SubmissionError se = unclassified.get(index);
                     se.setKnowledgePoint(kp);
@@ -499,6 +498,22 @@ public class DashboardServiceImpl implements DashboardService {
         } catch (Exception e) {
             log.warn("AI reclassify failed for classId={}: {}", classId, e.getMessage());
         }
+    }
+
+    private void validateReclassification(KnowledgeReclassificationResult result,
+                                          int errorCount, Set<String> allowedKnowledgePoints) {
+        List<String> violations = new ArrayList<>();
+        for (int i = 0; i < result.getResults().size(); i++) {
+            KnowledgeReclassificationResult.Item item = result.getResults().get(i);
+            if (item.getIndex() >= errorCount) {
+                violations.add("results[" + i + "].index: out of range");
+            }
+            if (!"其他".equals(item.getKnowledgePoint())
+                    && !allowedKnowledgePoints.contains(item.getKnowledgePoint())) {
+                violations.add("results[" + i + "].knowledgePoint: not in allowed values");
+            }
+        }
+        if (!violations.isEmpty()) throw new StructuredOutputValidationException(violations);
     }
 
     private String buildReclassifyPrompt(List<SubmissionError> unclassified, List<String> kpNames) {
