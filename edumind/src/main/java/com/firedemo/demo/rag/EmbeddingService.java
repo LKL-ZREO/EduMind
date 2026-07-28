@@ -17,8 +17,6 @@ import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.util.Collections;
-import java.util.List;
 
 /**
  * 嵌入服务 - 使用 ONNX 真实嵌入模型
@@ -201,30 +199,6 @@ public class EmbeddingService {
         } catch (ai.djl.translate.TranslateException e) {
             throw new RuntimeException("ONNX embedding inference failed", e);
         }
-    }
-
-    /**
-     * 通用嵌入（兼容旧调用，等同于 embedDocument）
-     */
-    public float[] embed(String text) {
-        return embedDocument(text);
-    }
-
-    /**
-     * 批量嵌入 —— 顺序单条推理。
-     * 当前 Predictor 不保证线程安全，使用 stream（非 parallelStream）。
-     * <p>
-     * TODO: 改为真正的 stacked-batch 推理 + Predictor 池（需改造 OnnxEmbeddingTranslator
-     * 为 BatchTranslator，将所有输入 padded 后拼成 [batch, max_len] 张量一次性推理）
-     */
-    @io.micrometer.core.annotation.Timed(value = "embedding.batch", histogram = true)
-    public List<float[]> embedBatch(List<String> texts) {
-        if (texts == null || texts.isEmpty()) {
-            return Collections.emptyList();
-        }
-        return texts.stream()
-                .map(this::embed)
-                .toList();
     }
 
 }
