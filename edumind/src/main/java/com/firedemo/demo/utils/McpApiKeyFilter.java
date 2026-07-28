@@ -20,7 +20,7 @@ import java.util.List;
 /**
  * MCP 专用 API Key 认证过滤器。
  * <p>
- * /mcp 由 OpenClaw Gateway 调用，不使用普通用户 JWT，而使用固定服务间密钥认证。
+ * /mcp 由 Agent 编排系统或外部 MCP 客户端调用，不使用普通用户 JWT，而使用固定服务间密钥认证。
  */
 @Component
 public class McpApiKeyFilter extends OncePerRequestFilter {
@@ -54,7 +54,7 @@ public class McpApiKeyFilter extends OncePerRequestFilter {
         }
 
         UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
-                "openclaw-mcp",
+                "mcp-service",
                 null,
                 List.of(new SimpleGrantedAuthority("ROLE_MCP"))
         );

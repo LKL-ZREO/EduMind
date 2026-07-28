@@ -4,8 +4,8 @@ import com.firedemo.demo.Service.OpenClawService;
 import com.firedemo.demo.infrastructure.prompt.PromptLoader;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -22,11 +22,15 @@ import java.time.Duration;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class QueryRewriter {
 
     private final OpenClawService openClawService;
     private final PromptLoader promptLoader;
+
+    public QueryRewriter(@Lazy OpenClawService openClawService, PromptLoader promptLoader) {
+        this.openClawService = openClawService;
+        this.promptLoader = promptLoader;
+    }
 
     /** 改写结果本地缓存：同一查询 5 分钟内不重复调用 LLM */
     private final Cache<String, String> rewriteCache = Caffeine.newBuilder()

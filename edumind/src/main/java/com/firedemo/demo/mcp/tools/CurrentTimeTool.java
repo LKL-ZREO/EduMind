@@ -1,5 +1,6 @@
 package com.firedemo.demo.mcp.tools;
 
+import com.firedemo.demo.agent.context.AgentExecutionContext;
 import com.firedemo.demo.mcp.ToolDefinition;
 import org.springframework.stereotype.Component;
 
@@ -34,7 +35,7 @@ public class CurrentTimeTool implements ToolDefinition {
     }
 
     @Override
-    public String execute(Map<String, Object> arguments) {
+    public String execute(Map<String, Object> arguments, AgentExecutionContext context) {
         return LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
     }
 }

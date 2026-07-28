@@ -18,4 +18,7 @@ public interface CourseMapper extends BaseMapper<Course> {
             "INNER JOIN class_info ci ON ci.course_id = c.id " +
             "WHERE ci.id = #{classId}")
     Course selectByClassId(@Param("classId") Long classId);
+
+    @Select("SELECT system_prompt FROM course WHERE id = #{id}")
+    String selectSystemPromptById(@Param("id") Long id);
 }

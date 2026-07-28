@@ -2,7 +2,7 @@ import request from './request'
 
 export async function submitHomework(formData: FormData) {
   const res = await request.post('/homework/submit', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' }
+    headers: { 'Content-Type': 'multipart/form-data' },
   })
   return res.data
 }

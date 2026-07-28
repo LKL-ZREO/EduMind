@@ -67,6 +67,13 @@ public interface ClassStudentMapper extends BaseMapper<ClassStudent> {
     Integer countByClassId(@Param("classId") Long classId);
 
     /**
+     * 检查指定学号是否属于指定班级
+     */
+    @Select("SELECT COUNT(*) > 0 FROM class_student WHERE class_id = #{classId} AND student_id = #{studentId}")
+    boolean existsByClassIdAndStudentId(@Param("classId") Long classId,
+                                        @Param("studentId") String studentId);
+
+    /**
      * 批量查询各班级学生数（避免 N+1）
      */
     @Select("<script>" +

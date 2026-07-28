@@ -20,11 +20,10 @@ export default defineConfigWithVueTs(
   ...pluginVue.configs['flat/essential'],
   vueTsConfigs.recommended,
 
+  // Dashboard is the only legacy Options API page left; keep the exception local until it is split.
   {
-    name: 'app/rules-override',
+    files: ['src/views/Dashboard.vue'],
     rules: {
-      '@typescript-eslint/no-explicit-any': 'warn',
-      '@typescript-eslint/no-unused-vars': ['error', { caughtErrors: 'none', argsIgnorePattern: '^_' }],
       'vue/block-lang': 'off',
     },
   },

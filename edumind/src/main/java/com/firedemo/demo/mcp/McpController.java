@@ -1,5 +1,9 @@
 package com.firedemo.demo.mcp;
 
+import com.firedemo.demo.agent.context.AgentChannel;
+import com.firedemo.demo.agent.context.AgentExecutionContext;
+import com.firedemo.demo.agent.context.AgentExecutionContextFactory;
+import com.firedemo.demo.agent.context.AgentRunTrace;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -11,6 +15,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -36,6 +41,7 @@ public class McpController {
 
     private final Map<String, ToolDefinition> tools = new LinkedHashMap<>();
     private final McpSessionStore mcpSessionStore;
+    private final AgentExecutionContextFactory executionContextFactory;
 
     /** MCP 协议 JSON-RPC 响应键 */
     private static final String KEY_CONTENT = "content";
@@ -43,11 +49,13 @@ public class McpController {
     private static final String KEY_TEXT = "text";
 
     public McpController(List<ToolDefinition> toolDefinitions,
-                         McpSessionStore mcpSessionStore) {
+                         McpSessionStore mcpSessionStore,
+                         AgentExecutionContextFactory executionContextFactory) {
         for (ToolDefinition tool : toolDefinitions) {
             tools.put(tool.name(), tool);
         }
         this.mcpSessionStore = mcpSessionStore;
+        this.executionContextFactory = executionContextFactory;
     }
 
     @PostConstruct
@@ -80,7 +88,7 @@ public class McpController {
                 case "initialize" -> handleInitialize(id, params);
                 case "notifications/initialized" -> null; // 通知不需要响应
                 case "tools/list" -> handleToolsList(id);
-                case "tools/call" -> handleToolsCall(id, params);
+                case "tools/call" -> handleToolsCall(id, params, httpRequest);
                 default -> errorResponse(id, -32601, "未知方法: " + method);
             };
         } catch (RuntimeException e) {
@@ -131,38 +139,39 @@ public class McpController {
     /**
      * 调用指定工具
      */
-    private Map<String, Object> handleToolsCall(Object id, Map<String, Object> params) {
+    private Map<String, Object> handleToolsCall(Object id,
+                                                Map<String, Object> params,
+                                                HttpServletRequest httpRequest) {
         String toolName = (String) params.get("name");
         @SuppressWarnings("unchecked")
         Map<String, Object> arguments = (Map<String, Object>) params.getOrDefault("arguments", Map.of());
 
-        log.info("MCP tools/call: name={}, args={}", toolName, arguments);
-        log.info("MCP tools/call full params keys: {}", params.keySet());
-
-        // 尝试解析会话上下文（sessionId 可能由 OpenClaw 在 _meta 或顶层字段回传）
-        String sessionId = extractSessionId(params);
-        if (sessionId != null) {
-            ToolContext ctx = mcpSessionStore.get(sessionId);
-            if (ctx != null) {
-                ToolContextHolder.set(ctx);
-                log.debug("MCP tool context injected: {}", ctx);
-            }
-        }
+        log.info("MCP tools/call: name={}, args={}", toolName, summarizeArgs(arguments));
+        log.debug("MCP tools/call params keys: {}", params.keySet());
 
         ToolDefinition tool = tools.get(toolName);
         if (tool == null) {
-            ToolContextHolder.clear();
             return errorResponse(id, -32602, "未知工具: " + toolName);
         }
 
-        String result;
-        try {
-            result = tool.execute(arguments);
-        } finally {
-            ToolContextHolder.clear();
+        String sessionId = extractSessionId(params, httpRequest);
+        AgentExecutionContext context = sessionId != null
+                ? mcpSessionStore.resolve(sessionId, AgentChannel.MCP)
+                : null;
+        if (context == null) {
+            String anonymousSessionId = sessionId != null
+                    ? sessionId
+                    : "mcp-" + UUID.randomUUID().toString().replace("-", "");
+            context = executionContextFactory.create(
+                    anonymousSessionId, null, null, AgentChannel.MCP);
         }
-        log.info("MCP tools/call 结果: name={}, resultLen={}", toolName,
-                result != null ? result.length() : 0);
+
+        AgentRunTrace trace = new AgentRunTrace(context);
+        AgentExecutionContext executionContext = context;
+        String result = trace.traceToolCall(
+                toolName, () -> tool.execute(arguments, executionContext));
+        log.info("MCP tools/call 结果: name={}, resultLen={}, traceId={}", toolName,
+                result != null ? result.length() : 0, trace.traceId());
 
         // MCP 要求返回 content 数组
         return successResponse(id, Map.of(
@@ -177,7 +186,11 @@ public class McpController {
      * 从 MCP params 中尝试提取 sessionId。
      * OpenClaw 可能通过 _meta.sessionId 或顶层 sessionId 字段回传。
      */
-    private String extractSessionId(Map<String, Object> params) {
+    private String extractSessionId(Map<String, Object> params, HttpServletRequest request) {
+        String headerSessionId = request.getHeader("X-Session-Id");
+        if (headerSessionId != null && !headerSessionId.isBlank()) {
+            return headerSessionId.trim();
+        }
         // 直接字段
         Object sid = params.get("sessionId");
         if (sid instanceof String s && !s.isEmpty()) return s;
@@ -196,6 +209,33 @@ public class McpController {
     }
 
     // ==================== JSON-RPC 响应构造 ====================
+
+    private Map<String, Object> summarizeArgs(Map<String, Object> args) {
+        Map<String, Object> summary = new LinkedHashMap<>();
+        for (Map.Entry<String, Object> entry : args.entrySet()) {
+            Object value = entry.getValue();
+            if (value instanceof String text) {
+                summary.put(entry.getKey(), summarizeText(text));
+            } else {
+                summary.put(entry.getKey(), value);
+            }
+        }
+        return summary;
+    }
+
+    private String summarizeText(String text) {
+        if (text == null) return null;
+        if (text.startsWith("data:image/")) {
+            return "[data-url length=" + text.length() + "]";
+        }
+        if (text.startsWith("[CQ:image")) {
+            return "[cq-image length=" + text.length() + "]";
+        }
+        if (text.length() > 160) {
+            return text.substring(0, 160) + "...(length=" + text.length() + ")";
+        }
+        return text;
+    }
 
     private Map<String, Object> successResponse(Object id, Map<String, Object> result) {
         Map<String, Object> response = new LinkedHashMap<>();

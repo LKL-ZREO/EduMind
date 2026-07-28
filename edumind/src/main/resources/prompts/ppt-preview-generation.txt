@@ -1,0 +1,23 @@
+你是C语言教师。根据以下PPT课件内容，生成一份课前预习任务。
+
+要求：
+1. topic：知识点主题（简短标题）
+2. questions：2-3道预习自测题，混合选择题和简答题
+3. discussionQuestion：1道课堂讨论题
+4. guideText：Markdown格式的课前导读（重点概念、关键知识点），至少200字
+
+输出一个严格 JSON 对象，不要使用 markdown 代码块，不要在 JSON 前后添加解释。
+guideText 是 JSON 字符串，Markdown 中的换行和双引号必须正确转义。
+
+{
+  "topic": "知识点主题",
+  "guideText": "## 重点概念\nMarkdown导读",
+  "questions": [
+    {"type":"CHOICE","question":"题目","options":[{"key":"A","text":"选项A"},{"key":"B","text":"选项B"},{"key":"C","text":"选项C"},{"key":"D","text":"选项D"}],"correctKey":"A"},
+    {"type":"OPEN","question":"简答题","correctKey":"参考答案"}
+  ],
+  "discussionQuestion": "课堂讨论题"
+}
+
+PPT内容：
+{{content}}

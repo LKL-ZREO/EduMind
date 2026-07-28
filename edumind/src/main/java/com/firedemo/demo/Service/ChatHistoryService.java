@@ -30,11 +30,12 @@ public interface ChatHistoryService {
     /**
      * 获取会话历史
      *
+     * @param userId    用户ID
      * @param sessionId 会话ID
      * @param limit     限制条数
      * @return 历史记录列表
      */
-    List<ChatHistory> getHistory(String sessionId, int limit);
+    List<ChatHistory> getHistory(Long userId, String sessionId, int limit);
 
     /**
      * 获取用户的历史会话ID
@@ -63,9 +64,10 @@ public interface ChatHistoryService {
     /**
      * 构建上下文提示词
      *
+     * @param userId    用户ID
      * @param sessionId 会话ID
      * @param limit     限制条数
      * @return 格式化的上下文
      */
-    String buildContextPrompt(String sessionId, int limit);
+    String buildContextPrompt(Long userId, String sessionId, int limit);
 }

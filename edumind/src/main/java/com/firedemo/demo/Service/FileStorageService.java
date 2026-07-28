@@ -14,6 +14,9 @@ public interface FileStorageService {
      */
     String storeFile(MultipartFile file);
 
+    /** Store binary content at a caller-controlled key and return that key. */
+    String storeBytes(byte[] content, String storageKey, String contentType);
+
     /**
      * 删除文件
      * @param filePath 文件路径
@@ -26,4 +29,7 @@ public interface FileStorageService {
      * @return 文件内容
      */
     String readFileContent(String filePath);
+
+    /** Read raw file bytes without document parsing. */
+    byte[] readFileBytes(String filePath);
 }

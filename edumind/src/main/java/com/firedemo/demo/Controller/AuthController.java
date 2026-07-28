@@ -2,19 +2,25 @@ package com.firedemo.demo.Controller;
 
 import com.firedemo.demo.DTO.UserLoginDTO;
 import com.firedemo.demo.DTO.UserRegisterDTO;
-import com.firedemo.demo.Service.TokenService;
 import com.firedemo.demo.Service.UserService;
 import com.firedemo.demo.VO.UserLoginVO;
 import com.firedemo.demo.common.annotation.RateLimit;
 import com.firedemo.demo.common.result.Result;
-import com.firedemo.demo.utils.JwtUtil;
-import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpSession;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContext;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.web.context.SecurityContextRepository;
+import org.springframework.security.web.csrf.CsrfToken;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -23,12 +29,16 @@ import java.util.Map;
 public class AuthController {
 
     private final UserService userService;
-    private final TokenService tokenService;
-    private final JwtUtil jwtUtil;
+    private final SecurityContextRepository securityContextRepository;
 
-    private static final String TOKEN_COOKIE = "edumind_token";
-    /** Cookie 有效期（秒），与 JWT 过期时间一致 */
-    private static final int COOKIE_MAX_AGE = (int) JwtUtil.EXPIRATION_SECONDS;
+    /** SPA 获取 CSRF token；访问该端点会同步写入 XSRF-TOKEN Cookie。 */
+    @GetMapping("/csrf")
+    public Result<Map<String, String>> csrf(HttpServletRequest request) {
+        CsrfToken token = (CsrfToken) request.getAttribute("_csrf");
+        return Result.success(Map.of(
+                "token", token.getToken(),
+                "headerName", token.getHeaderName()));
+    }
 
     @RateLimit(dimensions = {RateLimit.Dimension.GLOBAL, RateLimit.Dimension.IP},
                count = 3, interval = 60, timeUnit = RateLimit.TimeUnit.SECONDS)
@@ -39,100 +49,61 @@ public class AuthController {
     }
 
     /**
-     * 登录 — 双层限流 + 返回 JWT + 刷新令牌 + HttpOnly Cookie
+     * 登录并将教师身份写入 Redis-backed HttpSession。
      */
     @RateLimit(dimensions = {RateLimit.Dimension.GLOBAL, RateLimit.Dimension.IP},
                count = 5, interval = 60, timeUnit = RateLimit.TimeUnit.SECONDS)
     @PostMapping("/login")
-    public Result<UserLoginVO> login(@Valid @RequestBody UserLoginDTO dto, HttpServletResponse response) {
+    public Result<UserLoginVO> login(@Valid @RequestBody UserLoginDTO dto,
+                                     HttpServletRequest request,
+                                     HttpServletResponse response) {
         UserLoginVO vo = userService.login(dto);
 
-        // 设置 HttpOnly Cookie — 前端无需手动管理 token
-        Cookie cookie = new Cookie(TOKEN_COOKIE, vo.getToken());
-        cookie.setHttpOnly(true);
-        cookie.setSecure(false);  // 本地开发用 HTTP，生产 Nginx 会设 Secure
-        cookie.setPath("/");
-        cookie.setMaxAge(COOKIE_MAX_AGE);
-        cookie.setAttribute("SameSite", "Lax");
-        response.addCookie(cookie);
+        HttpSession session = request.getSession(false);
+        if (session == null) {
+            request.getSession(true);
+        } else {
+            request.changeSessionId();
+        }
+
+        UsernamePasswordAuthenticationToken authentication =
+                new UsernamePasswordAuthenticationToken(
+                        vo.getUsername(),
+                        null,
+                        List.of(new SimpleGrantedAuthority("ROLE_TEACHER")));
+        authentication.setDetails(vo.getId());
+        SecurityContext context = SecurityContextHolder.createEmptyContext();
+        context.setAuthentication(authentication);
+        SecurityContextHolder.setContext(context);
+        securityContextRepository.saveContext(context, request, response);
 
         return Result.success(vo);
     }
 
-    /**
-     * 刷新令牌 — 用 Refresh Token 换新的 Access Token。
-     * Refresh Token 单次使用，换成功后旧 token 立即失效。
-     */
-    @PostMapping("/refresh")
-    public Result<Map<String, Object>> refresh(@RequestBody Map<String, String> body,
-                                                HttpServletResponse response) {
-        String refreshToken = body.get("refreshToken");
-        if (refreshToken == null || refreshToken.isBlank()) {
-            return Result.error(400, "缺少 refreshToken");
+    @GetMapping("/me")
+    public Result<UserLoginVO> me(Authentication authentication) {
+        if (authentication == null || !(authentication.getDetails() instanceof Long userId)) {
+            return Result.error(401, "未登录");
         }
-
-        Long userId = tokenService.consumeRefreshToken(refreshToken);
-        if (userId == null) {
-            return Result.error(401, "刷新令牌无效或已过期，请重新登录");
-        }
-
-        // 查用户信息
         var user = userService.getById(userId);
-        if (user == null || user.getStatus() == 0) {
-            return Result.error(401, "账号已被禁用");
+        if (user == null || Integer.valueOf(0).equals(user.getStatus())) {
+            return Result.error(401, "账号已被禁用或不存在");
         }
-
-        // 签发新的 Access Token + Refresh Token
-        String newToken = jwtUtil.generateToken(userId, user.getUsername(), user.getStatus());
-        String newRefreshToken = tokenService.createRefreshToken(userId);
-
-        // 更新 Cookie
-        Cookie cookie = new Cookie(TOKEN_COOKIE, newToken);
-        cookie.setHttpOnly(true);
-        cookie.setSecure(false);
-        cookie.setPath("/");
-        cookie.setMaxAge(COOKIE_MAX_AGE);
-        cookie.setAttribute("SameSite", "Lax");
-        response.addCookie(cookie);
-
-        return Result.success(Map.of(
-                "token", newToken,
-                "refreshToken", newRefreshToken,
-                "expiresIn", JwtUtil.EXPIRATION_SECONDS
-        ));
+        return Result.success(UserLoginVO.builder()
+                .id(user.getId())
+                .username(user.getUsername())
+                .email(user.getEmail())
+                .build());
     }
 
-    /**
-     * 退出登录 — 吊销 Access Token + 清除 Cookie
-     */
+    /** 退出登录后 Redis Session 立即失效。 */
     @PostMapping("/logout")
-    public Result<Void> logout(HttpServletRequest request, HttpServletResponse response) {
-        // 提取 token
-        String token = jwtUtil.extractTokenFromRequest(request);
-
-        // Cookie 回退
-        if (token == null && request.getCookies() != null) {
-            for (Cookie c : request.getCookies()) {
-                if (TOKEN_COOKIE.equals(c.getName())) {
-                    token = c.getValue();
-                    break;
-                }
-            }
+    public Result<Void> logout(HttpServletRequest request) {
+        HttpSession session = request.getSession(false);
+        if (session != null) {
+            session.invalidate();
         }
-
-        // 加入黑名单
-        if (token != null) {
-            long remaining = jwtUtil.getRemainingSeconds(token);
-            tokenService.blacklist(token, remaining);
-        }
-
-        // 清除 Cookie
-        Cookie cookie = new Cookie(TOKEN_COOKIE, "");
-        cookie.setHttpOnly(true);
-        cookie.setPath("/");
-        cookie.setMaxAge(0);
-        response.addCookie(cookie);
-
+        SecurityContextHolder.clearContext();
         return Result.success(null);
     }
 }

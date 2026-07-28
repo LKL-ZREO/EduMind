@@ -4,11 +4,11 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
-import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -17,6 +17,7 @@ import java.io.IOException;
 import java.util.UUID;
 
 /**
+ * 相当于规范化跟踪请求，便于后期DEBUG排查问题
  * 请求追踪过滤器 — 为每个 HTTP 请求生成/传播 RequestId。
  * <p>
  * 优先级最高（{@code Ordered.HIGHEST_PRECEDENCE}），确保在其他 Filter / Interceptor

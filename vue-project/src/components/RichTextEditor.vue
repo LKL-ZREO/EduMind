@@ -14,7 +14,7 @@ const props = withDefaults(
   {
     placeholder: '请输入作业要求、题目说明...',
     minHeight: '180px',
-  }
+  },
 )
 
 const emit = defineEmits<{
@@ -47,7 +47,7 @@ watch(
     if (editor.value && editor.value.getHTML() !== val) {
       editor.value.commands.setContent(val, { emitUpdate: false })
     }
-  }
+  },
 )
 
 onBeforeUnmount(() => {
@@ -58,10 +58,14 @@ onBeforeUnmount(() => {
 function insertFormula() {
   const latex = prompt('输入 LaTeX 公式:', 'x^2')
   if (latex) {
-    editor.value?.chain().focus().insertContent({
-      type: 'mathInline',
-      attrs: { latex },
-    }).run()
+    editor.value
+      ?.chain()
+      .focus()
+      .insertContent({
+        type: 'mathInline',
+        attrs: { latex },
+      })
+      .run()
   }
 }
 </script>
@@ -122,13 +126,7 @@ function insertFormula() {
         &lt;/&gt;
       </button>
       <span class="sep"></span>
-      <button
-        title="插入公式"
-        class="btn-formula"
-        @click="insertFormula"
-      >
-        Σ 公式
-      </button>
+      <button title="插入公式" class="btn-formula" @click="insertFormula">Σ 公式</button>
     </div>
 
     <!-- 编辑区 -->
@@ -223,9 +221,18 @@ function insertFormula() {
   pointer-events: none;
 }
 
-.rich-editor-body h2 { font-size: 1.3em; margin: 0.6em 0 0.3em; }
-.rich-editor-body h3 { font-size: 1.15em; margin: 0.5em 0 0.25em; }
-.rich-editor-body h4 { font-size: 1.05em; margin: 0.4em 0 0.2em; }
+.rich-editor-body h2 {
+  font-size: 1.3em;
+  margin: 0.6em 0 0.3em;
+}
+.rich-editor-body h3 {
+  font-size: 1.15em;
+  margin: 0.5em 0 0.25em;
+}
+.rich-editor-body h4 {
+  font-size: 1.05em;
+  margin: 0.4em 0 0.2em;
+}
 
 .rich-editor-body blockquote {
   border-left: 3px solid #409eff;

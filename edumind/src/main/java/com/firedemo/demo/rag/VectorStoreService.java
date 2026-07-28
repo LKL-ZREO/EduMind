@@ -196,23 +196,6 @@ public class VectorStoreService {
     }
 
     /**
-     * 根据文档ID获取所有chunk
-     */
-    public List<DocumentChunk> getChunksByDocument(String documentId) {
-        String sql = "SELECT * FROM document_chunk WHERE doc_id = ?";
-        return jdbcTemplate.query(sql, new DocumentChunkRowMapper(), documentId);
-    }
-
-    /**
-     * 根据ID获取chunk
-     */
-    public DocumentChunk getChunkById(String chunkId) {
-        String sql = "SELECT * FROM document_chunk WHERE id = ?";
-        List<DocumentChunk> results = jdbcTemplate.query(sql, new DocumentChunkRowMapper(), chunkId);
-        return results.isEmpty() ? null : results.get(0);
-    }
-
-    /**
      * 删除文档的所有chunk
      */
     public void deleteDocument(String documentId) {

@@ -1,6 +1,7 @@
 package com.firedemo.demo.mcp;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import com.firedemo.demo.agent.context.AgentExecutionContext;
+
 import java.util.Map;
 
 /**
@@ -28,6 +29,6 @@ public interface ToolDefinition {
      */
     Map<String, Object> inputSchema();
 
-    /** 执行工具，返回文本结果 */
-    String execute(Map<String, Object> arguments);
+    /** 使用应用侧生成的可信上下文执行工具。 */
+    String execute(Map<String, Object> arguments, AgentExecutionContext context);
 }

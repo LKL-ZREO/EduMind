@@ -8,9 +8,6 @@ import org.springframework.lang.NonNull;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
-/**
- * WebMVC 配置 — 注册网关层令牌桶限流拦截器
- */
 @Configuration
 public class WebMvcConfig implements WebMvcConfigurer {
 
@@ -31,9 +28,23 @@ public class WebMvcConfig implements WebMvcConfigurer {
         registry.addInterceptor(new TokenBucketInterceptor(rateLimiter, bucketConfig, objectMapper))
                 .addPathPatterns("/api/**")
                 .excludePathPatterns(
-                        "/actuator/**",       // 健康检查不限流
-                        "/error"             // 错误页面不限流
+                        "/api/auth/**",
+                        "/api/chat/health",
+                        "/api/homework/classes",
+                        "/api/homework/tasks",
+                        "/api/homework/submit-status",
+                        "/api/homework/result/**",
+                        "/api/homework/check-qq-binding",
+                        "/api/homework/submit",
+                        "/api/homework/bind-qq",
+                        "/api/onebot/rag",
+                        "/api/teacher/classes/join",
+                        "/api/live/join",
+                        "/api/live/session/*",
+                        "/api/preview/*",
+                        "/actuator/**",
+                        "/error"
                 )
-                .order(0); // 最先执行，作为第一道防线
+                .order(0);
     }
 }

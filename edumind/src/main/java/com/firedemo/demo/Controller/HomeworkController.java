@@ -15,14 +15,13 @@ import com.firedemo.demo.Service.ClassService;import com.firedemo.demo.Service.S
 import com.firedemo.demo.common.annotation.RateLimit;
 import com.firedemo.demo.common.exception.ErrorCode;
 import com.firedemo.demo.common.result.Result;
-import com.firedemo.demo.utils.JwtUtil;
-import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.constraints.NotNull;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RBucket;
 import org.redisson.api.RedissonClient;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -46,9 +45,7 @@ import org.springframework.cache.annotation.CacheEvict;
 public class HomeworkController {
 
     private final FileStorageService fileStorageService;
-    private final OpenClawService openClawService;
     private final GradingStreamProducer gradingStreamProducer;
-    private final com.firedemo.demo.Service.OneBotHttpService oneBotHttpService;
     private final SubmissionService submissionService;
     private final HomeworkResultService homeworkResultService;
     private final HomeworkTaskService taskService;
@@ -57,7 +54,6 @@ public class HomeworkController {
 private final TaskReminderService taskReminderService;
     private final CacheManager cacheManager;
     private final ObjectMapper objectMapper;
-    private final JwtUtil jwtUtil;
 
     /** 文件名正则：学号_姓名_班级_作业名称.扩展名 */
     private static final Pattern FILE_NAME_PATTERN =
@@ -161,9 +157,10 @@ private final TaskReminderService taskReminderService;
         // 1.5 检查QQ号绑定
         String qqNumber = classService.getQqByStudentId(studentId);
         if (qqNumber == null) {
-            return ResponseEntity.ok(Result.error(ErrorCode.UNAUTHORIZED.getCode(),
-                    "请先绑定QQ号",
-                    Map.of("needBind", true, "studentId", studentId, "studentName", studentName)));
+            return ResponseEntity.status(ErrorCode.PRECONDITION_REQUIRED.getHttpStatus())
+                    .body(Result.error(ErrorCode.PRECONDITION_REQUIRED.getCode(),
+                            "请先绑定QQ号",
+                            Map.of("needBind", true, "studentId", studentId, "studentName", studentName)));
         }
 
         // 1.6 幂等性检查：10 秒内相同学生+相同作业+相同文件的重复提交直接拦截
@@ -218,15 +215,16 @@ private final TaskReminderService taskReminderService;
                 }
             }
             if (!warnings.isEmpty()) {
-                return ResponseEntity.ok(Result.error(300,
-                        "文件名与选择项不匹配，请确认",
-                        Map.of(
-                                "warnings", warnings,
-                                "studentId", studentId,
-                                "studentName", studentName,
-                                "parsedClassName", className,
-                                "parsedAssignmentName", assignmentName
-                        )));
+                return ResponseEntity.status(ErrorCode.CONFIRMATION_REQUIRED.getHttpStatus())
+                        .body(Result.error(ErrorCode.CONFIRMATION_REQUIRED.getCode(),
+                                "文件名与选择项不匹配，请确认",
+                                Map.of(
+                                        "warnings", warnings,
+                                        "studentId", studentId,
+                                        "studentName", studentName,
+                                        "parsedClassName", className,
+                                        "parsedAssignmentName", assignmentName
+                                )));
             }
         }
 
@@ -254,20 +252,21 @@ private final TaskReminderService taskReminderService;
         int submitCount = existingCount + 1;
 
         // 7. 创建 Submission（状态 PENDING），入库
-        Submission submission = new Submission();
-        submission.setStudentId(studentId);
-        submission.setStudentName(studentName);
-        submission.setClassName(className);
-        submission.setClassId(classInfo.getId());
-        submission.setAssignmentName(assignmentName);
-        submission.setFileName(originalFileName);
-        submission.setFilePath(filePath);
-        submission.setFileSize(file.getSize());
-        submission.setStatus(SubmissionStatus.PENDING.getCode());
-        submission.setTaskId(expectedTaskId);
-        submission.setSubmitCount(submitCount);
-        submission.setRemainingAttempts(Math.max(0, 3 - submitCount));
-        submission.setAssignmentNo(submitCount);
+        Submission submission = Submission.builder()
+                .studentId(studentId)
+                .studentName(studentName)
+                .className(className)
+                .classId(classInfo.getId())
+                .assignmentName(assignmentName)
+                .fileName(originalFileName)
+                .filePath(filePath)
+                .fileSize(file.getSize())
+                .status(SubmissionStatus.PENDING.getCode())
+                .taskId(expectedTaskId)
+                .submitCount(submitCount)
+                .remainingAttempts(Math.max(0, 3 - submitCount))
+                .assignmentNo(submitCount)
+                .build();
         submissionService.save(submission);
 
         log.info("作业提交已入库(PENDING): submissionId={}, studentName={}, className={}, assignmentName={}",
@@ -347,9 +346,10 @@ private final TaskReminderService taskReminderService;
     public ResponseEntity<?> checkQqBinding(@RequestParam String studentId) {
         String qqNumber = classService.getQqByStudentId(studentId);
         if (qqNumber == null) {
-            return ResponseEntity.ok(Result.error(ErrorCode.UNAUTHORIZED.getCode(),
-                    "请先绑定QQ号",
-                    Map.of("needBind", true)));
+            return ResponseEntity.status(ErrorCode.PRECONDITION_REQUIRED.getHttpStatus())
+                    .body(Result.error(ErrorCode.PRECONDITION_REQUIRED.getCode(),
+                            "请先绑定QQ号",
+                            Map.of("needBind", true)));
         }
         return ResponseEntity.ok(Result.success(Map.of("qqNumber", qqNumber)));
     }
@@ -372,14 +372,8 @@ private final TaskReminderService taskReminderService;
     @RateLimit(dimensions = {RateLimit.Dimension.GLOBAL, RateLimit.Dimension.IP},
                count = 1, interval = 300, timeUnit = RateLimit.TimeUnit.SECONDS)
     @GetMapping("/tasks/remind-all")
-    public ResponseEntity<?> remindAllTasks(HttpServletRequest request) {
-        // 认证检查
-        Long userId = jwtUtil.getUserIdFromRequest(request);
-        if (userId == null) {
-            return ResponseEntity.status(401).body(Result.error(ErrorCode.UNAUTHORIZED.getCode(),
-                    "请先登录"));
-        }
-
+    @PreAuthorize("hasRole('TEACHER')")
+    public ResponseEntity<?> remindAllTasks() {
         List<HomeworkTask> activeTasks = taskService.listActiveWithDeadline();
         if (activeTasks.isEmpty()) {
             Result<Void> r = Result.success();

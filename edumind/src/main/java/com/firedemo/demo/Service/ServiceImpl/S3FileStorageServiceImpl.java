@@ -114,6 +114,30 @@ public class S3FileStorageServiceImpl implements FileStorageService {
     }
 
     @Override
+    public String storeBytes(byte[] content, String storageKey, String contentType) {
+        if (content == null || content.length == 0 || storageKey == null || storageKey.isBlank()
+                || storageKey.startsWith("/") || storageKey.contains("..")) {
+            throw new BusinessException(ErrorCode.FILE_UPLOAD_ERROR);
+        }
+
+        try {
+            s3Client.putObject(
+                    PutObjectRequest.builder()
+                            .bucket(s3Properties.getBucket())
+                            .key(storageKey)
+                            .contentType(contentType)
+                            .build(),
+                    RequestBody.fromBytes(content));
+            log.info("S3 binary file stored: bucket={}, key={}, size={}",
+                    s3Properties.getBucket(), storageKey, content.length);
+            return storageKey;
+        } catch (Exception e) {
+            log.error("Failed to store S3 binary file: key={}", storageKey, e);
+            throw new BusinessException(ErrorCode.FILE_UPLOAD_ERROR);
+        }
+    }
+
+    @Override
     public void deleteFile(String filePath) {
         if (filePath == null || filePath.isEmpty()) return;
         try {
@@ -157,6 +181,22 @@ public class S3FileStorageServiceImpl implements FileStorageService {
             return "";
         } catch (Exception e) {
             log.error("S3 读取文件失败: key={}", filePath, e);
+            throw new BusinessException(ErrorCode.FILE_READ_ERROR);
+        }
+    }
+
+    @Override
+    public byte[] readFileBytes(String filePath) {
+        if (filePath == null || filePath.isBlank()) {
+            throw new BusinessException(ErrorCode.FILE_READ_ERROR);
+        }
+        try (var response = s3Client.getObject(GetObjectRequest.builder()
+                .bucket(s3Properties.getBucket())
+                .key(filePath)
+                .build())) {
+            return response.readAllBytes();
+        } catch (Exception e) {
+            log.error("Failed to read S3 binary file: key={}", filePath, e);
             throw new BusinessException(ErrorCode.FILE_READ_ERROR);
         }
     }

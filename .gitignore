@@ -1,0 +1,14 @@
+# Local assistant configuration
+/.claude/settings.local.json
+
+# Bundled service runtime artifacts
+/NapCat.Shell/cache/
+/NapCat.Shell/config/
+/NapCat.Shell/logs/
+/NapCat.Shell/node_modules/
+/NapCat.Shell/temp/
+/NapCat.Shell/*-user.bat
+
+# Local backend diagnostics and one-off maintenance scripts
+/edumind/hs_err_pid*.log
+/edumind/manual_migration.sql

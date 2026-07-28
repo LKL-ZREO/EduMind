@@ -23,24 +23,26 @@ public class AesUtil {
 
     private static final String ALGORITHM = "AES";
     private static final String TRANSFORMATION = "AES/GCM/NoPadding";
+    private static final int AES_256_KEY_LENGTH = 32;
     private static final int GCM_IV_LENGTH = 12;   // 96 bits
     private static final int GCM_TAG_LENGTH = 128; // bits
 
     private final SecretKeySpec keySpec;
 
     public AesUtil(@Value("${app.encrypt.aes-key}") String base64Key) {
-        if (base64Key == null || base64Key.length() < 32) {
-            throw new IllegalStateException(
-                    "app.encrypt.aes-key 未配置或长度不足（至少需要 32 字节 Base64）。" +
-                    "生成命令：openssl rand -base64 32");
+        if (base64Key == null || base64Key.isBlank()) {
+            throw new IllegalStateException("app.encrypt.aes-key must be configured");
         }
         byte[] keyBytes;
         try {
             keyBytes = Base64.getDecoder().decode(base64Key);
         } catch (IllegalArgumentException e) {
             throw new IllegalStateException(
-                    "app.encrypt.aes-key 不是有效的 Base64 字符串。" +
-                    "请用 openssl rand -base64 32 生成，并将结果设置到 ENCRYPT_AES_KEY 环境变量", e);
+                    "app.encrypt.aes-key must be valid Base64; generate it with: openssl rand -base64 32", e);
+        }
+        if (keyBytes.length != AES_256_KEY_LENGTH) {
+            throw new IllegalStateException(
+                    "app.encrypt.aes-key must decode to exactly 32 bytes for AES-256");
         }
         this.keySpec = new SecretKeySpec(keyBytes, ALGORITHM);
         log.info("AES-256-GCM 加密模块已初始化");

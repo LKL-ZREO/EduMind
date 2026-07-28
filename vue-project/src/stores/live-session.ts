@@ -1,0 +1,394 @@
+import { Client } from '@stomp/stompjs'
+import { defineStore } from 'pinia'
+import { computed, ref } from 'vue'
+import * as liveApi from '../api/live'
+import type {
+  CreateInteractionRequest,
+  InteractionHistoryItem,
+  InteractionPush,
+  LiveSessionInfo,
+  LiveStats,
+  OnlineStudents,
+  QAMessage,
+  QAQuestion,
+  ReactionMsg,
+  StudentProfile,
+} from '../api/live'
+
+interface HandEntry {
+  studentId: string
+  studentName: string
+  raisedAt: number
+}
+
+interface HandQueue {
+  waiting: HandEntry[]
+  called: HandEntry[]
+}
+
+interface TeacherStatus {
+  online: boolean
+  sessionEnded?: boolean
+}
+
+export const useLiveSessionStore = defineStore('liveSession', () => {
+  const role = ref<'teacher' | 'student' | null>(null)
+  const sessionInfo = ref<LiveSessionInfo | null>(null)
+  const currentInteraction = ref<InteractionPush | null>(null)
+  const lastStats = ref<LiveStats | null>(null)
+  const interactionHistory = ref<InteractionHistoryItem[]>([])
+  const topQuestions = ref<QAQuestion[]>([])
+  const connectionStatus = ref<'disconnected' | 'connecting' | 'connected'>('disconnected')
+  const studentCount = ref(0)
+  const studentList = ref<OnlineStudents['students']>([])
+  const absentCount = ref(0)
+  const absentStudents = ref<OnlineStudents['absentStudents']>([])
+  const reactions = ref<ReactionMsg[]>([])
+  const studentProfile = ref<StudentProfile | null>(null)
+  const handQueue = ref<HandQueue>({ waiting: [], called: [] })
+  const handRaised = ref(false)
+  const teacherOnline = ref(true)
+  const sessionEnded = ref(false)
+  let stomp: Client | null = null
+
+  const isTeacher = computed(() => role.value === 'teacher')
+  const isStudent = computed(() => role.value === 'student')
+  const sessionId = computed(() => sessionInfo.value?.sessionId ?? null)
+
+  async function createSession(classId: number, title?: string) {
+    const response = await liveApi.createSession({ classId, title })
+    const data = response.data.data
+    sessionInfo.value = {
+      sessionId: data.sessionId,
+      sessionCode: data.sessionCode,
+      title: data.title,
+      className: '',
+      teacherName: '',
+      token: '',
+      studentId: '',
+      studentName: '',
+      hasActive: true,
+      currentInteraction: null,
+      startedAt: data.startedAt,
+    }
+    role.value = 'teacher'
+    connect()
+    return data
+  }
+
+  async function checkActiveSession(classId: number) {
+    const response = await liveApi.getActiveSession(classId)
+    return response.data.data
+  }
+
+  async function endLiveSession() {
+    const id = sessionId.value
+    try {
+      if (id) await liveApi.endSession(id)
+    } finally {
+      disconnect()
+      reset()
+    }
+  }
+
+  async function joinSession(code: string, studentId: string, studentName: string) {
+    const response = await liveApi.joinSession({
+      code: code.toUpperCase(),
+      studentId,
+      studentName,
+    })
+    const data = response.data.data
+    sessionInfo.value = data
+    role.value = 'student'
+    if (data.currentInteraction) currentInteraction.value = data.currentInteraction
+    connect(data.token)
+    return data
+  }
+
+  function submitResponse(answer: string) {
+    const interactionId = currentInteraction.value?.interactionId
+    if (!interactionId) return
+    send(`/app/session/${sessionId.value}/interaction/${interactionId}/respond`, {
+      interactionId,
+      answer,
+      studentId: sessionInfo.value?.studentId,
+      studentName: sessionInfo.value?.studentName,
+    })
+    const index = interactionHistory.value.findIndex((item) => item.interactionId === interactionId)
+    const existing = interactionHistory.value[index]
+    if (existing) interactionHistory.value[index] = { ...existing, myAnswer: answer }
+  }
+
+  function askQuestion(question: string) {
+    send(`/app/session/${sessionId.value}/qa/ask`, { question })
+  }
+
+  function createInteraction(dto: CreateInteractionRequest) {
+    send(`/app/session/${sessionId.value}/interaction/create`, dto)
+  }
+
+  function closeInteraction(interactionId: number) {
+    send(`/app/session/${sessionId.value}/interaction/${interactionId}/close`, {})
+  }
+
+  function answerQuestion(qaId: number, answerText: string) {
+    send(`/app/session/${sessionId.value}/qa/${qaId}/answer`, { answerText })
+  }
+
+  function sendReaction(emoji: string) {
+    send(`/app/session/${sessionId.value}/reaction`, {
+      emoji,
+      studentId: sessionInfo.value?.studentId,
+      studentName: sessionInfo.value?.studentName,
+      type: 'emoji',
+    })
+  }
+
+  function raiseHand() {
+    send(`/app/session/${sessionId.value}/hand/raise`, {})
+    handRaised.value = true
+  }
+
+  function lowerHand() {
+    send(`/app/session/${sessionId.value}/hand/lower`, {})
+    handRaised.value = false
+  }
+
+  function callStudent(studentId?: string) {
+    send(`/app/session/${sessionId.value}/hand/call`, studentId ? { studentId } : {})
+  }
+
+  function dismissHand(studentId: string) {
+    send(`/app/session/${sessionId.value}/hand/dismiss`, { studentId })
+  }
+
+  async function fetchStudentProfile(studentId: string, classId: number) {
+    const response = await liveApi.getStudentProfile(studentId, classId)
+    studentProfile.value = response.data.data
+  }
+
+  function mergeStats(stats: LiveStats) {
+    const index = interactionHistory.value.findIndex(
+      (item) => item.interactionId === stats.interactionId,
+    )
+    const existing = interactionHistory.value[index]
+    if (!existing) return
+    interactionHistory.value[index] = {
+      ...existing,
+      respondedCount: stats.respondedCount,
+      correctRate: stats.correctRate,
+      status: stats.status,
+    }
+  }
+
+  function mergeInteractionPush(push: InteractionPush) {
+    const index = interactionHistory.value.findIndex(
+      (item) => item.interactionId === push.interactionId,
+    )
+    const item: InteractionHistoryItem = {
+      interactionId: push.interactionId,
+      type: push.type,
+      title: push.title,
+      description: push.description,
+      options: push.options,
+      correctKey: push.correctKey,
+      timeLimit: push.timeLimit,
+      status: push.status,
+      createdAt: push.serverTime,
+      totalStudents: 0,
+      respondedCount: 0,
+      correctRate: null,
+      myAnswer: null,
+      myCorrect: null,
+    }
+    const existing = interactionHistory.value[index]
+    if (existing) {
+      interactionHistory.value[index] = { ...existing, ...item }
+    } else {
+      interactionHistory.value.unshift(item)
+    }
+  }
+
+  function parseMessage<T>(body: string): T {
+    return JSON.parse(body) as T
+  }
+
+  function updatePresence(data: OnlineStudents) {
+    studentCount.value = data.count
+    studentList.value = data.students
+    absentCount.value = data.absentCount
+    absentStudents.value = data.absentStudents
+  }
+
+  function connect(classroomToken?: string) {
+    if (stomp?.connected) return
+    connectionStatus.value = 'connecting'
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const connectHeaders: Record<string, string> = {
+      'X-Session-Id': String(sessionInfo.value?.sessionId ?? ''),
+    }
+    if (classroomToken) connectHeaders.Authorization = `Bearer ${classroomToken}`
+
+    stomp = new Client({
+      brokerURL: `${wsProtocol}//${window.location.host}/ws/live`,
+      connectHeaders,
+      reconnectDelay: 5000,
+      heartbeatIncoming: 10000,
+      heartbeatOutgoing: 10000,
+      onConnect: subscribeToSession,
+      onStompError: markDisconnected,
+      onWebSocketClose: markDisconnected,
+    })
+    stomp.activate()
+  }
+
+  function subscribeToSession() {
+    connectionStatus.value = 'connected'
+    const id = sessionInfo.value?.sessionId
+    const client = stomp
+    if (!id || !client) return
+
+    if (isTeacher.value) {
+      client.subscribe(`/topic/session/${id}/stats`, (message) => {
+        const stats = parseMessage<LiveStats>(message.body)
+        lastStats.value = stats
+        mergeStats(stats)
+      })
+      client.subscribe(`/topic/session/${id}/interaction`, (message) => {
+        mergeInteractionPush(parseMessage<InteractionPush>(message.body))
+      })
+      client.subscribe(`/topic/session/${id}/qa`, (message) => {
+        topQuestions.value = parseMessage<QAMessage>(message.body).topQuestions ?? []
+      })
+      client.subscribe(`/topic/session/${id}/students`, (message) => {
+        updatePresence(parseMessage<OnlineStudents>(message.body))
+      })
+      client.subscribe(`/topic/session/${id}/reactions`, (message) => {
+        reactions.value = [...reactions.value.slice(-19), parseMessage<ReactionMsg>(message.body)]
+      })
+      client.subscribe(`/topic/session/${id}/hand-queue`, (message) => {
+        handQueue.value = parseMessage<HandQueue>(message.body)
+      })
+      void loadTeacherSessionState(id).catch(() => undefined)
+      return
+    }
+
+    if (isStudent.value) {
+      client.subscribe(`/topic/session/${id}/interaction`, (message) => {
+        const push = parseMessage<InteractionPush>(message.body)
+        currentInteraction.value = push
+        mergeInteractionPush(push)
+      })
+      client.subscribe(`/topic/session/${id}/hand-queue`, (message) => {
+        const queue = parseMessage<HandQueue>(message.body)
+        handQueue.value = queue
+        const studentId = sessionInfo.value?.studentId
+        if (!studentId) return
+        handRaised.value = [...queue.waiting, ...queue.called].some(
+          (entry) => entry.studentId === studentId,
+        )
+      })
+      client.subscribe(`/topic/session/${id}/teacher-status`, (message) => {
+        const status = parseMessage<TeacherStatus>(message.body)
+        teacherOnline.value = status.online
+        if (status.sessionEnded) sessionEnded.value = true
+      })
+      void loadStudentHistory(id).catch(() => undefined)
+    }
+  }
+
+  async function loadTeacherSessionState(id: number) {
+    const [historyResponse, presenceResponse] = await Promise.all([
+      liveApi.getInteractionHistory(id),
+      liveApi.getOnlineStudents(id),
+    ])
+    interactionHistory.value = historyResponse.data.data
+    updatePresence(presenceResponse.data.data)
+  }
+
+  async function loadStudentHistory(id: number) {
+    const response = await liveApi.getInteractionHistory(
+      id,
+      sessionInfo.value?.studentId,
+      sessionInfo.value?.token,
+    )
+    interactionHistory.value = response.data.data
+  }
+
+  function send(destination: string, body: object) {
+    if (!stomp?.connected) return
+    stomp.publish({ destination, body: JSON.stringify(body) })
+  }
+
+  function markDisconnected() {
+    connectionStatus.value = 'disconnected'
+  }
+
+  function disconnect() {
+    if (stomp) {
+      void stomp.deactivate()
+      stomp = null
+    }
+    markDisconnected()
+  }
+
+  function reset() {
+    role.value = null
+    sessionInfo.value = null
+    currentInteraction.value = null
+    lastStats.value = null
+    interactionHistory.value = []
+    topQuestions.value = []
+    studentCount.value = 0
+    studentList.value = []
+    absentCount.value = 0
+    absentStudents.value = []
+    reactions.value = []
+    studentProfile.value = null
+    handQueue.value = { waiting: [], called: [] }
+    handRaised.value = false
+    teacherOnline.value = true
+    sessionEnded.value = false
+  }
+
+  return {
+    role,
+    sessionInfo,
+    currentInteraction,
+    lastStats,
+    interactionHistory,
+    topQuestions,
+    connectionStatus,
+    studentCount,
+    studentList,
+    absentCount,
+    absentStudents,
+    reactions,
+    studentProfile,
+    handQueue,
+    handRaised,
+    teacherOnline,
+    sessionEnded,
+    isTeacher,
+    isStudent,
+    sessionId,
+    createSession,
+    checkActiveSession,
+    endLiveSession,
+    joinSession,
+    submitResponse,
+    askQuestion,
+    createInteraction,
+    closeInteraction,
+    answerQuestion,
+    sendReaction,
+    raiseHand,
+    lowerHand,
+    callStudent,
+    dismissHand,
+    fetchStudentProfile,
+    connect,
+    disconnect,
+    reset,
+  }
+})

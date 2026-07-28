@@ -3,12 +3,10 @@ package com.firedemo.demo.Service.ServiceImpl;
 import com.firedemo.demo.DTO.UserLoginDTO;
 import com.firedemo.demo.DTO.UserRegisterDTO;
 import com.firedemo.demo.Entity.User;
-import com.firedemo.demo.Service.TokenService;
 import com.firedemo.demo.VO.UserLoginVO;
 import com.firedemo.demo.common.exception.BusinessException;
 import com.firedemo.demo.mapper.ChatHistoryMapper;
 import com.firedemo.demo.mapper.UserMapper;
-import com.firedemo.demo.utils.JwtUtil;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -37,11 +35,6 @@ class UserServiceImplTest {
     private UserMapper userMapper;
     @Mock
     private ChatHistoryMapper chatHistoryMapper;
-    @Mock
-    private JwtUtil jwtUtil;
-    @Mock
-    private TokenService tokenService;
-
     @InjectMocks
     private UserServiceImpl userService;
 
@@ -128,15 +121,13 @@ class UserServiceImplTest {
         }
 
         @Test
-        @DisplayName("正常登录返回 UserLoginVO（含 JWT、刷新令牌和 sessionId）")
+        @DisplayName("正常登录返回用户信息和 AI 对话 sessionId")
         void shouldLoginSuccessfully() {
             UserLoginDTO dto = new UserLoginDTO();
             dto.setUsername("teacher1");
             dto.setPassword("correct-password");
 
             when(userMapper.selectOne(any())).thenReturn(existingUser);
-            when(jwtUtil.generateToken(1L, "teacher1", 2)).thenReturn("jwt-token-abc");
-            when(tokenService.createRefreshToken(1L)).thenReturn("refresh-token-abc");
             when(chatHistoryMapper.selectSessionIdsByUserId(1L)).thenReturn(List.of("existing-session-123"));
 
             UserLoginVO result = userService.login(dto);
@@ -144,9 +135,6 @@ class UserServiceImplTest {
             assertThat(result).isNotNull();
             assertThat(result.getId()).isEqualTo(1L);
             assertThat(result.getUsername()).isEqualTo("teacher1");
-            assertThat(result.getToken()).isEqualTo("jwt-token-abc");
-            assertThat(result.getRefreshToken()).isEqualTo("refresh-token-abc");
-            assertThat(result.getExpiresIn()).isEqualTo(JwtUtil.EXPIRATION_SECONDS);
             assertThat(result.getSessionId()).isEqualTo("existing-session-123");
         }
 
@@ -158,8 +146,6 @@ class UserServiceImplTest {
             dto.setPassword("correct-password");
 
             when(userMapper.selectOne(any())).thenReturn(existingUser);
-            when(jwtUtil.generateToken(anyLong(), anyString(), any())).thenReturn("jwt-token-xyz");
-            when(tokenService.createRefreshToken(anyLong())).thenReturn("refresh-token-xyz");
             when(chatHistoryMapper.selectSessionIdsByUserId(1L)).thenReturn(Collections.emptyList());
 
             UserLoginVO result = userService.login(dto);

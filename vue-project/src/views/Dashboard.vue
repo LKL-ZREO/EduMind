@@ -59,7 +59,52 @@
       </div>
     </section>
 
-    <!-- 图表区域 -->
+    <!-- 学生"不懂"标记（QQ + 课堂双源合并） -->
+    <section
+      class="confusions-section"
+      v-if="allConfusionStats.length || liveEvents.length || confusions.length"
+    >
+      <div class="detail-card">
+        <div class="card-header">
+          <h3>🤔 学生标记"不懂"的知识点</h3>
+          <span class="tag">QQ私聊 + 课堂实时</span>
+        </div>
+        <div class="confusions-body">
+          <div class="confusions-stats">
+            <h4>📊 知识点分布（合并）</h4>
+            <div v-if="!allConfusionStats.length" class="empty-hint">暂无数据</div>
+            <div v-else class="stat-bars">
+              <div v-for="s in allConfusionStats" :key="s.name" class="stat-bar-row">
+                <span class="stat-bar-name">{{ s.name }}</span>
+                <span class="stat-bar-wrap">
+                  <span
+                    class="stat-bar-fill"
+                    :style="{ width: Math.min(s.count * 20, 100) + '%' }"
+                  ></span>
+                </span>
+                <span class="stat-bar-count">{{ s.count }}次</span>
+              </div>
+            </div>
+          </div>
+          <div class="confusions-log">
+            <h4>📋 最近记录</h4>
+            <div v-if="!allConfusionEvents.length" class="empty-hint">暂无记录</div>
+            <div v-else class="confusion-list">
+              <div
+                v-for="c in allConfusionEvents.slice(0, 15)"
+                :key="c._key"
+                class="confusion-item"
+              >
+                <span class="confusion-name">{{ c.studentName || '未知' }}</span>
+                <span class="confusion-kp">{{ c.knowledgePoint }}</span>
+                <span class="confusion-source">{{ c._source }}</span>
+                <span class="confusion-time">{{ formatRelativeTime(c.createdAt) }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
     <section class="charts-section">
       <!-- 班级成绩分布 -->
       <div class="chart-card">
@@ -78,11 +123,7 @@
         </div>
         <div class="chart-body">
           <div class="score-distribution">
-            <div
-              v-for="(item, index) in scoreDistribution"
-              :key="index"
-              class="distribution-bar"
-            >
+            <div v-for="(item, index) in scoreDistribution" :key="index" class="distribution-bar">
               <div class="bar-label">{{ item.range }}</div>
               <div class="bar-track">
                 <div
@@ -101,13 +142,26 @@
         <div class="chart-header">
           <h3>🎯 知识点掌握度热力图</h3>
           <div class="chart-actions">
-            <button v-if="!isEditing" class="action-btn" @click="showAddKpDialog = true">✚ 添加知识点</button>
-            <button v-if="!isEditing" class="action-btn edit-btn" @click="toggleEdit">✏️ 编辑</button>
-            <button v-if="isEditing" class="action-btn save-btn" @click="saveKnowledge" :disabled="savingKnowledge">
+            <button v-if="!isEditing" class="action-btn" @click="showAddKpDialog = true">
+              ✚ 添加知识点
+            </button>
+            <button v-if="!isEditing" class="action-btn edit-btn" @click="toggleEdit">
+              ✏️ 编辑
+            </button>
+            <button
+              v-if="isEditing"
+              class="action-btn save-btn"
+              @click="saveKnowledge"
+              :disabled="savingKnowledge"
+            >
               {{ savingKnowledge ? '保存中...' : '💾 保存' }}
             </button>
-            <button v-if="isEditing" class="action-btn cancel-edit-btn" @click="cancelEdit">取消</button>
-            <button class="action-btn teaching-btn" @click="generateTeachingPlan">生成针对性教案</button>
+            <button v-if="isEditing" class="action-btn cancel-edit-btn" @click="cancelEdit">
+              取消
+            </button>
+            <button class="action-btn teaching-btn" @click="generateTeachingPlan">
+              生成针对性教案
+            </button>
           </div>
         </div>
         <div class="chart-body">
@@ -123,13 +177,21 @@
             >
               <!-- 编辑模式 -->
               <template v-if="isEditing">
-                <button v-if="item.name !== '其他'" class="heatmap-remove" @click.stop="removeKnowledge(index)">×</button>
+                <button
+                  v-if="item.name !== '其他'"
+                  class="heatmap-remove"
+                  @click.stop="removeKnowledge(index)"
+                >
+                  ×
+                </button>
                 <span v-else class="heatmap-remove-placeholder"></span>
                 <div class="heatmap-edit-content">
                   <input v-model="item.name" class="heatmap-name-input" placeholder="知识点名称" />
                   <div class="heatmap-color-row">
                     <input type="color" v-model="item.color" class="heatmap-color-picker" />
-                    <span class="color-preview" :style="{ background: item.color }">{{ item.color }}</span>
+                    <span class="color-preview" :style="{ background: item.color }">{{
+                      item.color
+                    }}</span>
                   </div>
                 </div>
               </template>
@@ -182,7 +244,10 @@
                 <div class="progress-bar">
                   <div
                     class="progress-fill"
-                    :style="{ width: student.avgScore + '%', background: getScoreColor(student.avgScore) }"
+                    :style="{
+                      width: student.avgScore + '%',
+                      background: getScoreColor(student.avgScore),
+                    }"
                   ></div>
                 </div>
                 <span class="progress-text">{{ student.avgScore }}分</span>
@@ -195,7 +260,9 @@
               </div>
               <div class="stat">
                 <span class="stat-label">错题</span>
-                <span class="stat-value" :class="{ high: student.errorCount > 10 }">{{ student.errorCount }}</span>
+                <span class="stat-value" :class="{ high: student.errorCount > 10 }">{{
+                  student.errorCount
+                }}</span>
               </div>
               <div class="stat">
                 <span class="stat-label">趋势</span>
@@ -230,7 +297,9 @@
               <span class="stat-label">平均分</span>
             </div>
             <div class="stat-card" :class="progressData.trend > 0 ? 'trend-up' : 'trend-down'">
-              <span class="stat-num">{{ progressData.trend > 0 ? '+' : '' }}{{ progressData.trend }}</span>
+              <span class="stat-num"
+                >{{ progressData.trend > 0 ? '+' : '' }}{{ progressData.trend }}</span
+              >
               <span class="stat-label">成长趋势</span>
             </div>
             <div class="stat-card">
@@ -241,10 +310,19 @@
           <!-- 曲线图 -->
           <div ref="progressChartRef" class="progress-chart"></div>
           <!-- 作业历史 -->
-          <div class="progress-table-wrap" v-if="progressData.points && progressData.points.length > 0">
+          <div
+            class="progress-table-wrap"
+            v-if="progressData.points && progressData.points.length > 0"
+          >
             <table class="progress-table">
               <thead>
-                <tr><th>次数</th><th>作业名称</th><th>日期</th><th>得分</th><th>环比</th></tr>
+                <tr>
+                  <th>次数</th>
+                  <th>作业名称</th>
+                  <th>日期</th>
+                  <th>得分</th>
+                  <th>环比</th>
+                </tr>
               </thead>
               <tbody>
                 <tr v-for="p in progressData.points" :key="p.no">
@@ -274,19 +352,27 @@
         <div class="modal-body">
           <div class="config-item">
             <label>知识点名称</label>
-            <input v-model="newKpItem.name" class="config-input" placeholder="例如：指针、数组、循环结构" />
+            <input
+              v-model="newKpItem.name"
+              class="config-input"
+              placeholder="例如：指针、数组、循环结构"
+            />
           </div>
           <div class="config-item">
             <label>热力图颜色</label>
             <div class="color-picker-row">
               <input type="color" v-model="newKpItem.color" class="color-picker" />
-              <span class="color-preview" :style="{ background: newKpItem.color }">{{ newKpItem.color }}</span>
+              <span class="color-preview" :style="{ background: newKpItem.color }">{{
+                newKpItem.color
+              }}</span>
             </div>
           </div>
         </div>
         <div class="modal-footer">
           <button class="btn-secondary" @click="showAddKpDialog = false">取消</button>
-          <button class="btn-primary" @click="addKnowledge" :disabled="!newKpItem.name.trim()">确认添加</button>
+          <button class="btn-primary" @click="addKnowledge" :disabled="!newKpItem.name.trim()">
+            确认添加
+          </button>
         </div>
       </div>
     </div>
@@ -311,7 +397,9 @@
               <div class="error-content">
                 <div class="error-title">{{ error.question }}</div>
                 <div class="error-meta">
-                  <span class="error-tag" :class="error.difficulty">{{ error.difficultyLabel }}</span>
+                  <span class="error-tag" :class="error.difficulty">{{
+                    error.difficultyLabel
+                  }}</span>
                   <span class="error-count">{{ error.errorCount }} 次出现</span>
                 </div>
               </div>
@@ -337,7 +425,7 @@
               <label>教学目标</label>
               <div class="checkbox-group">
                 <label v-for="goal in teachingGoals" :key="goal.value" class="checkbox-label">
-                  <input type="checkbox" v-model="selectedGoals" :value="goal.value">
+                  <input type="checkbox" v-model="selectedGoals" :value="goal.value" />
                   {{ goal.label }}
                 </label>
               </div>
@@ -345,11 +433,7 @@
             <div class="config-item">
               <label>针对薄弱知识点</label>
               <div class="tag-list">
-                <span
-                  v-for="tag in weakKnowledgePoints"
-                  :key="tag"
-                  class="tag-item"
-                >
+                <span v-for="tag in weakKnowledgePoints" :key="tag" class="tag-item">
                   {{ tag }}
                 </span>
               </div>
@@ -365,7 +449,7 @@
           </div>
           <div v-if="generatedPlan" class="plan-preview">
             <h4>生成结果预览</h4>
-            <div class="plan-content" v-html="generatedPlan"></div>
+            <div class="plan-content" v-html="safeGeneratedPlan"></div>
           </div>
         </div>
         <div class="modal-footer">
@@ -383,9 +467,10 @@
   </div>
 </template>
 
-<script>
+<script lang="js">
 import * as echarts from 'echarts'
 import request from '@/api/request'
+import { sanitizeHtml } from '@/utils/safeHtml'
 
 export default {
   name: 'TeacherDashboard',
@@ -409,7 +494,7 @@ export default {
       periods: [
         { label: '本周', value: 'week' },
         { label: '本月', value: 'month' },
-        { label: '本学期', value: 'semester' }
+        { label: '本学期', value: 'semester' },
       ],
 
       // 教学目标
@@ -417,7 +502,7 @@ export default {
         { label: '巩固基础', value: 'basic' },
         { label: '突破难点', value: 'difficult' },
         { label: '举一反三', value: 'extend' },
-        { label: '查漏补缺', value: 'review' }
+        { label: '查漏补缺', value: 'review' },
       ],
 
       // 热力图编辑
@@ -431,7 +516,7 @@ export default {
       backupKnowledge: [],
       newKpItem: {
         name: '',
-        color: '#1890ff'
+        color: '#1890ff',
       },
 
       // 核心指标
@@ -442,7 +527,7 @@ export default {
         newHomework: 0,
         avgScore: 0,
         scoreTrend: 3.2,
-        warningStudents: 0
+        warningStudents: 0,
       },
 
       // 成绩分布
@@ -465,11 +550,17 @@ export default {
         avgScore: 0,
         maxScore: 0,
         trend: 0,
-        points: []
+        points: [],
       },
       progressChartRef: null,
       progressChart: null,
-      progressChartResizeHandler: null
+      progressChartResizeHandler: null,
+
+      // 学生"不懂"标记
+      confusions: [],
+      confusionStats: [],
+      liveEvents: [],
+      liveStats: [],
     }
   },
 
@@ -492,15 +583,36 @@ export default {
       if (!val) {
         this.$nextTick(() => this.disposeChart())
       }
-    }
+    },
   },
 
   computed: {
+    safeGeneratedPlan() {
+      return sanitizeHtml(this.generatedPlan)
+    },
+
+    // 合并 QQ + 活课堂的不懂统计
+    allConfusionStats() {
+      const map = {}
+      for (const s of this.confusionStats) map[s.name] = (map[s.name] || 0) + (s.count || 0)
+      for (const s of this.liveStats) map[s.name] = (map[s.name] || 0) + (s.count || 0)
+      return Object.entries(map)
+        .map(([name, count]) => ({ name, count }))
+        .sort((a, b) => b.count - a.count)
+    },
+    allConfusionEvents() {
+      const qq = (this.confusions || []).map((c) => ({ ...c, _source: 'QQ', _key: 'qq-' + c.id }))
+      const live = (this.liveEvents || []).map((c) => ({
+        ...c,
+        _source: '课堂',
+        _key: 'live-' + c.id,
+      }))
+      return [...qq, ...live].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+    },
+
     // 薄弱知识点（掌握度 < 70%）
     weakKnowledgePoints() {
-      return this.knowledgeMastery
-        .filter(k => k.mastery < 70)
-        .map(k => k.name)
+      return this.knowledgeMastery.filter((k) => k.mastery < 70).map((k) => k.name)
     },
 
     // 筛选和排序后的学生列表
@@ -509,11 +621,11 @@ export default {
 
       // 搜索筛选
       if (this.studentFilter) {
-        result = result.filter(s => s.name.includes(this.studentFilter))
+        result = result.filter((s) => s.name.includes(this.studentFilter))
       }
 
       return result
-    }
+    },
   },
 
   methods: {
@@ -542,7 +654,9 @@ export default {
         this.loadScoreDistribution(),
         this.loadKnowledgeMastery(),
         this.loadFrequentErrors(),
-        this.loadStudents()
+        this.loadStudents(),
+        this.loadConfusions(),
+        this.loadLiveConfusions(),
       ])
       this.loading = false
     },
@@ -551,8 +665,12 @@ export default {
     async loadMetrics() {
       if (!this.selectedClass || this.selectedClass === 'null') return
       try {
-        const res = await request.get('/dashboard/metrics', { params: { classId: this.selectedClass } })
-        if (res.data.code === 200) { this.metrics = res.data.data }
+        const res = await request.get('/dashboard/metrics', {
+          params: { classId: this.selectedClass },
+        })
+        if (res.data.code === 200) {
+          this.metrics = res.data.data
+        }
       } catch (error) {
         console.error('加载指标失败:', error)
       }
@@ -562,8 +680,12 @@ export default {
     async loadScoreDistribution() {
       if (!this.selectedClass || this.selectedClass === 'null') return
       try {
-        const res = await request.get('/dashboard/score-distribution', { params: { classId: this.selectedClass } })
-        if (res.data.code === 200) { this.scoreDistribution = res.data.data }
+        const res = await request.get('/dashboard/score-distribution', {
+          params: { classId: this.selectedClass },
+        })
+        if (res.data.code === 200) {
+          this.scoreDistribution = res.data.data
+        }
       } catch (error) {
         console.error('加载成绩分布失败:', error)
       }
@@ -573,7 +695,9 @@ export default {
     async loadKnowledgeMastery() {
       if (!this.selectedClass || this.selectedClass === 'null') return
       try {
-        const res = await request.get('/dashboard/knowledge-mastery', { params: { classId: this.selectedClass } })
+        const res = await request.get('/dashboard/knowledge-mastery', {
+          params: { classId: this.selectedClass },
+        })
         console.log('知识点掌握度接口返回:', res.data)
         if (res.data.code === 200) {
           this.knowledgeMastery = res.data.data
@@ -591,7 +715,9 @@ export default {
         const params = { classId: this.selectedClass }
         if (this.selectedKp) params.knowledgePoint = this.selectedKp
         const res = await request.get('/dashboard/frequent-errors', { params })
-        if (res.data.code === 200) { this.frequentErrors = res.data.data }
+        if (res.data.code === 200) {
+          this.frequentErrors = res.data.data
+        }
       } catch (error) {
         console.error('加载高频错题失败:', error)
       }
@@ -602,12 +728,63 @@ export default {
       if (!this.selectedClass || this.selectedClass === 'null') return
       try {
         const res = await request.get('/dashboard/students', {
-          params: { classId: this.selectedClass, sortBy: this.sortBy }
+          params: { classId: this.selectedClass, sortBy: this.sortBy },
         })
-        if (res.data.code === 200) { this.students = res.data.data }
+        if (res.data.code === 200) {
+          this.students = res.data.data
+        }
       } catch (error) {
         console.error('加载学生列表失败:', error)
       }
+    },
+
+    // 加载活课堂"不懂"标记
+    async loadLiveConfusions() {
+      if (!this.selectedClass || this.selectedClass === 'null') return
+      try {
+        const res = await request.get('/dashboard/live-confusions', {
+          params: { classId: this.selectedClass },
+        })
+        if (res.data.code === 200) {
+          this.liveStats = res.data.data.stats || []
+          this.liveEvents = res.data.data.events || []
+        }
+      } catch (error) {
+        console.error('加载活课堂不懂标记失败:', error)
+      }
+    },
+
+    // 加载学生"不懂"标记（QQ）
+    async loadConfusions() {
+      if (!this.selectedClass || this.selectedClass === 'null') return
+      try {
+        const [logRes, statsRes] = await Promise.all([
+          request.get('/dashboard/student-confusions', { params: { classId: this.selectedClass } }),
+          request.get('/dashboard/student-confusions/stats', {
+            params: { classId: this.selectedClass },
+          }),
+        ])
+        if (logRes.data.code === 200) this.confusions = logRes.data.data || []
+        if (statsRes.data.code === 200) this.confusionStats = statsRes.data.data || []
+      } catch (error) {
+        console.error('加载不懂标记失败:', error)
+      }
+    },
+
+    // 相对时间格式化
+    formatRelativeTime(dateStr) {
+      if (!dateStr) return ''
+      const now = Date.now()
+      const t = new Date(dateStr).getTime()
+      const diff = now - t
+      const mins = Math.floor(diff / 60000)
+      if (mins < 1) return '刚刚'
+      if (mins < 60) return mins + '分钟前'
+      const hours = Math.floor(mins / 60)
+      if (hours < 24) return hours + '小时前'
+      const days = Math.floor(hours / 24)
+      if (days < 30) return days + '天前'
+      return Math.floor(days / 30) + '个月前'
     },
 
     // 刷新数据
@@ -645,7 +822,7 @@ export default {
         const res = await request.post('/dashboard/teacher-knowledge/add', {
           classId: this.selectedClass,
           name: this.newKpItem.name.trim(),
-          color: this.newKpItem.color
+          color: this.newKpItem.color,
         })
         if (res.data.code === 200) {
           this.$message?.success('添加成功，正在后台重归类历史错误...')
@@ -696,14 +873,14 @@ export default {
       this.savingKnowledge = true
       try {
         const items = this.knowledgeMastery.map((k, i) => ({
-            name: k.name,
-            color: k.color || '#1890ff',
-            sortOrder: i
-          }))
+          name: k.name,
+          color: k.color || '#1890ff',
+          sortOrder: i,
+        }))
 
         const res = await request.post('/dashboard/teacher-knowledge/batch', {
           classId: this.selectedClass,
-          items: items
+          items: items,
         })
         if (res.data.code === 200) {
           this.$message?.success('保存成功，正在后台重归类历史错误...')
@@ -725,14 +902,14 @@ export default {
 
     pollReclassifyResult() {
       // 记录当前「其他」的错误数
-      const otherItem = this.knowledgeMastery.find(k => k.name === '其他')
+      const otherItem = this.knowledgeMastery.find((k) => k.name === '其他')
       const beforeCount = otherItem ? otherItem.errorCount : 0
 
       const check = (attempt) => {
         if (attempt > 5) return
         setTimeout(async () => {
           await this.loadKnowledgeMastery()
-          const current = this.knowledgeMastery.find(k => k.name === '其他')
+          const current = this.knowledgeMastery.find((k) => k.name === '其他')
           const afterCount = current ? current.errorCount : 0
           if (afterCount < beforeCount) {
             this.$message?.success(`重归类完成，${beforeCount - afterCount}条错误已重新分配`)
@@ -755,9 +932,11 @@ export default {
 
       try {
         const res = await request.get('/dashboard/frequent-errors', {
-          params: { classId: this.selectedClass, knowledgePoint: item.name }
+          params: { classId: this.selectedClass, knowledgePoint: item.name },
         })
-        if (res.data.code === 200) { this.kpErrorList = res.data.data }
+        if (res.data.code === 200) {
+          this.kpErrorList = res.data.data
+        }
       } catch (error) {
         console.error('加载知识点错误详情失败:', error)
         this.kpErrorList = []
@@ -782,12 +961,16 @@ export default {
 
     // 查看错题详情
     viewErrorDetail(error) {
-      alert(`错题详情：${error.question}\n\n错误率：${error.errorRate}%\n错误人数：${error.errorCount}人`)
+      alert(
+        `错题详情：${error.question}\n\n错误率：${error.errorRate}%\n错误人数：${error.errorCount}人`,
+      )
     },
 
     // 查看学生详情
     viewStudentDetail(student) {
-      alert(`学生详情：${student.name}\n\n平均分：${student.avgScore}\n作业数：${student.homeworkCount}\n错题数：${student.errorCount}`)
+      alert(
+        `学生详情：${student.name}\n\n平均分：${student.avgScore}\n作业数：${student.homeworkCount}\n错题数：${student.errorCount}`,
+      )
     },
 
     // 📈 查看学生成长曲线
@@ -798,7 +981,7 @@ export default {
         avgScore: 0,
         maxScore: 0,
         trend: 0,
-        points: []
+        points: [],
       }
       this.showProgressModal = true
 
@@ -833,7 +1016,7 @@ export default {
       chart.setOption({
         tooltip: {
           trigger: 'axis',
-          formatter: function(params) {
+          formatter: function (params) {
             const p = points[params[0].dataIndex]
             return `<div style="padding:8px;font-size:14px">
               <b>第${p.no}次作业</b><br/>
@@ -841,18 +1024,18 @@ export default {
               得分: <span style="color:#667eea;font-weight:bold;">${p.score}</span> 分<br/>
               提交: ${p.date}
             </div>`
-          }
+          },
         },
         grid: {
           left: '3%',
           right: '4%',
           bottom: '10%',
-          containLabel: true
+          containLabel: true,
         },
         xAxis: {
           type: 'category',
-          data: points.map(p => `第${p.no}次`),
-          axisLabel: { color: '#666' }
+          data: points.map((p) => `第${p.no}次`),
+          axisLabel: { color: '#666' },
         },
         yAxis: {
           type: 'value',
@@ -860,33 +1043,46 @@ export default {
           max: 100,
           name: '分数',
           nameTextStyle: { color: '#666' },
-          axisLabel: { color: '#666' }
+          axisLabel: { color: '#666' },
         },
-        series: [{
-          data: points.map(p => p.score),
-          type: 'line',
-          smooth: true,
-          symbol: 'circle',
-          symbolSize: 10,
-          lineStyle: { width: 3, color: '#667eea' },
-          areaStyle: {
-            color: {
-              type: 'linear',
-              x: 0, y: 0, x2: 0, y2: 1,
-              colorStops: [
-                { offset: 0, color: 'rgba(102,126,234,0.3)' },
-                { offset: 1, color: 'rgba(102,126,234,0.05)' }
-              ]
-            }
+        series: [
+          {
+            data: points.map((p) => p.score),
+            type: 'line',
+            smooth: true,
+            symbol: 'circle',
+            symbolSize: 10,
+            lineStyle: { width: 3, color: '#667eea' },
+            areaStyle: {
+              color: {
+                type: 'linear',
+                x: 0,
+                y: 0,
+                x2: 0,
+                y2: 1,
+                colorStops: [
+                  { offset: 0, color: 'rgba(102,126,234,0.3)' },
+                  { offset: 1, color: 'rgba(102,126,234,0.05)' },
+                ],
+              },
+            },
+            markLine: {
+              silent: true,
+              data: [
+                {
+                  type: 'average',
+                  name: '平均分',
+                  lineStyle: { color: '#faad14', type: 'dashed' },
+                },
+                {
+                  yAxis: 60,
+                  lineStyle: { color: '#f5222d', type: 'dashed' },
+                  label: { formatter: '及格线' },
+                },
+              ],
+            },
           },
-          markLine: {
-            silent: true,
-            data: [
-              { type: 'average', name: '平均分', lineStyle: { color: '#faad14', type: 'dashed' } },
-              { yAxis: 60, lineStyle: { color: '#f5222d', type: 'dashed' }, label: { formatter: '及格线' } }
-            ]
-          }
-        }]
+        ],
       })
 
       // 窗口自适应
@@ -930,7 +1126,9 @@ export default {
 
       // 加载薄弱知识点
       try {
-        const res = await request.get('/dashboard/weak-points', { params: { classId: this.selectedClass } })
+        const res = await request.get('/dashboard/weak-points', {
+          params: { classId: this.selectedClass },
+        })
         if (res.data.code === 200) {
           console.log('薄弱知识点:', res.data.data)
         }
@@ -953,17 +1151,19 @@ export default {
           classId: this.selectedClass,
           goals: this.selectedGoals,
           planType: this.planType,
-          weakKnowledgePoints: this.weakKnowledgePoints.slice(0, 3)
+          weakKnowledgePoints: this.weakKnowledgePoints.slice(0, 3),
         })
-        if (res.data.code === 200) { this.generatedPlan = res.data.data }
+        if (res.data.code === 200) {
+          this.generatedPlan = res.data.data
+        }
       } catch (error) {
         console.error('生成教案失败:', error)
         this.$message?.error('生成教案失败')
       } finally {
         this.generatingPlan = false
       }
-    }
-  }
+    },
+  },
 }
 </script>
 
@@ -985,7 +1185,7 @@ export default {
   background: white;
   padding: 1.5rem;
   border-radius: 12px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
 
 .header-left h1 {
@@ -1050,13 +1250,15 @@ export default {
   display: flex;
   align-items: center;
   gap: 1rem;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-  transition: transform 0.2s, box-shadow 0.2s;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  transition:
+    transform 0.2s,
+    box-shadow 0.2s;
 }
 
 .metric-card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
 .metric-icon {
@@ -1111,7 +1313,7 @@ export default {
 .chart-card {
   background: white;
   border-radius: 12px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
   overflow: hidden;
 }
 
@@ -1199,8 +1401,6 @@ export default {
   background: #531dab;
 }
 
-
-
 .chart-body {
   padding: 1.25rem;
 }
@@ -1259,7 +1459,9 @@ export default {
   text-align: center;
   color: white;
   cursor: pointer;
-  transition: transform 0.2s, box-shadow 0.2s;
+  transition:
+    transform 0.2s,
+    box-shadow 0.2s;
 }
 
 .heatmap-item:hover:not(.editing) {
@@ -1267,7 +1469,9 @@ export default {
 }
 
 .heatmap-item.active {
-  box-shadow: 0 0 0 3px white, 0 0 0 5px currentColor;
+  box-shadow:
+    0 0 0 3px white,
+    0 0 0 5px currentColor;
 }
 
 .heatmap-item.editing {
@@ -1432,7 +1636,7 @@ export default {
 .detail-card {
   background: white;
   border-radius: 12px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
   overflow: hidden;
 }
 
@@ -1725,7 +1929,7 @@ export default {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0,0,0,0.5);
+  background: rgba(0, 0, 0, 0.5);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1874,10 +2078,120 @@ export default {
   cursor: not-allowed;
 }
 
+/* 学生"不懂"标记 */
+.confusions-section {
+  margin-bottom: 1.5rem;
+}
+
+.confusions-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+  padding: 1.25rem;
+}
+
+.confusions-body h4 {
+  margin: 0 0 0.75rem 0;
+  font-size: 0.9rem;
+  color: #4a5568;
+}
+
+.stat-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.stat-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.stat-bar-name {
+  width: 100px;
+  text-align: right;
+  color: #4a5568;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stat-bar-wrap {
+  flex: 1;
+  height: 14px;
+  background: #edf2f7;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.stat-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #faad14, #f5222d);
+  border-radius: 4px;
+  transition: width 0.3s;
+  min-width: 2px;
+}
+
+.stat-bar-count {
+  width: 35px;
+  font-weight: 600;
+  color: #f5222d;
+  font-size: 0.8rem;
+}
+
+.confusion-list {
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.confusion-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid #f0f0f0;
+  font-size: 0.85rem;
+}
+
+.confusion-item:last-child {
+  border-bottom: none;
+}
+
+.confusion-name {
+  color: #4a5568;
+  min-width: 60px;
+}
+
+.confusion-kp {
+  flex: 1;
+  color: #f5222d;
+  font-weight: 500;
+}
+
+.confusion-time {
+  color: #a0aec0;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.confusion-source {
+  background: #f0f0f0;
+  color: #888;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 0.7rem;
+}
+
 /* 响应式 */
 @media (max-width: 1200px) {
   .metrics-section {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  .confusions-body {
+    grid-template-columns: 1fr;
   }
 
   .charts-section,
@@ -1984,13 +2298,31 @@ export default {
   background: #fafafa;
 }
 
-.score-excellent { color: #52c41a; font-weight: 600; }
-.score-good { color: #1890ff; font-weight: 600; }
-.score-pass { color: #d46b08; font-weight: 600; }
-.score-fail { color: #cf1322; font-weight: 600; }
+.score-excellent {
+  color: #52c41a;
+  font-weight: 600;
+}
+.score-good {
+  color: #1890ff;
+  font-weight: 600;
+}
+.score-pass {
+  color: #d46b08;
+  font-weight: 600;
+}
+.score-fail {
+  color: #cf1322;
+  font-weight: 600;
+}
 
-.change-up { color: #52c41a; font-weight: 600; }
-.change-down { color: #cf1322; font-weight: 600; }
+.change-up {
+  color: #52c41a;
+  font-weight: 600;
+}
+.change-down {
+  color: #cf1322;
+  font-weight: 600;
+}
 
 .empty-hint {
   text-align: center;

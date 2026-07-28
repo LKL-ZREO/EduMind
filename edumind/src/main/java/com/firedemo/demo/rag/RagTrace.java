@@ -75,12 +75,15 @@ public class RagTrace {
         if (currentStep == null) return this;
         int ms = (int) (System.currentTimeMillis() - currentStepStart);
         switch (currentStep) {
-            case "rewrite" -> { rewritten = result; rewriteMs = ms; }
-            case "embed"   -> embedMs = ms;
-            case "vector"  -> vectorMs = ms;
-            case "keyword" -> keywordMs = ms;
-            case "rrf"     -> rrfMs = ms;
-            case "reranker" -> rerankerMs = ms;
+            case "rewrite" -> {
+                if (result != null) rewritten = result;
+                rewriteMs += ms;
+            }
+            case "embed"   -> embedMs += ms;
+            case "vector"  -> vectorMs += ms;
+            case "keyword" -> keywordMs += ms;
+            case "rrf"     -> rrfMs += ms;
+            case "reranker" -> rerankerMs += ms;
         }
         currentStep = null;
         return this;
@@ -107,6 +110,7 @@ public class RagTrace {
     /** 结束追踪，输出结构化 JSON */
     public String finish(int llmTokens, long llmMs) {
         int totalMs = (int) (System.currentTimeMillis() - start);
+        int stageMs = rewriteMs + embedMs + vectorMs + keywordMs + rrfMs + rerankerMs;
 
         Map<String, Object> trace = new LinkedHashMap<>();
         trace.put("query", query);
@@ -127,6 +131,7 @@ public class RagTrace {
         }
         trace.put("llmTokens", llmTokens);
         trace.put("llmMs", llmMs);
+        trace.put("pipelineOverheadMs", Math.max(0, totalMs - stageMs - (int) llmMs));
         trace.put("totalMs", totalMs);
 
         try {
@@ -136,11 +141,9 @@ public class RagTrace {
         }
     }
 
-    /** 便捷方法：只记录 token 数，LLM 耗时用 total - 其他步 */
+    /** 便捷方法：当前 RAG 仅检索，未显式传入的 LLM 耗时不能从编排开销中推断。 */
     public String finish(int llmTokens) {
-        int otherMs = rewriteMs + embedMs + vectorMs + keywordMs + rrfMs + rerankerMs;
-        int llmMs = Math.max(0, (int) (System.currentTimeMillis() - start) - otherMs);
-        return finish(llmTokens, llmMs);
+        return finish(llmTokens, 0);
     }
 
     public record RerankerHit(String docName, double score) {}

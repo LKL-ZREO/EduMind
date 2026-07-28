@@ -2,9 +2,11 @@ package com.firedemo.demo.Controller;
 
 import com.firedemo.demo.Entity.ClassInfo;
 import com.firedemo.demo.Entity.ClassStudent;
+import com.firedemo.demo.Entity.StudentConfusionLog;
 import com.firedemo.demo.mapper.ClassInfoMapper;
 import com.firedemo.demo.mapper.ClassStudentMapper;
 import com.firedemo.demo.mapper.SharedKbMemberMapper;
+import com.firedemo.demo.mapper.StudentConfusionLogMapper;
 import com.firedemo.demo.mapper.StudentQqBindingMapper;
 import com.firedemo.demo.rag.RagResult;
 import com.firedemo.demo.rag.RagSearchRequest;
@@ -37,6 +39,7 @@ public class OnebotRagController {
     private final ClassStudentMapper classStudentMapper;
     private final ClassInfoMapper classInfoMapper;
     private final SharedKbMemberMapper sharedKbMemberMapper;
+    private final StudentConfusionLogMapper confusionLogMapper;
 
     @Value("${mcp.api-key:}")
     private String mcpApiKey;
@@ -60,8 +63,9 @@ public class OnebotRagController {
             Long userId = null;
             Set<Long> accessibleKbIds = null;
             Long courseId = null;
+            String studentId = null;
             try {
-                String studentId = studentQqBindingMapper.selectStudentIdByQq(request.getQq());
+                studentId = studentQqBindingMapper.selectStudentIdByQq(request.getQq());
                 if (studentId != null) {
                     ClassStudent cs = classStudentMapper.selectByStudentId(studentId);
                     if (cs != null && cs.getClassId() != null) {
@@ -89,6 +93,9 @@ public class OnebotRagController {
                     .build();
 
             RagResult result = ragService.search(searchRequest);
+
+            // 记录"不懂"标记
+            logConfusionIfNeeded(request, studentId);
 
             return ResponseEntity.ok(new RagResponse(
                     result.getEnhancedMessage(), result.isHasContext()));
@@ -138,6 +145,50 @@ public class OnebotRagController {
     public static class RagResponse {
         private String enhancedMessage;
         private boolean hasContext;
+    }
+
+    // ============ 不懂标记 ============
+
+    private static final java.util.regex.Pattern CONFUSION_PATTERN =
+            java.util.regex.Pattern.compile("^(不懂|没听懂|没明白|听不懂|不明白|没理解|不理解)\\s*(.*)");
+
+    /**
+     * 如果消息以"不懂/没听懂"等开头，记录到 student_confusion_log。
+     */
+    private void logConfusionIfNeeded(RagRequest request, String studentId) {
+        if (request.getMessage() == null) return;
+        var matcher = CONFUSION_PATTERN.matcher(request.getMessage().trim());
+        if (!matcher.matches()) return;
+
+        String knowledgePoint = matcher.group(2).trim();
+        if (knowledgePoint.isEmpty()) knowledgePoint = "未指定";
+
+        Long classId = null;
+        String studentName = null;
+        try {
+            if (studentId != null) {
+                ClassStudent cs = classStudentMapper.selectByStudentId(studentId);
+                if (cs != null) {
+                    classId = cs.getClassId();
+                    studentName = cs.getStudentName();
+                }
+            }
+        } catch (Exception e) {
+            log.debug("解析学生班级失败: qq={}", request.getQq(), e);
+        }
+
+        try {
+            confusionLogMapper.insert(StudentConfusionLog.builder()
+                    .qqNumber(request.getQq())
+                    .studentName(studentName)
+                    .classId(classId)
+                    .question(request.getMessage())
+                    .knowledgePoint(knowledgePoint)
+                    .build());
+            log.info("记录不懂标记: qq={}, kp={}, classId={}", request.getQq(), knowledgePoint, classId);
+        } catch (Exception e) {
+            log.warn("记录不懂标记失败: qq={}", request.getQq(), e);
+        }
     }
 
     /** 常量时间比较，防时序攻击（与 McpApiKeyFilter 一致） */

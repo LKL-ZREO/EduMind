@@ -3,6 +3,7 @@ package com.firedemo.demo.Service;
 import com.firedemo.demo.Entity.HomeworkTask;
 import com.firedemo.demo.Service.ClassService;
 import com.firedemo.demo.Service.HomeworkTaskService;
+import com.firedemo.demo.infrastructure.onebot.OneBotWebSocketClient;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
@@ -26,7 +27,7 @@ import java.util.stream.Collectors;
 @Slf4j
 public class TaskReminderService {
 
-    private final OneBotHttpService oneBotHttpService;
+    private final OneBotWebSocketClient oneBot;
     private final HomeworkTaskService taskService;
     private final ClassService classService;
     private final RedissonClient redissonClient;
@@ -77,7 +78,7 @@ public class TaskReminderService {
         if (unsubmitted.isEmpty()) {
             log.info("所有学生已提交作业，无需提醒: taskId={}", taskId);
             // 发送全员完成的祝贺消息
-            oneBotHttpService.sendGroupMessage(groupId, String.format(
+            oneBot.sendGroupMessage(groupId, String.format(
                     "🎉 太棒了！作业「%s」所有同学都已提交！",
                     task.getTaskName()));
             return;
@@ -93,7 +94,7 @@ public class TaskReminderService {
                 ? task.getDeadline().format(DateTimeFormatter.ofPattern("MM-dd HH:mm"))
                 : "未设置";
 
-        oneBotHttpService.sendGroupMessage(groupId, String.format(
+        oneBot.sendGroupMessage(groupId, String.format(
                 "@全体成员\n" +
                         "⏰ 作业提醒：「%s」将于%d小时后截止（%s）\n\n" +
                         "以下%d位同学尚未提交：\n%s\n\n" +
@@ -108,7 +109,7 @@ public class TaskReminderService {
                 String qqNumber = (String) s.get("qq_number");
                 String studentName = (String) s.get("student_name");
                 if (qqNumber != null && !qqNumber.isEmpty()) {
-                    oneBotHttpService.sendPrivateMessage(qqNumber, String.format(
+                    oneBot.sendPrivateMessage(qqNumber, String.format(
                             "同学%s你好，作业「%s」将于1小时后截止，你尚未提交，请尽快完成。",
                             studentName, task.getTaskName()));
                 }
@@ -141,7 +142,7 @@ public class TaskReminderService {
                 : "未设置";
 
         if (unsubmitted.isEmpty()) {
-            oneBotHttpService.sendGroupMessage(groupId, String.format(
+            oneBot.sendGroupMessage(groupId, String.format(
                     "✅ 作业「%s」全员已提交！(%d/%d)",
                     task.getTaskName(), totalCount, totalCount));
         } else {
@@ -149,7 +150,7 @@ public class TaskReminderService {
                     .map(s -> s.get("student_name") + "(" + s.get("student_id") + ")")
                     .collect(Collectors.joining("、"));
 
-            oneBotHttpService.sendGroupMessage(groupId, String.format(
+            oneBot.sendGroupMessage(groupId, String.format(
                     "@全体成员\n📋 作业完成情况：「%s」\n"
                             + "截止时间：%s\n"
                             + "已交：%d/%d  未交：%d人\n\n"
@@ -177,7 +178,7 @@ public class TaskReminderService {
                 ? deadline.format(DateTimeFormatter.ofPattern("MM-dd HH:mm"))
                 : "未设置";
 
-        oneBotHttpService.sendGroupMessage(groupId, String.format(
+        oneBot.sendGroupMessage(groupId, String.format(
                 "📚 新作业发布：「%s」\n" +
                         "截止时间：%s\n" +
                         "请同学们按时完成！",

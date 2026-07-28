@@ -1,7 +1,8 @@
 package com.firedemo.demo.common.aspect;
 
 import com.firedemo.demo.common.annotation.RateLimit;
-import com.firedemo.demo.common.exception.RateLimitExceededException;
+import com.firedemo.demo.common.exception.BusinessException;
+import com.firedemo.demo.common.exception.ErrorCode;
 import jakarta.annotation.PostConstruct;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -24,9 +25,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
-/**
- * 限流 AOP 切面 — Redis Lua 滑动时间窗口
- */
 @Slf4j
 @Aspect
 @Component
@@ -35,7 +33,7 @@ public class RateLimitAspect {
 
     private final RedissonClient redissonClient;
 
-    private static String LUA_SCRIPT;
+    private static final String LUA_SCRIPT;
     private String luaScriptSha;
 
     static {
@@ -43,14 +41,19 @@ public class RateLimitAspect {
             ClassPathResource resource = new ClassPathResource("scripts/rate_limit.lua");
             LUA_SCRIPT = new String(resource.getContentAsByteArray(), StandardCharsets.UTF_8);
         } catch (Exception e) {
-            throw new RuntimeException("加载限流 Lua 脚本失败", e);
+            throw new RuntimeException("Failed to load rate limit Lua script", e);
         }
     }
 
     @PostConstruct
     public void init() {
-        this.luaScriptSha = redissonClient.getScript(StringCodec.INSTANCE).scriptLoad(LUA_SCRIPT);
-        log.info("限流 Lua 脚本已预加载, SHA1={}", luaScriptSha);
+        try {
+            this.luaScriptSha = redissonClient.getScript(StringCodec.INSTANCE).scriptLoad(LUA_SCRIPT);
+            log.info("Rate limit Lua script preloaded, SHA1={}", luaScriptSha);
+        } catch (RuntimeException e) {
+            this.luaScriptSha = null;
+            log.warn("Rate limit Lua preload failed, rate limit aspect will fail open. error={}", e.getMessage());
+        }
     }
 
     @Around("@annotation(rateLimit)")
@@ -60,10 +63,12 @@ public class RateLimitAspect {
         String className = method.getDeclaringClass().getSimpleName();
         String methodName = method.getName();
 
+        if (luaScriptSha == null) {
+            return joinPoint.proceed();
+        }
+
         long intervalMs = calculateIntervalMs(rateLimit.interval(), rateLimit.timeUnit());
         List<String> keys = generateKeys(className, methodName, rateLimit.dimensions());
-
-        List<Object> keyArgs = new ArrayList<>(keys);
         Object[] scriptArgs = {
                 String.valueOf(System.currentTimeMillis()),
                 String.valueOf(1),
@@ -72,17 +77,20 @@ public class RateLimitAspect {
                 UUID.randomUUID().toString()
         };
 
-        log.debug("限流检查: keys={}, count={}, windowMs={}", keys, rateLimit.count(), intervalMs);
-
         for (String key : keys) {
-            // 每个维度独立调用 Lua，全部通过才算通过
-            List<Object> singleKey = List.of(key);
-            Long result = toLong(redissonClient.getScript(StringCodec.INSTANCE)
-                    .evalSha(RScript.Mode.READ_WRITE, luaScriptSha, RScript.ReturnType.VALUE,
-                            singleKey, scriptArgs));
+            Long result;
+            try {
+                result = toLong(redissonClient.getScript(StringCodec.INSTANCE)
+                        .evalSha(RScript.Mode.READ_WRITE, luaScriptSha, RScript.ReturnType.VALUE,
+                                List.of(key), scriptArgs));
+            } catch (RuntimeException e) {
+                log.warn("Rate limit check failed, fail open. key={}, method={}.{}, error={}",
+                        key, className, methodName, e.getMessage());
+                return joinPoint.proceed();
+            }
 
             if (result == null || result == 0) {
-                log.warn("限流触发: key={}, method={}.{}", key, className, methodName);
+                log.warn("Rate limit exceeded: key={}, method={}.{}", key, className, methodName);
                 return handleRateLimitExceeded(joinPoint, rateLimit);
             }
         }
@@ -104,11 +112,11 @@ public class RateLimitAspect {
                     fallback.setAccessible(true);
                     return fallback.invoke(joinPoint.getTarget());
                 } catch (NoSuchMethodException ignored) {
-                    log.warn("降级方法未找到: {}", rateLimit.fallback());
+                    log.warn("Rate limit fallback method not found: {}", rateLimit.fallback());
                 }
             }
         }
-        throw new RateLimitExceededException("请求过于频繁，请稍后再试");
+        throw new BusinessException(ErrorCode.RATE_LIMIT_EXCEEDED);
     }
 
     private List<String> generateKeys(String className, String methodName, RateLimit.Dimension[] dimensions) {
@@ -166,7 +174,11 @@ public class RateLimitAspect {
         if (obj instanceof Long l) return l;
         if (obj instanceof Integer i) return i.longValue();
         if (obj instanceof String s) {
-            try { return Long.parseLong(s); } catch (NumberFormatException ignored) {}
+            try {
+                return Long.parseLong(s);
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
         }
         return null;
     }

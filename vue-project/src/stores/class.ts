@@ -1,6 +1,7 @@
 import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import request from '@/api/request'
+import type { ApiResponse } from '@/api/types'
 
 interface ClassInfo {
   id: number
@@ -17,8 +18,8 @@ export const useClassStore = defineStore('class', () => {
   const CACHE_TTL = 5 * 60 * 1000 // 5 分钟
 
   // ========== 派生状态 ==========
-  const currentClass = computed(() =>
-    classList.value.find(c => c.id === currentClassId.value) ?? null
+  const currentClass = computed(
+    () => classList.value.find((c) => c.id === currentClassId.value) ?? null,
   )
   const currentClassName = computed(() => currentClass.value?.name ?? '')
 
@@ -28,12 +29,12 @@ export const useClassStore = defineStore('class', () => {
       return classList.value
     }
     try {
-      const res = await request.get('/dashboard/classes')
-      classList.value = res?.data?.data ?? []
+      const res = await request.get<ApiResponse<ClassInfo[]>>('/dashboard/classes')
+      classList.value = res.data.data ?? []
       lastFetchTime.value = Date.now()
       // 自动选中第一个
       if (!currentClassId.value && classList.value.length > 0) {
-        currentClassId.value = classList.value[0]?.id ?? currentClassId.value
+        currentClassId.value = classList.value[0]?.id ?? null
       }
       return classList.value
     } catch (e) {

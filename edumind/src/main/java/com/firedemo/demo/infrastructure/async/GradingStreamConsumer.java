@@ -7,10 +7,10 @@ import com.firedemo.demo.Entity.Submission;
 import com.firedemo.demo.Entity.SubmissionError;
 import com.firedemo.demo.Entity.TeacherKnowledge;
 import com.firedemo.demo.Service.FileStorageService;
-import com.firedemo.demo.Service.OneBotHttpService;
+import com.firedemo.demo.infrastructure.onebot.OneBotWebSocketClient;
 import com.firedemo.demo.common.enums.SubmissionStatus;
 import com.firedemo.demo.Service.OpenClawService;
-import com.firedemo.demo.infrastructure.ai.StructuredOutputInvoker;
+import com.firedemo.demo.agent.workflow.GradingWorkflow;
 import com.firedemo.demo.infrastructure.cache.CacheConsistencyService;
 import com.firedemo.demo.infrastructure.cache.RedisCacheReader;
 import com.firedemo.demo.infrastructure.prompt.PromptLoader;
@@ -44,7 +44,7 @@ public class GradingStreamConsumer extends AbstractStreamConsumer {
     private final SubmissionMapper submissionMapper;
     private final FileStorageService fileStorageService;
     private final OpenClawService openClawService;
-    private final OneBotHttpService oneBotHttpService;
+    private final OneBotWebSocketClient oneBot;
     private final TeacherKnowledgeMapper teacherKnowledgeMapper;
     private final SubmissionErrorMapper submissionErrorMapper;
     private final HomeworkTaskMapper taskMapper;
@@ -53,19 +53,21 @@ public class GradingStreamConsumer extends AbstractStreamConsumer {
     private final ObjectMapper objectMapper;
     private final CacheConsistencyService cacheConsistencyService;
     private final RedisCacheReader redisCacheReader;
-    private final StructuredOutputInvoker structuredOutputInvoker;
+    private final GradingWorkflow gradingWorkflow;
     private final PromptLoader promptLoader;
 
-    /** grading-system.txt 模板的 SHA-256，模板改动后缓存自动失效 */
+    /** grading-*.txt 三个模板的联合 SHA-256，任一模板改动后缓存自动失效 */
     private String promptTemplateHash;
 
     // ==================== 初始化 ====================
 
     @jakarta.annotation.PostConstruct
     void initCacheKey() {
-        String template = promptLoader.load("grading-system.txt");
-        this.promptTemplateHash = sha256(template);
-        log.info("批改缓存模板哈希: {}", promptTemplateHash);
+        String t1 = promptLoader.load("grading-grade.txt");
+        String t2 = promptLoader.load("grading-errors.txt");
+        String t3 = promptLoader.load("grading-suggestions.txt");
+        this.promptTemplateHash = sha256(t1 + t2 + t3);
+        log.info("批改缓存模板哈希(3合1): {}", promptTemplateHash);
     }
 
     public GradingStreamConsumer(RedissonClient redissonClient,
@@ -73,7 +75,7 @@ public class GradingStreamConsumer extends AbstractStreamConsumer {
                                   SubmissionMapper submissionMapper,
                                   FileStorageService fileStorageService,
                                   OpenClawService openClawService,
-                                  OneBotHttpService oneBotHttpService,
+                                  OneBotWebSocketClient oneBot,
                                   TeacherKnowledgeMapper teacherKnowledgeMapper,
                                   SubmissionErrorMapper submissionErrorMapper,
                                   HomeworkTaskMapper taskMapper,
@@ -82,14 +84,14 @@ public class GradingStreamConsumer extends AbstractStreamConsumer {
                                   ObjectMapper objectMapper,
                                   CacheConsistencyService cacheConsistencyService,
                                   RedisCacheReader redisCacheReader,
-                                  StructuredOutputInvoker structuredOutputInvoker,
+                                  GradingWorkflow gradingWorkflow,
                                   PromptLoader promptLoader) {
         super(redissonClient);
         this.gradingStreamProducer = gradingStreamProducer;
         this.submissionMapper = submissionMapper;
         this.fileStorageService = fileStorageService;
         this.openClawService = openClawService;
-        this.oneBotHttpService = oneBotHttpService;
+        this.oneBot = oneBot;
         this.teacherKnowledgeMapper = teacherKnowledgeMapper;
         this.submissionErrorMapper = submissionErrorMapper;
         this.taskMapper = taskMapper;
@@ -98,7 +100,7 @@ public class GradingStreamConsumer extends AbstractStreamConsumer {
         this.objectMapper = objectMapper;
         this.cacheConsistencyService = cacheConsistencyService;
         this.redisCacheReader = redisCacheReader;
-        this.structuredOutputInvoker = structuredOutputInvoker;
+        this.gradingWorkflow = gradingWorkflow;
         this.promptLoader = promptLoader;
     }
 
@@ -225,13 +227,11 @@ public class GradingStreamConsumer extends AbstractStreamConsumer {
         EvaluationResultDTO evaluation = getCachedResult(cacheKey);
 
         if (evaluation == null) {
-            // 缓存未命中 — 调用 AI 批改
-            String prompt = buildPrompt(submission, taskDescription, studentRequirement, fileContent, kpContext);
-            evaluation = structuredOutputInvoker.invoke(
-                    p -> openClawService.chat(p, "grading_" + submissionId),
-                    prompt,
-                    EvaluationResultDTO.class,
-                    "作业批改 submissionId=" + submissionId);
+            // 缓存未命中 — 启动 DAG 工作流批改
+            GradingWorkflow.GradingState state = GradingWorkflow.GradingState.create(
+                    submission, taskDescription, studentRequirement, fileContent, kpContext);
+            state = gradingWorkflow.execute(state);
+            evaluation = gradingWorkflow.mergeToEvaluationResult(state);
             cacheResult(cacheKey, evaluation);
         } else {
             log.info("批改缓存命中，跳过LLM: submissionId={}, score={}", submissionId, evaluation.getTotalScore());
@@ -257,7 +257,7 @@ public class GradingStreamConsumer extends AbstractStreamConsumer {
         if (evaluation.getTotalScore() != null && evaluation.getTotalScore() < 60) {
             String qq = studentQqBindingMapper.selectQqByStudentId(submission.getStudentId());
             if (qq != null) {
-                oneBotHttpService.sendPrivateMessage(qq, String.format(
+                oneBot.sendPrivateMessage(qq, String.format(
                         "同学你好，你的作业「%s」得分 %d 分，建议多向老师或机器人提问。",
                         submission.getAssignmentName(), evaluation.getTotalScore()));
             }
@@ -293,26 +293,6 @@ public class GradingStreamConsumer extends AbstractStreamConsumer {
     }
 
     // ==================== Prompt 构建 ====================
-
-    private String buildPrompt(Submission sub, String taskDescription,
-                                String studentRequirement, String fileContent,
-                                String kpContext) {
-        String studentNote = "";
-        if (studentRequirement != null && !studentRequirement.isEmpty()) {
-            studentNote = String.format("\n\n【学生提交说明】\n%s\n", studentRequirement);
-        }
-
-        String template = promptLoader.load("grading-system.txt");
-        return template
-                .replace("{{taskDescription}}",
-                        taskDescription != null && !taskDescription.isEmpty() ? taskDescription : "无特殊要求")
-                .replace("{{studentName}}", sub.getStudentName())
-                .replace("{{className}}", sub.getClassName())
-                .replace("{{assignmentName}}", sub.getAssignmentName())
-                .replace("{{studentNote}}", studentNote)
-                .replace("{{fileContent}}", fileContent)
-                .replace("{{kpContext}}", kpContext != null ? kpContext : "");
-    }
 
     private void saveEvaluation(Submission sub, EvaluationResultDTO eval, String rawResponse) {
         sub.setTotalScore(eval.getTotalScore());

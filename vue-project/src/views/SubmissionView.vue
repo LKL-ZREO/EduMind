@@ -25,43 +25,42 @@
   </div>
 </template>
 
-<script>
+<script setup lang="ts">
+import { onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import request from '@/api/request'
+import type { ApiResponse } from '@/api/types'
 
-export default {
-  name: 'SubmissionView',
-  data() {
-    return {
-      submissionId: null,
-      data: null,
-      loading: true
-    }
-  },
+interface SubmissionContent {
+  fileName: string
+  studentName: string
+  content: string
+}
 
-  mounted() {
-    this.submissionId = this.$route.params.id
-    this.loadContent()
-  },
+const route = useRoute()
+const data = ref<SubmissionContent | null>(null)
+const loading = ref(true)
 
-  methods: {
-    closeWindow() {
-      window.close()
-    },
+function closeWindow() {
+  window.close()
+}
 
-    async loadContent() {
-      this.loading = true
-      try {
-        const res = await request.get(`/submissions/${this.submissionId}/content`)
-        this.data = res.data.code === 200 ? res.data.data : null
-      } catch (e) {
-        console.error('加载提交内容失败', e)
-        this.data = null
-      } finally {
-        this.loading = false
-      }
-    }
+async function loadContent() {
+  loading.value = true
+  try {
+    const submissionId = String(route.params.id)
+    const response = await request.get<ApiResponse<SubmissionContent>>(
+      `/submissions/${submissionId}/content`,
+    )
+    data.value = response.data.code === 200 ? response.data.data : null
+  } catch {
+    data.value = null
+  } finally {
+    loading.value = false
   }
 }
+
+onMounted(loadContent)
 </script>
 
 <style scoped>

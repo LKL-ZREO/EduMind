@@ -1,40 +1,82 @@
-import axios from 'axios'
+import axios, { type InternalAxiosRequestConfig } from 'axios'
 import { getCached, setCache } from './cache'
 
-// 创建 axios 实例
+type RetryableRequest = InternalAxiosRequestConfig & { _csrfRetry?: boolean }
+
 const request = axios.create({
   baseURL: '/api',
-  timeout: 10000
+  timeout: 10000,
+  withCredentials: true,
 })
 
-// 请求拦截器 - 自动添加 token
+let csrfToken: string | null = null
+let csrfRequest: Promise<string> | null = null
+
+function isUnsafe(method?: string) {
+  return !['GET', 'HEAD', 'OPTIONS', 'TRACE'].includes((method || 'GET').toUpperCase())
+}
+
+export async function ensureCsrfToken(force = false): Promise<string> {
+  if (csrfToken && !force) return csrfToken
+  if (csrfRequest && !force) return csrfRequest
+
+  csrfRequest = axios
+    .get('/api/auth/csrf', { withCredentials: true })
+    .then((response) => {
+      const token = response.data?.data?.token
+      if (!token) throw new Error('未获取到 CSRF token')
+      csrfToken = token
+      return token as string
+    })
+    .finally(() => {
+      csrfRequest = null
+    })
+  return csrfRequest
+}
+
+export async function getCsrfHeaders(): Promise<Record<string, string>> {
+  return { 'X-XSRF-TOKEN': await ensureCsrfToken() }
+}
+
 request.interceptors.request.use(
-  (config) => {
-    const token = localStorage.getItem('token')
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`
+  async (config) => {
+    if (isUnsafe(config.method)) {
+      config.headers.set('X-XSRF-TOKEN', await ensureCsrfToken())
     }
     return config
   },
-  (error) => {
-    return Promise.reject(error)
-  }
+  (error) => Promise.reject(error),
 )
 
-// 响应拦截器 - 处理 401
 request.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      // 未登录，清除 token 并跳转到登录页
+  async (error) => {
+    const original = error.config as RetryableRequest | undefined
+    if (
+      error.response?.status === 403 &&
+      error.response?.data?.code === 40301 &&
+      original &&
+      !original._csrfRetry
+    ) {
+      original._csrfRetry = true
+      original.headers.set('X-XSRF-TOKEN', await ensureCsrfToken(true))
+      return request(original)
+    }
+
+    const url = String(original?.url || '')
+    const isSessionProbe = url.includes('/auth/me')
+    const isAuthAttempt = url.includes('/auth/login') || url.includes('/auth/register')
+    const isStudentPage = window.location.pathname.startsWith('/live/')
+    if (error.response?.status === 401 && !isSessionProbe && !isAuthAttempt && !isStudentPage) {
       localStorage.removeItem('token')
+      localStorage.removeItem('user')
+      localStorage.removeItem('auth:user')
       window.location.href = '/login'
     }
     return Promise.reject(error)
-  }
+  },
 )
 
-/** 健康检查（带 3 分钟缓存） */
 export async function checkHealth() {
   const cached = getCached('health')
   if (cached) return cached

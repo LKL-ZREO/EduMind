@@ -1,10 +1,11 @@
 package com.firedemo.demo.mcp.tools;
 
 import com.firedemo.demo.Entity.ClassInfo;
-import com.firedemo.demo.Service.ClassService;
+import com.firedemo.demo.agent.context.AgentExecutionContext;
 import com.firedemo.demo.mapper.HomeworkEvaluationMapper;
 import com.firedemo.demo.mapper.SubmissionErrorMapper;
 import com.firedemo.demo.mapper.SubmissionMapper;
+import com.firedemo.demo.mcp.ToolAccessPolicy;
 import com.firedemo.demo.mcp.ToolDefinition;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -22,7 +23,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ClassStatusTool implements ToolDefinition {
 
-    private final ClassService classService;
+    private final ToolAccessPolicy toolAccessPolicy;
     private final SubmissionMapper submissionMapper;
     private final HomeworkEvaluationMapper evaluationMapper;
     private final SubmissionErrorMapper submissionErrorMapper;
@@ -49,14 +50,14 @@ public class ClassStatusTool implements ToolDefinition {
     }
 
     @Override
-    public String execute(Map<String, Object> arguments) {
+    public String execute(Map<String, Object> arguments, AgentExecutionContext context) {
         String className = (String) arguments.get("className");
         log.info("MCP Tool queryClassStatus: className={}", className);
 
         try {
-            ClassInfo classInfo = classService.getClassByName(className);
+            ClassInfo classInfo = toolAccessPolicy.findOwnedClass(context, className);
             if (classInfo == null) {
-                return "未找到班级「" + className + "」，请确认班级名称是否正确。";
+                return "未找到班级「" + className + "」或当前用户无权访问。";
             }
             Long classId = classInfo.getId();
 

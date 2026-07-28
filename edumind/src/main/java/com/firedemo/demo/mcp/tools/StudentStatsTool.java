@@ -2,6 +2,8 @@ package com.firedemo.demo.mcp.tools;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.firedemo.demo.Entity.Submission;
+import com.firedemo.demo.agent.context.AgentExecutionContext;
+import com.firedemo.demo.mcp.ToolAccessPolicy;
 import com.firedemo.demo.mcp.ToolDefinition;
 import com.firedemo.demo.mapper.SubmissionMapper;
 import lombok.RequiredArgsConstructor;
@@ -21,6 +23,7 @@ import java.util.stream.Collectors;
 public class StudentStatsTool implements ToolDefinition {
 
     private final SubmissionMapper submissionMapper;
+    private final ToolAccessPolicy toolAccessPolicy;
 
     @Override
     public String name() {
@@ -44,14 +47,19 @@ public class StudentStatsTool implements ToolDefinition {
     }
 
     @Override
-    public String execute(Map<String, Object> arguments) {
+    public String execute(Map<String, Object> arguments, AgentExecutionContext context) {
         String studentName = (String) arguments.get("studentName");
         log.info("MCP Tool queryStudentStats: student={}", studentName);
 
         try {
+            List<Long> classIds = toolAccessPolicy.accessibleClassIds(context);
+            if (classIds.isEmpty()) {
+                return "当前用户未认证，或没有可访问的班级。";
+            }
             List<Submission> submissions = submissionMapper.selectList(
                     new LambdaQueryWrapper<Submission>()
                             .eq(Submission::getStudentName, studentName)
+                            .in(Submission::getClassId, classIds)
                             .orderByDesc(Submission::getSubmittedAt));
 
             if (submissions == null || submissions.isEmpty()) {

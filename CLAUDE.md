@@ -29,7 +29,7 @@ cd edumind && docker compose up -d
 
 The app runs on `http://localhost:8080`. Swagger UI at `http://localhost:8080/swagger-ui.html`.
 
-Environment config: copy `edumind/.env.example` to `edumind/.env` and fill in required values (`DB_PASS`, `JWT_SECRET`, `OPENCLAW_API_KEY`, `ONEBOT_TOKEN`).
+Environment config: copy `edumind/.env.example` to `edumind/.env` and fill in required values (`DB_PASS`, `LIVE_SESSION_TOKEN_SECRET`, `LLM_API_KEY`, `ONEBOT_TOKEN`).
 
 ### Frontend (`vue-project/`)
 
@@ -83,7 +83,7 @@ npm run format       # Prettier
 - `ai/` — structured output caller for LLM JSON responses
 
 **Config** (`config/`):
-- `SecurityConfig` — JWT stateless auth via `JwtAuthenticationFilter` + MCP API key filter; public endpoints: `/api/auth/**`, `/api/homework/**`, `/api/onebot/rag`, `/api/teacher/classes/join`
+- `SecurityConfig` — teacher Web auth via Redis-backed Spring Session + CSRF; classroom students use a separate session-scoped bearer token; MCP uses its own API key filter
 - `WebMvcConfig` — registers `TokenBucketInterceptor` (excludes `/api/auth/**`, `/actuator/**`, `/error`)
 - `properties/` — typed configuration property classes
 

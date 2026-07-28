@@ -11,8 +11,6 @@ public class UserLoginVO {
     private Long id;
     private String username;
     private String email;
-    private String token;          // Access Token（JWT）
-    private String refreshToken;   // Refresh Token（用于无感刷新）
-    private Long expiresIn;        // Access Token 过期秒数
-    private String sessionId;      // 当前会话ID
+    /** 最近的 AI 对话会话 ID，不是 HTTP Session ID。 */
+    private String sessionId;
 }

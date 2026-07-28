@@ -1,19 +1,50 @@
 import request from './request'
+import type { ApiResponse } from './types'
 
 export interface Task {
   id: number
   classId: number
   taskName: string
   description: string
-  deadline: string
+  deadline?: string
   allowLate: boolean
   latePenalty: number
   status: string
   createdAt: string
 }
 
+export interface DraftQuestion {
+  id?: number
+  title: string
+  requirement: string
+  score: number
+  uploadRequired: boolean
+}
+
+export interface HomeworkDraft {
+  id: number
+  taskName: string
+  description?: string
+  deadline?: string
+  allowLate: boolean
+  latePenalty: number
+  status: string
+  createdAt: string
+  updatedAt: string
+  questions: DraftQuestion[]
+}
+
+export interface SaveDraftPayload {
+  taskName: string
+  description?: string
+  deadline?: string | null
+  allowLate?: boolean
+  latePenalty?: number
+  questions: DraftQuestion[]
+}
+
 export async function getTasksByClass(classId: number) {
-  const res = await request.get(`/tasks?classId=${classId}`)
+  const res = await request.get<ApiResponse<Task[]>>(`/tasks?classId=${classId}`)
   return res.data
 }
 
@@ -26,7 +57,7 @@ export async function createTask(data: {
   classId: number
   taskName: string
   description: string
-  deadline: string
+  deadline?: string | null
   allowLate?: boolean
   latePenalty?: number
 }) {
@@ -34,13 +65,16 @@ export async function createTask(data: {
   return res.data
 }
 
-export async function updateTask(taskId: number, data: {
-  taskName?: string
-  description?: string
-  deadline?: string
-  allowLate?: boolean
-  latePenalty?: number
-}) {
+export async function updateTask(
+  taskId: number,
+  data: {
+    taskName?: string
+    description?: string
+    deadline?: string | null
+    allowLate?: boolean
+    latePenalty?: number
+  },
+) {
   const res = await request.put(`/tasks/${taskId}`, data)
   return res.data
 }
@@ -52,5 +86,46 @@ export async function deleteTask(taskId: number) {
 
 export async function testReminder(taskId: number) {
   const res = await request.post(`/tasks/${taskId}/test-reminder`)
+  return res.data
+}
+
+export async function getDrafts() {
+  const res = await request.get('/tasks/drafts')
+  return res.data
+}
+
+export async function getDraft(draftId: number) {
+  const res = await request.get(`/tasks/drafts/${draftId}`)
+  return res.data
+}
+
+export async function saveDraft(data: SaveDraftPayload, draftId?: number | null) {
+  const res = draftId
+    ? await request.put(`/tasks/drafts/${draftId}`, data)
+    : await request.post('/tasks/drafts', data)
+  return res.data
+}
+
+export async function deleteDraft(draftId: number) {
+  const res = await request.delete(`/tasks/drafts/${draftId}`)
+  return res.data
+}
+
+export async function searchQuestions(keyword = '') {
+  const res = await request.get('/tasks/questions', { params: { keyword } })
+  return res.data
+}
+
+export async function publishDraft(
+  draftId: number,
+  data: {
+    classIds: number[]
+    taskName?: string
+    deadline?: string | null
+    allowLate?: boolean
+    latePenalty?: number
+  },
+) {
+  const res = await request.post(`/tasks/drafts/${draftId}/publish`, data)
   return res.data
 }

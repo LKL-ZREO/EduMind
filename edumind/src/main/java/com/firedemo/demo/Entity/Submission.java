@@ -3,7 +3,10 @@ package com.firedemo.demo.Entity;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
 
@@ -11,6 +14,9 @@ import java.time.LocalDateTime;
  * 作业提交记录（学生端匿名提交）
  */
 @Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor(access = lombok.AccessLevel.PRIVATE)
 @TableName("submission")
 public class Submission {
 

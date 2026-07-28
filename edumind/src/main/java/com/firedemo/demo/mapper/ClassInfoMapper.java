@@ -22,6 +22,25 @@ public interface ClassInfoMapper extends BaseMapper<ClassInfo> {
     List<ClassInfo> selectByTeacherId(Long teacherId);
 
     /**
+     * 按名称查询当前教师在指定课程下可访问的班级。
+     */
+    @Select("""
+            <script>
+            SELECT *
+            FROM class_info
+            WHERE name = #{name}
+              AND teacher_id = #{teacherId}
+            <if test="courseId != null">
+              AND course_id = #{courseId}
+            </if>
+            LIMIT 1
+            </script>
+            """)
+    ClassInfo selectOwnedByName(@Param("name") String name,
+                                @Param("teacherId") Long teacherId,
+                                @Param("courseId") Long courseId);
+
+    /**
      * 查询班级学生数量
      */
     @Select("SELECT COUNT(*) FROM sys_user WHERE class_id = #{classId} AND status = 1")
