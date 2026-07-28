@@ -7,6 +7,8 @@ import com.firedemo.demo.Entity.*;
 import com.firedemo.demo.Service.OpenClawService;
 import com.firedemo.demo.common.exception.BusinessException;
 import com.firedemo.demo.common.exception.ErrorCode;
+import com.firedemo.demo.infrastructure.ai.StructuredOutputInvoker;
+import com.firedemo.demo.infrastructure.ai.StructuredOutputValidationException;
 import com.firedemo.demo.mapper.*;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
@@ -32,6 +34,7 @@ public class InteractionService {
     private final SimpMessagingTemplate messagingTemplate;
     private final ObjectMapper objectMapper;
     private final OpenClawService openClawService;
+    private final StructuredOutputInvoker structuredOutputInvoker;
     private final LiveNotificationService liveNotificationService;
 
     /** 自动关闭互动的定时任务执行器（2 个调度线程足够，实际关闭逻辑在调用线程执行） */
@@ -314,29 +317,33 @@ public class InteractionService {
         String prompt = String.format(
                 "你是一位资深教师。请根据以下知识点生成一道%s。\n知识点：%s\n\n" +
                 "输出严格JSON格式（不要markdown代码块）：\n" +
-                "{\"title\":\"题目内容\",\"options\":[{\"key\":\"A\",\"text\":\"选项A\"},...],\"correctKey\":\"A\"}\n" +
-                "如果是简答题，options字段为null，correctKey为参考答案。", typeName, topic);
+                "{\"type\":\"%s\",\"title\":\"题目内容\",\"options\":[{\"key\":\"A\",\"text\":\"选项A\"},...],\"correctKey\":\"A\"}\n" +
+                "如果是简答题，options字段为null，correctKey为参考答案。", typeName, topic, type);
 
-        String raw = openClawService.chat(prompt, "1");
         try {
-            String json = extractJson(raw);
-            @SuppressWarnings("unchecked")
-            Map<String, Object> result = objectMapper.readValue(json, Map.class);
-            result.put("type", type);
-            return result;
+            InteractionCreateDTO generated = structuredOutputInvoker.invoke(
+                    p -> openClawService.chat(p, "question-generation"),
+                    prompt, InteractionCreateDTO.class, "question-generation",
+                    this::validateGeneratedQuestion);
+            generated.setType(type);
+            return objectMapper.convertValue(generated, Map.class);
         } catch (Exception e) {
             log.error("AI生成题目解析失败: {}", e.getMessage());
             throw new BusinessException(ErrorCode.SYSTEM_ERROR.getCode(), "AI生成失败，请重试");
         }
     }
 
-    private String extractJson(String raw) {
-        if (raw == null) return "{}";
-        String s = raw.trim();
-        int start = s.indexOf('{');
-        int end = s.lastIndexOf('}');
-        if (start >= 0 && end > start) return s.substring(start, end + 1);
-        return s;
+    private void validateGeneratedQuestion(InteractionCreateDTO result) {
+        if ("CHOICE".equals(result.getType())) {
+            if (result.getOptions() == null || result.getOptions().size() < 2) {
+                throw new StructuredOutputValidationException(List.of("options: choice requires at least two options"));
+            }
+            boolean keyExists = result.getOptions().stream()
+                    .anyMatch(option -> option.getKey().equals(result.getCorrectKey()));
+            if (!keyExists) {
+                throw new StructuredOutputValidationException(List.of("correctKey: must reference an option"));
+            }
+        }
     }
 
     /**

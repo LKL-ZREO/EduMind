@@ -5,7 +5,10 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.firedemo.demo.Entity.DocumentChunkEntity;
 import com.firedemo.demo.eval.model.EvalCase;
+import com.firedemo.demo.eval.model.EvalDatasetGenerationResult;
 import com.firedemo.demo.eval.model.EvalResponse;
+import com.firedemo.demo.eval.model.JudgeResult;
+import com.firedemo.demo.infrastructure.ai.StructuredOutputInvoker;
 import com.firedemo.demo.mapper.DocumentChunkMapper;
 import com.firedemo.demo.rag.RagResult;
 import com.firedemo.demo.rag.RagSearchRequest;
@@ -38,6 +41,7 @@ public class EvalService {
     private final OpenClawService openClawService;
     private final DocumentChunkMapper chunkMapper;
     private final ObjectMapper objectMapper;
+    private final StructuredOutputInvoker structuredOutputInvoker;
 
     private String faithfulnessPrompt;
     private String relevancePrompt;
@@ -45,11 +49,13 @@ public class EvalService {
     public EvalService(RagService ragService,
                        OpenClawService openClawService,
                        DocumentChunkMapper chunkMapper,
-                       ObjectMapper objectMapper) {
+                       ObjectMapper objectMapper,
+                       StructuredOutputInvoker structuredOutputInvoker) {
         this.ragService = ragService;
         this.openClawService = openClawService;
         this.chunkMapper = chunkMapper;
         this.objectMapper = objectMapper;
+        this.structuredOutputInvoker = structuredOutputInvoker;
         loadPrompts();
     }
 
@@ -76,8 +82,8 @@ public class EvalService {
             1. 问题覆盖文档不同部分，不要集中在一处
             2. 类型多样化：定义类、概念对比类、应用类、因果类
             3. 每个问题配完整参考答案（答案必须能从文档中找到依据）
-            4. 输出严格 JSON 数组，不要加 markdown 标记：
-            [{"question": "...", "answer": "..."}]
+            4. 输出严格 JSON 对象，不要加 markdown 标记：
+            {"items":[{"question": "...", "answer": "..."}]}
 
             文档内容：
             %s
@@ -146,29 +152,21 @@ public class EvalService {
 
             try {
                 String prompt = String.format(QA_GEN_PROMPT, questionCount, content);
-                String raw = openClawService.chat(prompt, "eval-dataset-gen");
+                EvalDatasetGenerationResult generated = structuredOutputInvoker.invoke(
+                        p -> openClawService.chat(p, "eval-dataset-gen"), prompt,
+                        EvalDatasetGenerationResult.class, "eval-dataset-generation");
 
-                // 清理 markdown
-                raw = raw.trim();
-                if (raw.startsWith("```")) {
-                    raw = raw.substring(raw.indexOf("\n") + 1);
-                    if (raw.endsWith("```")) raw = raw.substring(0, raw.lastIndexOf("```"));
-                }
-
-                @SuppressWarnings("unchecked")
-                List<Map<String, String>> qaList = objectMapper.readValue(raw, List.class);
-
-                for (Map<String, String> qa : qaList) {
+                for (EvalDatasetGenerationResult.Item qa : generated.getItems()) {
                     caseId++;
                     cases.add(EvalCase.builder()
                             .id(caseId)
-                            .query(qa.getOrDefault("question", "").trim())
-                            .answer(qa.getOrDefault("answer", "").trim())
+                            .query(qa.getQuestion().trim())
+                            .answer(qa.getAnswer().trim())
                             .sourceDocId(docId)
                             .sourceDocName(docName)
                             .build());
                 }
-                log.info("    → 生成 {} 题", qaList.size());
+                log.info("    → 生成 {} 题", generated.getItems().size());
 
             } catch (Exception e) {
                 log.warn("    → 生成失败: {}", e.getMessage());
@@ -288,17 +286,10 @@ public class EvalService {
 
     private boolean callJudge(String prompt) {
         try {
-            String raw = openClawService.chat(prompt, "eval-judge");
-            raw = raw.trim();
-            if (raw.startsWith("```")) {
-                raw = raw.substring(raw.indexOf("\n") + 1);
-                if (raw.endsWith("```")) raw = raw.substring(0, raw.lastIndexOf("```"));
-            }
-            @SuppressWarnings("unchecked")
-            Map<String, Object> json = objectMapper.readValue(raw, Map.class);
-            Object score = json.get("score");
-            if (score instanceof Number n) return n.intValue() >= 1;
-            if (score instanceof String s) return "1".equals(s) || "pass".equalsIgnoreCase(s);
+            JudgeResult result = structuredOutputInvoker.invoke(
+                    p -> openClawService.chat(p, "eval-judge"), prompt,
+                    JudgeResult.class, "eval-judge");
+            return result.getScore() == 1;
         } catch (Exception e) {
             log.warn("Judge 解析失败: {}", e.getMessage());
         }

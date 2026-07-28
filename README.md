@@ -196,6 +196,7 @@ npm run test                                   # Vitest 单元测试
 
 - **`/actuator/prometheus`** — JVM、HTTP、RAG 检索等指标
 - **Grafana Dashboard** — JVM 内存/GC、API QPS/延迟、5xx 错误率、RAG 耗时
+- **结构化输出可靠性** — JSON 严格解析/修复/语义校验/重试结果与 Repair p95
 - **结构化日志** — JSON 格式，自动携带 `requestId` + `userId`
 - **Request ID 追踪** — 每个请求贯穿 Nginx → 应用 → 响应头
 

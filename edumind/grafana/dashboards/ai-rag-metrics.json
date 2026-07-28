@@ -198,6 +198,34 @@
       ],
       "title": "RAG Query Rewrites",
       "type": "timeseries"
+    },
+    {
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "palette-classic"}, "custom": {"drawStyle": "bars", "fillOpacity": 25, "lineWidth": 1, "showPoints": "never", "spanNulls": true}, "unit": "ops"},
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 34},
+      "id": 10,
+      "options": {"legend": {"displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"expr": "sum(rate(edumind_llm_structured_requests_total{application=\"edumind\"}[5m])) by (use_case, outcome)", "legendFormat": "{{use_case}} / {{outcome}}", "refId": "A"}
+      ],
+      "title": "Structured Output Outcomes",
+      "type": "timeseries"
+    },
+    {
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "palette-classic"}, "custom": {"drawStyle": "line", "fillOpacity": 10, "lineWidth": 2, "showPoints": "never", "spanNulls": true}, "unit": "s"},
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 34},
+      "id": 11,
+      "options": {"legend": {"displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"expr": "histogram_quantile(0.95, sum(rate(edumind_llm_structured_repair_duration_seconds_bucket{application=\"edumind\"}[5m])) by (le))", "legendFormat": "repair p95", "refId": "A"}
+      ],
+      "title": "JSON Repair Latency (p95)",
+      "type": "timeseries"
     }
   ],
   "refresh": "10s",

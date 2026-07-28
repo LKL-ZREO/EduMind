@@ -6,8 +6,8 @@
 3. 每道题标注知识点名称（knowledgePoint）、难度（difficulty）、建议限时（timeLimit秒）
 4. 选择题至少4个选项
 
-输出严格JSON数组格式（不要markdown代码块，字符串内的双引号必须转义为\"，换行必须用\\n）：
-[
+输出严格JSON对象格式（不要markdown代码块，字符串内的双引号必须转义为\"，换行必须用\\n）：
+{"quizzes": [
   {
     "type": "CHOICE",
     "title": "题目内容",
@@ -33,7 +33,7 @@
     "difficulty": "hard",
     "timeLimit": 300
   }
-]
+]}
 
 PPT内容：
 {{content}}

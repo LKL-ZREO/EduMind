@@ -1,6 +1,7 @@
 package com.firedemo.demo.config.observability;
 
 import com.firedemo.demo.agent.observability.AgentToolMetrics;
+import com.firedemo.demo.infrastructure.ai.StructuredOutputMetrics;
 import com.firedemo.demo.rag.RagMetrics;
 import com.firedemo.demo.rag.RagTrace;
 import io.micrometer.prometheusmetrics.PrometheusConfig;
@@ -16,6 +17,7 @@ class LocalAiMetricsPrometheusContractTest {
         PrometheusMeterRegistry registry = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
         RagMetrics ragMetrics = new RagMetrics(registry);
         AgentToolMetrics toolMetrics = new AgentToolMetrics(registry);
+        StructuredOutputMetrics structuredOutputMetrics = new StructuredOutputMetrics(registry);
         RagTrace trace = new RagTrace("test query");
 
         ragMetrics.recordStage(trace, RagMetrics.Stage.EMBEDDING, () -> new float[0]);
@@ -24,6 +26,8 @@ class LocalAiMetricsPrometheusContractTest {
         ragMetrics.recordRewriteOutcome(
                 RagMetrics.RewriteReason.INITIAL, RagMetrics.RewriteOutcome.CHANGED);
         toolMetrics.record("searchKnowledge", () -> "ok");
+        structuredOutputMetrics.record("grading", "strict_success");
+        structuredOutputMetrics.recordRepair(() -> "{}");
 
         String scrape = registry.scrape();
 
@@ -35,6 +39,8 @@ class LocalAiMetricsPrometheusContractTest {
                 .contains("edumind_rag_searches_total")
                 .contains("edumind_rag_rewrites_total")
                 .contains("edumind_agent_tool_duration_seconds_bucket")
-                .contains("edumind_agent_tool_duration_seconds_count");
+                .contains("edumind_agent_tool_duration_seconds_count")
+                .contains("edumind_llm_structured_requests_total")
+                .contains("edumind_llm_structured_repair_duration_seconds_count");
     }
 }
