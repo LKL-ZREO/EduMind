@@ -20,6 +20,6 @@ public interface TeachingCalendarMapper extends BaseMapper<TeachingCalendar> {
     @Update("UPDATE teaching_calendar SET session_id = #{sessionId}, status = 'COMPLETED', updated_at = NOW() WHERE id = #{id}")
     int markCompleted(@Param("id") Long id, @Param("sessionId") Long sessionId);
 
-    @Delete("DELETE FROM teaching_calendar WHERE id = #{id}")
-    int deletePlan(@Param("id") Long id);
+    @Delete("DELETE FROM teaching_calendar WHERE id = #{id} AND teacher_id = #{teacherId}")
+    int deletePlan(@Param("id") Long id, @Param("teacherId") Long teacherId);
 }

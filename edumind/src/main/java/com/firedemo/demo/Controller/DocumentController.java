@@ -6,6 +6,9 @@ import com.firedemo.demo.Entity.DirectoryNode;
 import com.firedemo.demo.Entity.Document;
 import com.firedemo.demo.Service.DocumentService;
 import com.firedemo.demo.Service.FileStorageService;
+import com.firedemo.demo.common.exception.BusinessException;
+import com.firedemo.demo.common.exception.ErrorCode;
+import com.firedemo.demo.config.OwnershipGuard;
 import com.firedemo.demo.live.service.TeachingMaterialGenerator;
 import com.firedemo.demo.mapper.DirectoryNodeMapper;
 import com.firedemo.demo.mapper.InteractionMapper;
@@ -23,6 +26,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 /**
@@ -41,6 +45,7 @@ public class DocumentController {
     private final PreviewTaskMapper previewTaskMapper;
     private final InteractionMapper interactionMapper;
     private final ObjectMapper objectMapper;
+    private final OwnershipGuard ownershipGuard;
 
     /**
      * 上传文档并自动处理（切割+向量化）
@@ -55,24 +60,29 @@ public class DocumentController {
         if (userId == null) return ResponseEntity.status(401).build();
 
         try {
-            String docId = documentService.uploadDocument(userId, file, kbId);
-
             Long targetParentId = parentNodeId != null ? parentNodeId : null;
+            requireAccess(kbId == null || ownershipGuard.canAccessKnowledgeBase(userId, kbId));
             if (parentNodeId != null) {
                 DirectoryNode parent = directoryNodeMapper.selectById(parentNodeId);
-                if (parent == null || !parent.getUserId().equals(userId)) {
+                if (parent == null || !ownershipGuard.canAccessDirectoryNode(userId, parentNodeId)) {
                     throw new IllegalArgumentException("目标目录不存在或无权访问");
                 }
+                if (!Objects.equals(parent.getKbId(), kbId))
+                    throw new IllegalArgumentException("目标目录与知识库不匹配");
                 if (!"folder".equals(parent.getNodeType())) {
                     throw new IllegalArgumentException("只能上传到文件夹中");
                 }
             }
 
+            String docId = documentService.uploadDocument(userId, file, kbId);
+
             int maxOrder = parentNodeId != null
                 ? Optional.ofNullable(directoryNodeMapper.selectByParentId(parentNodeId))
                     .map(list -> list.stream().mapToInt(DirectoryNode::getSortOrder).max().orElse(-1))
                     .orElse(-1)
-                : Optional.ofNullable(directoryNodeMapper.selectByUserId(userId))
+                : Optional.ofNullable(kbId == null
+                        ? directoryNodeMapper.selectByUserId(userId)
+                        : directoryNodeMapper.selectByKbId(kbId))
                     .map(list -> list.stream().filter(n -> n.getParentId() == null).mapToInt(DirectoryNode::getSortOrder).max().orElse(-1))
                     .orElse(-1);
 
@@ -94,6 +104,8 @@ public class DocumentController {
             result.put("status", "processing");
             return ResponseEntity.ok(result);
 
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
             log.error("Document upload failed", e);
             return ResponseEntity.badRequest().body(Map.of("error", "上传失败: " + e.getMessage()));
@@ -108,7 +120,7 @@ public class DocumentController {
     }
 
     @DeleteMapping("/{docId}")
-    @PreAuthorize("@sec.isDocumentOwner(#docId)")
+    @PreAuthorize("@sec.canWriteDocument(#docId)")
     public ResponseEntity<Map<String, String>> deleteDocument(@PathVariable String docId) {
         Long userId = getCurrentUserId();
         boolean success = documentService.deleteDocument(docId, userId);
@@ -124,15 +136,7 @@ public class DocumentController {
         Document document = documentService.getByDocId(docId);
         if (document == null) return ResponseEntity.status(404).build();
 
-        boolean isOwner = document.getUserId().equals(userId);
-        boolean isShared = !isOwner && directoryNodeMapper.selectCount(
-                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<DirectoryNode>()
-                    .eq(DirectoryNode::getDocId, docId)
-                    .eq(DirectoryNode::getIsShared, true)) > 0;
-        boolean isKbDoc = document.getKbId() != null;
-        if (!isOwner && !isShared && !isKbDoc) {
-            return ResponseEntity.status(403).build();
-        }
+        requireAccess(ownershipGuard.canReadDocument(userId, docId));
 
         try {
             String content = fileStorageService.readFileContent(document.getFilePath());
@@ -144,7 +148,7 @@ public class DocumentController {
     }
 
     @PostMapping("/{docId}/process")
-    @PreAuthorize("@sec.isDocumentOwner(#docId)")
+    @PreAuthorize("@sec.canWriteDocument(#docId)")
     public ResponseEntity<Map<String, String>> processDocument(@PathVariable String docId) {
         documentService.processDocument(docId);
         return ResponseEntity.ok(Map.of("message", "文档处理已启动"));
@@ -155,7 +159,7 @@ public class DocumentController {
             @RequestParam(value = "kbId", required = false) Long kbId) {
         Long userId = getCurrentUserId();
         if (userId == null) return ResponseEntity.status(401).build();
-        if (kbId != null) return ResponseEntity.ok(documentService.getDirectoryTreeByKbId(kbId));
+        if (kbId != null) return ResponseEntity.ok(documentService.getDirectoryTreeByKbId(userId, kbId));
         return ResponseEntity.ok(documentService.getDirectoryTree(userId));
     }
 
@@ -176,7 +180,7 @@ public class DocumentController {
     }
 
     @PutMapping("/directory/{id}/rename")
-    @PreAuthorize("@sec.isDirectoryNodeOwner(#id)")
+    @PreAuthorize("@sec.canAccessDirectoryNode(#id)")
     public ResponseEntity<Map<String, String>> renameNode(@PathVariable Long id,
                                                            @RequestBody Map<String, String> body) {
         Long userId = getCurrentUserId();
@@ -189,7 +193,7 @@ public class DocumentController {
     }
 
     @DeleteMapping("/directory/{id}")
-    @PreAuthorize("@sec.isDirectoryNodeOwner(#id)")
+    @PreAuthorize("@sec.canAccessDirectoryNode(#id)")
     public ResponseEntity<Map<String, String>> deleteDirectoryNode(@PathVariable Long id) {
         Long userId = getCurrentUserId();
         documentService.deleteDirectoryNode(userId, id);
@@ -197,7 +201,7 @@ public class DocumentController {
     }
 
     @PutMapping("/directory/{id}/move")
-    @PreAuthorize("@sec.isDirectoryNodeOwner(#id)")
+    @PreAuthorize("@sec.canAccessDirectoryNode(#id)")
     public ResponseEntity<Map<String, String>> moveNode(@PathVariable Long id,
                                                          @RequestBody Map<String, Object> body) {
         Long userId = getCurrentUserId();
@@ -231,6 +235,8 @@ public class DocumentController {
             @RequestBody GenerateMaterialsRequest req) {
         Long userId = getCurrentUserId();
         if (userId == null) return ResponseEntity.status(401).build();
+        requireAccess(ownershipGuard.canReadDocument(userId, req.getDocId()));
+        if (req.getClassId() != null) requireAccess(ownershipGuard.isClassOwner(req.getClassId()));
         req.setTeacherId(userId);
         GenerateMaterialsResponse result = materialGenerator.generate(req, userId);
         return ResponseEntity.ok(result);
@@ -253,8 +259,10 @@ public class DocumentController {
 
         Long classId = body.get("classId") instanceof Number n ? n.longValue() : null;
         if (classId == null) return ResponseEntity.badRequest().body(Map.of("error", "请选择班级"));
+        requireAccess(ownershipGuard.isClassOwner(classId));
 
         String docId = (String) body.get("docId");
+        if (docId != null) requireAccess(ownershipGuard.canReadDocument(userId, docId));
         GenerateMaterialsResponse.PreviewItem saved = materialGenerator.savePreview(
                 item, classId, userId, docId);
         return ResponseEntity.ok(Map.of("savedId", saved.getSavedId()));
@@ -266,6 +274,7 @@ public class DocumentController {
     public ResponseEntity<Map<String, Object>> listDrafts(@RequestParam String docId) {
         Long userId = getCurrentUserId();
         if (userId == null) return ResponseEntity.status(401).build();
+        requireAccess(ownershipGuard.canReadDocument(userId, docId));
 
         List<Map<String, Object>> previews = previewTaskMapper.findBySourceDocId(docId).stream()
                 .map(p -> Map.<String, Object>of(
@@ -309,9 +318,13 @@ public class DocumentController {
         Long userId = getCurrentUserId();
         if (userId == null) return ResponseEntity.status(401).build();
         if ("preview".equals(type)) {
+            requireAccess(ownershipGuard.isPreviewTaskOwner(id));
             previewTaskMapper.deleteById(id);
         } else if ("quiz".equals(type)) {
+            requireAccess(ownershipGuard.isInteractionDraftOwner(id));
             interactionMapper.deleteDraft(id);
+        } else {
+            return ResponseEntity.badRequest().body(Map.of("error", "不支持的草稿类型"));
         }
         return ResponseEntity.ok(Map.of("message", "已删除"));
     }
@@ -324,6 +337,7 @@ public class DocumentController {
 
         Long classId = body.get("classId") instanceof Number n ? n.longValue() : null;
         if (classId == null) return ResponseEntity.badRequest().body(Map.of("error", "请选择班级"));
+        requireAccess(ownershipGuard.isClassOwner(classId));
 
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> optionsRaw = (List<Map<String, Object>>) body.get("options");
@@ -343,6 +357,7 @@ public class DocumentController {
                 .timeLimit(body.get("timeLimit") instanceof Number n ? n.intValue() : null)
                 .build();
         String docId = (String) body.get("docId");
+        if (docId != null) requireAccess(ownershipGuard.canReadDocument(userId, docId));
         GenerateMaterialsResponse.QuizItem saved = materialGenerator.saveQuiz(item, classId, docId, userId);
         return ResponseEntity.ok(Map.of("savedId", saved.getSavedId()));
     }
@@ -354,5 +369,9 @@ public class DocumentController {
         if (auth == null || !auth.isAuthenticated() || auth.getDetails() == null) return null;
         if (auth.getDetails() instanceof Long uid) return uid;
         return null;
+    }
+
+    private void requireAccess(boolean allowed) {
+        if (!allowed) throw new BusinessException(ErrorCode.FORBIDDEN);
     }
 }

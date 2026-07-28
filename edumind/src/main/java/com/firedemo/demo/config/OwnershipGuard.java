@@ -41,6 +41,9 @@ public class OwnershipGuard {
     private final TeacherKnowledgeMapper teacherKnowledgeMapper;
     private final ClassroomSessionMapper sessionMapper;
     private final PreviewTaskMapper previewTaskMapper;
+    private final SharedKbMemberMapper sharedKbMemberMapper;
+    private final TeachingCalendarMapper teachingCalendarMapper;
+    private final InteractionMapper interactionMapper;
 
     // ───────────────────── 课堂会话 ─────────────────────
 
@@ -127,9 +130,37 @@ public class OwnershipGuard {
     public boolean isDocumentOwner(String docId) {
         Long userId = getCurrentUserId();
         if (userId == null || docId == null) return false;
-        Document doc = documentMapper.selectById(docId);
+        Document doc = documentMapper.selectByDocId(docId);
         if (doc == null) return false;
         return denyIfNotOwner(userId, doc.getUserId(), "文档", docId);
+    }
+
+    public boolean canReadDocument(String docId) {
+        return canReadDocument(getCurrentUserId(), docId);
+    }
+
+    public boolean canReadDocument(Long userId, String docId) {
+        if (userId == null || docId == null) return false;
+        Document doc = documentMapper.selectByDocId(docId);
+        if (doc == null) return false;
+        return userId.equals(doc.getUserId())
+                || (doc.getKbId() != null && canAccessKnowledgeBase(userId, doc.getKbId()))
+                || directoryNodeMapper.selectCount(
+                        new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<DirectoryNode>()
+                                .eq(DirectoryNode::getDocId, docId)
+                                .eq(DirectoryNode::getIsShared, true)) > 0;
+    }
+
+    public boolean canWriteDocument(String docId) {
+        return canWriteDocument(getCurrentUserId(), docId);
+    }
+
+    public boolean canWriteDocument(Long userId, String docId) {
+        if (userId == null || docId == null) return false;
+        Document doc = documentMapper.selectByDocId(docId);
+        if (doc == null) return false;
+        return userId.equals(doc.getUserId())
+                || (doc.getKbId() != null && canAccessKnowledgeBase(userId, doc.getKbId()));
     }
 
     // ───────────────────── 目录节点 ─────────────────────
@@ -142,6 +173,19 @@ public class OwnershipGuard {
         return denyIfNotOwner(userId, node.getUserId(), "目录节点", nodeId);
     }
 
+    public boolean canAccessDirectoryNode(Long nodeId) {
+        return canAccessDirectoryNode(getCurrentUserId(), nodeId);
+    }
+
+    public boolean canAccessDirectoryNode(Long userId, Long nodeId) {
+        if (userId == null || nodeId == null) return false;
+        DirectoryNode node = directoryNodeMapper.selectById(nodeId);
+        if (node == null) return false;
+        return node.getKbId() == null
+                ? userId.equals(node.getUserId())
+                : canAccessKnowledgeBase(userId, node.getKbId());
+    }
+
     // ───────────────────── 共享知识库 ─────────────────────
 
     public boolean isSharedKbOwner(Long kbId) {
@@ -150,6 +194,18 @@ public class OwnershipGuard {
         SharedKb kb = sharedKbMapper.selectById(kbId);
         if (kb == null) return false;
         return denyIfNotOwner(userId, kb.getOwnerId(), "共享知识库", kbId);
+    }
+
+    public boolean canAccessKnowledgeBase(Long kbId) {
+        return canAccessKnowledgeBase(getCurrentUserId(), kbId);
+    }
+
+    public boolean canAccessKnowledgeBase(Long userId, Long kbId) {
+        if (userId == null || kbId == null) return false;
+        return sharedKbMemberMapper.selectCount(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<SharedKbMember>()
+                        .eq(SharedKbMember::getKbId, kbId)
+                        .eq(SharedKbMember::getUserId, userId)) > 0;
     }
 
     // ───────────────────── 提交记录 ─────────────────────
@@ -176,6 +232,23 @@ public class OwnershipGuard {
         PreviewTask task = previewTaskMapper.selectById(taskId);
         if (task == null) return false;
         return denyIfNotOwner(userId, task.getTeacherId(), "预习任务", taskId);
+    }
+
+    public boolean isInteractionDraftOwner(Long interactionId) {
+        Long userId = getCurrentUserId();
+        if (userId == null || interactionId == null) return false;
+        Interaction interaction = interactionMapper.selectById(interactionId);
+        return interaction != null
+                && "DRAFT".equals(interaction.getStatus())
+                && isClassOwner(interaction.getClassId());
+    }
+
+    public boolean isTeachingCalendarOwner(Long planId) {
+        Long userId = getCurrentUserId();
+        if (userId == null || planId == null) return false;
+        TeachingCalendar plan = teachingCalendarMapper.selectById(planId);
+        if (plan == null) return false;
+        return denyIfNotOwner(userId, plan.getTeacherId(), "教学日历", planId);
     }
 
     // ───────────────────── 内部工具 ─────────────────────
