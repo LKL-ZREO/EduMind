@@ -29,7 +29,7 @@ cd edumind && docker compose up -d
 
 The app runs on `http://localhost:8080`. Swagger UI at `http://localhost:8080/swagger-ui.html`.
 
-Environment config: copy `edumind/.env.example` to `edumind/.env` and fill in required values (`DB_PASS`, `LIVE_SESSION_TOKEN_SECRET`, `LLM_API_KEY`, `ONEBOT_TOKEN`).
+Environment config: copy `edumind/.env.example` to `edumind/.env` and fill in required values (`DB_PASS`, `LIVE_SESSION_TOKEN_SECRET`, `LLM_API_KEY`, `ONEBOT_WS_TOKEN`).
 
 ### Frontend (`vue-project/`)
 
@@ -47,7 +47,7 @@ npm run format       # Prettier
 | Service | Purpose | Default Address |
 |---------|---------|-----------------|
 | OpenClaw | AI gateway (LLM API key management, model routing, tool calling) | `localhost:18789` |
-| OneBot/NapCat | QQ bot client | `localhost:3000` |
+| OneBot/NapCat | QQ bot WebSocket service | `localhost:3001` |
 
 ## Architecture
 

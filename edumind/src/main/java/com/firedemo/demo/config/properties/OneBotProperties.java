@@ -12,14 +12,7 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "onebot")
 public class OneBotProperties {
 
-    private Http http = new Http();
     private Ws ws = new Ws();
-
-    @Data
-    public static class Http {
-        private String url = "http://127.0.0.1:3000";
-        private String token = "";
-    }
 
     /**
      * WebSocket 正向连接配置 — Java 作为客户端连接 NapCat 接收 QQ 消息事件

@@ -41,7 +41,7 @@
 
 | 服务 | 说明 | 安装指南 |
 |------|------|---------|
-| **OneBot / NapCat** | QQ 机器人客户端，将 QQ 消息转发到 HTTP | 见下方 |
+| **OneBot / NapCat** | QQ 机器人客户端，通过 WebSocket 与应用双向通信 | 见下方 |
 
 > **LLM 调用**：默认直连模型 API（Kimi 等），无需额外网关。也可通过 `edumind.llm.backend=openclaw` 切回 OpenClaw 网关。
 
@@ -68,7 +68,7 @@ cp .env.example .env
 DB_PASS=你的数据库密码
 LIVE_SESSION_TOKEN_SECRET=$(openssl rand -base64 32)   # 学生课堂范围令牌
 LLM_API_KEY=你的LLM API密钥（如 Kimi API Key）
-ONEBOT_TOKEN=你的QQ机器人token
+ONEBOT_WS_TOKEN=你的QQ机器人token
 ```
 
 ### 3. 启动基础设施
@@ -98,9 +98,10 @@ curl http://localhost:18789/v1/models
 ### 5. 启动 OneBot / NapCat（QQ 机器人）
 
 1. 下载 [NapCat](https://github.com/NapNeko/NapCatQQ)
-2. 配置 HTTP 服务端：
-   - 地址：`http://127.0.0.1:3000`
-   - Token：与 `.env` 中 `ONEBOT_TOKEN` 一致
+2. 在 NapCat WebUI 的网络配置中，新建并启用 **WebSocket 服务端（正向 WS）**：
+   - 监听地址：`0.0.0.0`
+   - 端口：`3001`
+   - Access Token：与 `.env` 中 `ONEBOT_WS_TOKEN` 一致
 3. 扫码登录 QQ
 
 ### 6. 导入数据库
@@ -143,8 +144,8 @@ npm run dev
 | `EDUMIND_LLM_BACKEND` | LLM 后端模式（`built-in`/`openclaw`） | `built-in` |
 | `OPENCLAW_API_KEY` | OpenClaw API Key（仅 openclaw 模式） | 可选 |
 | `OPENCLAW_BASE_URL` | OpenClaw 地址（仅 openclaw 模式） | `http://localhost:18789/v1` |
-| `ONEBOT_TOKEN` | QQ 机器人 Token | **必填** |
-| `ONEBOT_HTTP_URL` | OneBot HTTP 地址 | `http://127.0.0.1:3000` |
+| `ONEBOT_WS_URL` | OneBot WebSocket 地址 | Compose：`ws://host.docker.internal:3001`；本地直跑：`ws://127.0.0.1:3001` |
+| `ONEBOT_WS_TOKEN` | OneBot WebSocket Access Token | **必填** |
 | `STORAGE_TYPE` | 文件存储类型 | `local`（`s3` 用 MinIO） |
 | `S3_ENDPOINT` | S3 端点 | `http://localhost:9000` |
 | `S3_ACCESS_KEY` | S3 Access Key | `minioadmin` |

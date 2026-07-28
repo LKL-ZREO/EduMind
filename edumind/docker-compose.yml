@@ -117,8 +117,6 @@ services:
       HELICONE_GATEWAY_URL: ${HELICONE_GATEWAY_URL:-https://gateway.helicone.ai/v1}
       HELICONE_OMIT_CONTENT: ${HELICONE_OMIT_CONTENT:-true}
       HELICONE_ENVIRONMENT: ${HELICONE_ENVIRONMENT:-production}
-      ONEBOT_HTTP_URL: http://host.docker.internal:3000
-      ONEBOT_HTTP_TOKEN: ${ONEBOT_TOKEN:-change-me}
       ONEBOT_WS_URL: ${ONEBOT_WS_URL:-ws://host.docker.internal:3001}
       ONEBOT_WS_TOKEN: ${ONEBOT_WS_TOKEN:-change-me}
       AI_MODEL_DIR: ${AI_MODEL_DIR:-/app/models}
