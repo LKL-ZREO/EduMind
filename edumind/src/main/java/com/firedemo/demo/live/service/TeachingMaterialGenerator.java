@@ -1,9 +1,9 @@
 package com.firedemo.demo.live.service;
 
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.firedemo.demo.DTO.GenerateMaterialsRequest;
 import com.firedemo.demo.DTO.GenerateMaterialsResponse;
+import com.firedemo.demo.DTO.QuizGenerationResult;
 import com.firedemo.demo.Entity.ClassInfo;
 import com.firedemo.demo.Entity.Document;
 import com.firedemo.demo.Entity.Interaction;
@@ -14,6 +14,8 @@ import com.firedemo.demo.Service.OpenClawService;
 import com.firedemo.demo.common.exception.BusinessException;
 import com.firedemo.demo.common.exception.ErrorCode;
 import com.firedemo.demo.infrastructure.prompt.PromptLoader;
+import com.firedemo.demo.infrastructure.ai.StructuredOutputInvoker;
+import com.firedemo.demo.infrastructure.ai.StructuredOutputValidationException;
 import com.firedemo.demo.mapper.ClassInfoMapper;
 import com.firedemo.demo.mapper.DocumentMapper;
 import com.firedemo.demo.mapper.InteractionMapper;
@@ -27,7 +29,6 @@ import reactor.core.publisher.Flux;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -43,6 +44,7 @@ public class TeachingMaterialGenerator {
     private final FileStorageService fileStorageService;
     private final PromptLoader promptLoader;
     private final ObjectMapper objectMapper;
+    private final StructuredOutputInvoker structuredOutputInvoker;
     private final PreviewTaskMapper previewTaskMapper;
     private final InteractionMapper interactionMapper;
     private final DocumentMapper documentMapper;
@@ -78,65 +80,53 @@ public class TeachingMaterialGenerator {
         String quizPrompt = promptLoader.load("ppt-quiz-generation.txt")
                 .replace("{{content}}", content);
 
-        CompletableFuture<String> previewFuture = CompletableFuture.supplyAsync(() -> {
+        CompletableFuture<GenerateMaterialsResponse.PreviewItem> previewFuture = CompletableFuture.supplyAsync(() -> {
             try {
-                String json = openClawService.chat(previewPrompt, null);
-                log.info("预习作业生成完成，长度={}", json != null ? json.length() : 0);
-                return json;
+                return structuredOutputInvoker.invoke(
+                        p -> openClawService.chat(p, null), previewPrompt,
+                        GenerateMaterialsResponse.PreviewItem.class, "ppt-preview-generation",
+                        this::validatePreview);
             } catch (Exception e) {
                 log.error("预习作业生成失败", e);
                 return null;
             }
         }, AI_EXECUTOR);
 
-        CompletableFuture<String> quizFuture = CompletableFuture.supplyAsync(() -> {
+        CompletableFuture<QuizGenerationResult> quizFuture = CompletableFuture.supplyAsync(() -> {
             try {
-                String json = openClawService.chat(quizPrompt, null);
-                log.info("课堂试题生成完成，长度={}", json != null ? json.length() : 0);
-                return json;
+                return structuredOutputInvoker.invoke(
+                        p -> openClawService.chat(p, null), quizPrompt,
+                        QuizGenerationResult.class, "ppt-quiz-generation",
+                        result -> validateQuizzes(result.getQuizzes()));
             } catch (Exception e) {
                 log.error("课堂试题生成失败", e);
                 return null;
             }
         }, AI_EXECUTOR);
 
-        String previewJson = null;
-        String quizJson = null;
+        GenerateMaterialsResponse.PreviewItem preview = null;
+        QuizGenerationResult quizResult = null;
         try {
-            previewJson = previewFuture.get(AI_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            preview = previewFuture.get(AI_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         } catch (Exception e) {
             log.error("预习作业生成超时或异常", e);
         }
         try {
-            quizJson = quizFuture.get(AI_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            quizResult = quizFuture.get(AI_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         } catch (Exception e) {
             log.error("课堂试题生成超时或异常", e);
         }
 
-        GenerateMaterialsResponse.PreviewItem preview = null;
-        List<GenerateMaterialsResponse.QuizItem> quizzes = List.of();
+        List<GenerateMaterialsResponse.QuizItem> quizzes = quizResult != null
+                ? quizResult.getQuizzes() : List.of();
         String previewError = null;
         String quizError = null;
 
-        if (previewJson != null && !previewJson.isBlank()) {
-            try {
-                preview = parsePreview(previewJson);
-            } catch (Exception e) {
-                log.error("解析预习作业结果失败", e);
-                previewError = "预习作业解析失败: " + e.getMessage();
-            }
-        } else {
+        if (preview == null) {
             previewError = "预习作业生成失败，请重试";
         }
 
-        if (quizJson != null && !quizJson.isBlank()) {
-            try {
-                quizzes = parseQuizzes(quizJson);
-            } catch (Exception e) {
-                log.error("解析课堂试题结果失败", e);
-                quizError = "课堂试题解析失败: " + e.getMessage();
-            }
-        } else {
+        if (quizResult == null) {
             quizError = "课堂试题生成失败，请重试";
         }
 
@@ -281,105 +271,38 @@ public class TeachingMaterialGenerator {
         return value == null || value.isBlank() ? fallback : value;
     }
 
-    private GenerateMaterialsResponse.PreviewItem parsePreview(String raw) {
-        try {
-            String jsonPart;
-            String guidePart;
-            int split = raw.indexOf("===GUIDE===");
-            if (split >= 0) {
-                jsonPart = raw.substring(0, split);
-                guidePart = raw.substring(split + "===GUIDE===".length()).trim();
-            } else {
-                jsonPart = raw;
-                guidePart = "";
-            }
-
-            String json = extractJson(jsonPart);
-            Map<String, Object> map = objectMapper.readValue(json, new TypeReference<>() {});
-            return GenerateMaterialsResponse.PreviewItem.builder()
-                    .topic((String) map.getOrDefault("topic", ""))
-                    .guideText(guidePart.isEmpty() ? (String) map.getOrDefault("guideText", "") : guidePart)
-                    .questions(parseQuestions(map.get("questions")))
-                    .discussionQuestion((String) map.getOrDefault("discussionQuestion", ""))
-                    .build();
-        } catch (Exception e) {
-            log.error("解析预习作业JSON失败: {}", e.getMessage());
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR.getCode(), "AI生成结果解析失败，请重试");
-        }
+    private void validatePreview(GenerateMaterialsResponse.PreviewItem preview) {
+        validateQuestions(preview.getQuestions(), "questions");
     }
 
-    @SuppressWarnings("unchecked")
-    private List<GenerateMaterialsResponse.QuestionItem> parseQuestions(Object obj) {
-        if (!(obj instanceof List<?> list)) return List.of();
-        List<GenerateMaterialsResponse.QuestionItem> result = new ArrayList<>();
-        for (Object item : list) {
-            Map<String, Object> m = (Map<String, Object>) item;
-            result.add(GenerateMaterialsResponse.QuestionItem.builder()
-                    .type((String) m.getOrDefault("type", "CHOICE"))
-                    .question((String) m.getOrDefault("question", ""))
-                    .options(parseOptions(m.get("options")))
-                    .correctKey((String) m.getOrDefault("correctKey", ""))
-                    .build());
+    private void validateQuizzes(List<GenerateMaterialsResponse.QuizItem> quizzes) {
+        List<String> violations = new ArrayList<>();
+        for (int i = 0; i < quizzes.size(); i++) {
+            validateChoiceAnswer(quizzes.get(i).getType(), quizzes.get(i).getOptions(),
+                    quizzes.get(i).getCorrectKey(), "quizzes[" + i + "]", violations);
         }
-        return result;
+        if (!violations.isEmpty()) throw new StructuredOutputValidationException(violations);
     }
 
-    @SuppressWarnings("unchecked")
-    private List<GenerateMaterialsResponse.QuizItem> parseQuizzes(String raw) {
-        try {
-            String json = extractJson(raw);
-            List<Map<String, Object>> list = objectMapper.readValue(json, new TypeReference<>() {});
-            List<GenerateMaterialsResponse.QuizItem> result = new ArrayList<>();
-            for (Map<String, Object> m : list) {
-                result.add(GenerateMaterialsResponse.QuizItem.builder()
-                        .type((String) m.getOrDefault("type", "CHOICE"))
-                        .title((String) m.getOrDefault("title", ""))
-                        .options(parseOptions(m.get("options")))
-                        .correctKey((String) m.getOrDefault("correctKey", ""))
-                        .knowledgePoint((String) m.getOrDefault("knowledgePoint", ""))
-                        .difficulty((String) m.getOrDefault("difficulty", "medium"))
-                        .timeLimit(m.get("timeLimit") instanceof Number n ? n.intValue() : null)
-                        .build());
-            }
-            return result;
-        } catch (Exception e) {
-            log.error("解析课堂试题JSON失败: {}", e.getMessage());
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR.getCode(), "AI生成结果解析失败，请重试");
+    private void validateQuestions(List<GenerateMaterialsResponse.QuestionItem> questions, String path) {
+        List<String> violations = new ArrayList<>();
+        for (int i = 0; i < questions.size(); i++) {
+            validateChoiceAnswer(questions.get(i).getType(), questions.get(i).getOptions(),
+                    questions.get(i).getCorrectKey(), path + "[" + i + "]", violations);
         }
+        if (!violations.isEmpty()) throw new StructuredOutputValidationException(violations);
     }
 
-    @SuppressWarnings("unchecked")
-    private List<GenerateMaterialsResponse.OptionItem> parseOptions(Object obj) {
-        if (!(obj instanceof List<?> list)) return null;
-        List<GenerateMaterialsResponse.OptionItem> result = new ArrayList<>();
-        for (Object item : list) {
-            Map<String, Object> m = (Map<String, Object>) item;
-            result.add(GenerateMaterialsResponse.OptionItem.builder()
-                    .key((String) m.getOrDefault("key", ""))
-                    .text((String) m.getOrDefault("text", ""))
-                    .build());
+    private void validateChoiceAnswer(String type, List<GenerateMaterialsResponse.OptionItem> options,
+                                      String correctKey, String path, List<String> violations) {
+        if (!"CHOICE".equals(type)) return;
+        if (options == null || options.size() < 2) {
+            violations.add(path + ".options: choice requires at least two options");
+            return;
         }
-        return result.isEmpty() ? null : result;
-    }
-
-    private String extractJson(String raw) {
-        if (raw == null) return "{}";
-        String s = raw.trim();
-        if (s.startsWith("```")) {
-            int nl = s.indexOf('\n');
-            s = nl >= 0 ? s.substring(nl + 1).trim() : s.substring(3).trim();
+        if (options.stream().noneMatch(option -> option.getKey().equals(correctKey))) {
+            violations.add(path + ".correctKey: must reference an option");
         }
-        if (s.endsWith("```")) s = s.substring(0, s.length() - 3).trim();
-
-        int start = s.indexOf('{');
-        int end = s.lastIndexOf('}');
-        int arrStart = s.indexOf('[');
-        if (arrStart >= 0 && arrStart < (start >= 0 ? start : Integer.MAX_VALUE)) {
-            start = arrStart;
-            end = s.lastIndexOf(']');
-        }
-        if (start >= 0 && end > start) return s.substring(start, end + 1);
-        return s;
     }
 
     private String toJson(Object obj) {

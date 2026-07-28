@@ -4,12 +4,14 @@ import com.firedemo.demo.DTO.EvaluationResultDTO;
 import com.firedemo.demo.Entity.Submission;
 import com.firedemo.demo.Service.OpenClawService;
 import com.firedemo.demo.infrastructure.ai.StructuredOutputInvoker;
+import com.firedemo.demo.infrastructure.ai.StructuredOutputValidationException;
 import com.firedemo.demo.infrastructure.prompt.PromptLoader;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
 import java.util.Collections;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -63,7 +65,8 @@ public class GradingWorkflow {
                                 p -> openClawService.chat(p, "grading_grade_" + state.getSubmissionId()),
                                 prompt,
                                 EvaluationResultDTO.class,
-                                "DAG-GRADE submissionId=" + state.getSubmissionId());
+                                "DAG-GRADE submissionId=" + state.getSubmissionId(),
+                                this::validateGradeResult);
                         state.setGradeResult(result);
                         return "graded";
                     } catch (Exception e) {
@@ -94,7 +97,8 @@ public class GradingWorkflow {
                                 p -> openClawService.chat(p, "grading_error_" + state.getSubmissionId()),
                                 prompt,
                                 EvaluationResultDTO.class,
-                                "DAG-ERROR submissionId=" + state.getSubmissionId());
+                                "DAG-ERROR submissionId=" + state.getSubmissionId(),
+                                output -> requireList("errors", output.getErrors()));
                         state.setErrors(result.getErrors() != null
                                 ? result.getErrors() : Collections.emptyList());
                         return "analyzed";
@@ -118,7 +122,8 @@ public class GradingWorkflow {
                                 p -> openClawService.chat(p, "grading_sug_" + state.getSubmissionId()),
                                 prompt,
                                 EvaluationResultDTO.class,
-                                "DAG-SUGGEST submissionId=" + state.getSubmissionId());
+                                "DAG-SUGGEST submissionId=" + state.getSubmissionId(),
+                                output -> requireList("suggestions", output.getSuggestions()));
                         state.setSuggestions(result.getSuggestions() != null
                                 ? result.getSuggestions() : Collections.emptyList());
                         state.setCompleted(true);
@@ -180,6 +185,28 @@ public class GradingWorkflow {
         result.setSuggestions(state.getSuggestions() != null ? state.getSuggestions() : Collections.emptyList());
 
         return result;
+    }
+
+    private void validateGradeResult(EvaluationResultDTO result) {
+        List<String> violations = new ArrayList<>();
+        if (result.getTotalScore() == null) violations.add("totalScore: is required");
+        if (result.getContentScore() == null) violations.add("contentScore: is required");
+        if (result.getFormatScore() == null) violations.add("formatScore: is required");
+        if (result.getMaxScore() == null) violations.add("maxScore: is required");
+        if (result.getOverallComment() == null || result.getOverallComment().isBlank()) {
+            violations.add("overallComment: is required");
+        }
+        if (result.getTotalScore() != null && result.getMaxScore() != null
+                && result.getTotalScore() > result.getMaxScore()) {
+            violations.add("totalScore: must not exceed maxScore");
+        }
+        if (!violations.isEmpty()) throw new StructuredOutputValidationException(violations);
+    }
+
+    private void requireList(String field, List<?> value) {
+        if (value == null) {
+            throw new StructuredOutputValidationException(List.of(field + ": is required"));
+        }
     }
 
     // ==================== Prompt 构建 ====================

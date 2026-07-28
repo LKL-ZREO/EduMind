@@ -316,7 +316,7 @@
             <div
               v-if="selectedNode.content"
               class="markdown-preview"
-              v-html="renderContent(selectedNode.content)"
+              v-html="renderMarkdown(selectedNode.content)"
             />
             <div v-else class="content-empty">
               <el-icon :size="48" color="#dcdfe6"><Tickets /></el-icon>
@@ -552,7 +552,7 @@
         <div
           v-if="draftDetail.data.guideText"
           class="gen-guide"
-          v-html="markdownToHtml(draftDetail.data.guideText)"
+          v-html="renderMarkdown(draftDetail.data.guideText)"
         ></div>
         <div v-if="draftDetail.data.discussionQuestion">
           <p><strong>课堂讨论：</strong>{{ draftDetail.data.discussionQuestion }}</p>
@@ -682,7 +682,7 @@
                   <div
                     class="gen-guide"
                     style="margin-top: 8px; padding: 8px; background: #fafafa; border-radius: 4px"
-                    v-html="markdownToHtml(genEdit.previewGuide)"
+                    v-html="renderMarkdown(genEdit.previewGuide)"
                   ></div>
                 </details>
 
@@ -845,6 +845,7 @@ import {
 import type { AllowDropType, ElTree, UploadFile, UploadFiles, UploadUserFile } from 'element-plus'
 import request from '@/api/request'
 import { getApiErrorMessage } from '@/api/errors'
+import { renderMarkdown } from '@/utils/safeHtml'
 
 /* ===== Types ===== */
 interface FlatNode {
@@ -1594,40 +1595,10 @@ function typeLabelZh(type: string) {
   return TYPE_LABELS[type] ?? type
 }
 
-function markdownToHtml(md: string): string {
-  if (!md) return ''
-  return md
-    .replace(/^### (.+)$/gm, '<h3>$1</h3>')
-    .replace(/^## (.+)$/gm, '<h2>$1</h2>')
-    .replace(/^# (.+)$/gm, '<h1>$1</h1>')
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/`(.+?)`/g, '<code>$1</code>')
-    .replace(/- (.+)/g, '<li>$1</li>')
-    .replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>')
-    .replace(/\n\n/g, '</p><p>')
-    .replace(/^(.+)$/gm, (m) => (m.startsWith('<') ? m : m))
-}
-
 /* ===== Utils ===== */
 function countItems(node: TreeNode, type: 'folder' | 'file') {
   if (!node.children) return 0
   return node.children.filter((c) => c.type === type).length
-}
-function renderContent(content: string): string {
-  return (
-    '<p>' +
-    content
-      .replace(/^### (.+)$/gm, '<h3>$1</h3>')
-      .replace(/^## (.+)$/gm, '<h2>$1</h2>')
-      .replace(/^# (.+)$/gm, '<h1>$1</h1>')
-      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-      .replace(/`(.+?)`/g, '<code>$1</code>')
-      .replace(/- (.+)/g, '<li>$1</li>')
-      .replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>')
-      .replace(/\n\n/g, '</p><p>')
-      .replace(/^(.+)$/gm, (m) => (m.startsWith('<') ? m : m)) +
-    '</p>'
-  )
 }
 </script>
 

@@ -5,6 +5,7 @@ import 'katex/dist/katex.min.css'
 import { RouterLink } from 'vue-router'
 import request from '@/api/request'
 import { getApiErrorData, getApiErrorMessage } from '@/api/errors'
+import { sanitizeHtml, sanitizeRenderedMathHtml } from '@/utils/safeHtml'
 
 interface ClassOption {
   id: number
@@ -66,7 +67,7 @@ const selectedTask = computed(() => {
 
 // 作业描述 HTML 渲染（含 KaTeX 公式）
 const renderedDescription = computed(() => {
-  const html = selectedTask.value?.description || ''
+  const html = sanitizeHtml(selectedTask.value?.description)
   if (!html) return ''
   // 用临时 DOM 解析 HTML，将 math-inline 的 data-latex 渲染为 KaTeX
   const div = document.createElement('div')
@@ -81,7 +82,7 @@ const renderedDescription = computed(() => {
       }
     }
   })
-  return div.innerHTML
+  return sanitizeRenderedMathHtml(div.innerHTML)
 })
 
 // 切换作业时若描述已有 HTML，后续 watch 会处理

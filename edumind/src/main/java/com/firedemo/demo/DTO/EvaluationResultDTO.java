@@ -1,8 +1,11 @@
 package com.firedemo.demo.DTO;
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Size;
 
 import java.util.List;
 
@@ -10,19 +13,22 @@ import java.util.List;
  * 作业评价结果DTO（OpenClaw返回的JSON格式）
  */
 @Data
-@JsonIgnoreProperties(ignoreUnknown = true)
 public class EvaluationResultDTO {
 
     @JsonProperty("totalScore")
+    @Min(0) @Max(100)
     private Integer totalScore;
 
     @JsonProperty("contentScore")
+    @Min(0) @Max(100)
     private Integer contentScore;
 
     @JsonProperty("formatScore")
+    @Min(0) @Max(100)
     private Integer formatScore;
 
     @JsonProperty("maxScore")
+    @Min(1) @Max(100)
     private Integer maxScore;
 
     @JsonProperty("grade")
@@ -32,21 +38,27 @@ public class EvaluationResultDTO {
     private String overallComment;
 
     @JsonProperty("strengths")
+    @Size(max = 20)
     private List<String> strengths;
 
     @JsonProperty("weaknesses")
+    @Size(max = 20)
     private List<String> weaknesses;
 
     @JsonProperty("suggestions")
+    @Valid @Size(max = 20)
     private List<SuggestionItem> suggestions;
 
     @JsonProperty("errors")
+    @Valid @Size(max = 50)
     private List<ErrorItem> errors;
 
     @JsonProperty("knowledgePoints")
+    @Valid @Size(max = 30)
     private List<KnowledgePointItem> knowledgePoints;
 
     @JsonProperty("scoringDetails")
+    @Valid @Size(max = 20)
     private List<ScoringDetailItem> scoringDetails;
 
     /**
@@ -65,7 +77,6 @@ public class EvaluationResultDTO {
      * 错误项
      */
     @Data
-    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class ErrorItem {
         private Integer line;
         private String type;
@@ -81,6 +92,7 @@ public class EvaluationResultDTO {
     @Data
     public static class KnowledgePointItem {
         private String name;
+        @Min(0) @Max(100)
         private Integer mastery;
         private String status;
     }
@@ -91,7 +103,9 @@ public class EvaluationResultDTO {
     @Data
     public static class ScoringDetailItem {
         private String dimension;
+        @Min(0) @Max(100)
         private Integer score;
+        @Min(0) @Max(100)
         private Integer maxScore;
         private String comment;
     }

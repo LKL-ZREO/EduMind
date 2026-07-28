@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.firedemo.demo.DTO.PreviewTaskDTO;
+import com.firedemo.demo.DTO.PreviewTaskGenerationResult;
 import com.firedemo.demo.Entity.ClassInfo;
 import com.firedemo.demo.Entity.PreviewTask;
 import com.firedemo.demo.Service.OpenClawService;
@@ -11,6 +12,8 @@ import com.firedemo.demo.Service.PreviewTaskService;
 import com.firedemo.demo.common.exception.BusinessException;
 import com.firedemo.demo.common.exception.ErrorCode;
 import com.firedemo.demo.live.service.LiveNotificationService;
+import com.firedemo.demo.infrastructure.ai.StructuredOutputInvoker;
+import com.firedemo.demo.infrastructure.ai.StructuredOutputValidationException;
 import com.firedemo.demo.mapper.ClassInfoMapper;
 import com.firedemo.demo.mapper.PreviewTaskMapper;
 import lombok.RequiredArgsConstructor;
@@ -18,10 +21,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
-import java.util.Map;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -32,6 +33,7 @@ public class PreviewTaskServiceImpl implements PreviewTaskService {
     private final PreviewTaskMapper mapper;
     private final ClassInfoMapper classInfoMapper;
     private final OpenClawService openClawService;
+    private final StructuredOutputInvoker structuredOutputInvoker;
     private final ObjectMapper objectMapper;
     private final LiveNotificationService liveNotificationService;
 
@@ -46,15 +48,10 @@ public class PreviewTaskServiceImpl implements PreviewTaskService {
                 ? topic : "预习：" + knowledgePoint;
 
         // ── 调用 AI 生成全部内容 ──
-        String raw = generateWithAI(knowledgePoint, classInfo.getName());
-        Map<String, Object> aiResult = parseAIResult(raw);
-
-        String guideText = (String) aiResult.getOrDefault("guide", "");
-        String discussion = (String) aiResult.getOrDefault("discussion", "");
-
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> questionsRaw = (List<Map<String, Object>>) aiResult.get("questions");
-        String questionsJson = toJson(questionsRaw);
+        PreviewTaskGenerationResult aiResult = generateWithAI(knowledgePoint, classInfo.getName());
+        String guideText = aiResult.getGuide();
+        String discussion = aiResult.getDiscussion();
+        String questionsJson = toJson(aiResult.getQuestions());
 
         PreviewTask task = PreviewTask.builder()
                 .classId(classId).teacherId(teacherId).title(title)
@@ -99,7 +96,7 @@ public class PreviewTaskServiceImpl implements PreviewTaskService {
 
     // ── AI 生成 ──
 
-    private String generateWithAI(String knowledgePoint, String className) {
+    private PreviewTaskGenerationResult generateWithAI(String knowledgePoint, String className) {
         String prompt = String.format(
                 "你是一位资深教师，正在为「%s」班级准备课前预习材料。知识点：%s\n\n" +
                 "请生成以下内容，严格按JSON格式输出（不要markdown代码块）：\n" +
@@ -115,34 +112,28 @@ public class PreviewTaskServiceImpl implements PreviewTaskService {
                 "要求：题目难度适中，覆盖知识点的核心概念；选项要有干扰性；解析要清晰易懂。",
                 className, knowledgePoint);
 
-        String raw = openClawService.chat(prompt, "preview_gen");
-        if (raw == null || raw.isBlank())
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR.getCode(), "AI生成失败，请重试");
-        return raw;
-    }
-
-    private Map<String, Object> parseAIResult(String raw) {
         try {
-            String json = extractJson(raw);
-            return objectMapper.readValue(json, new TypeReference<Map<String, Object>>() {});
+            return structuredOutputInvoker.invoke(
+                    p -> openClawService.chat(p, "preview_gen"), prompt,
+                    PreviewTaskGenerationResult.class, "preview-task-generation",
+                    this::validatePreviewTask);
         } catch (Exception e) {
-            log.error("解析AI预习任务结果失败: {}", e.getMessage());
-            // 降级：返回基础内容
-            return Map.of(
-                    "guide", "请预习「" + "相关知识点" + "」相关内容，思考核心概念和应用场景。",
-                    "questions", List.of(),
-                    "discussion", "你对这个知识点有什么疑问？请带着问题来上课。"
-            );
+            log.error("AI预习任务生成失败: {}", e.getMessage());
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR.getCode(), "AI生成失败，请重试");
         }
     }
 
-    private String extractJson(String raw) {
-        if (raw == null) return "{}";
-        String s = raw.trim();
-        int start = s.indexOf('{');
-        int end = s.lastIndexOf('}');
-        if (start >= 0 && end > start) return s.substring(start, end + 1);
-        return s;
+    private void validatePreviewTask(PreviewTaskGenerationResult result) {
+        List<String> violations = new java.util.ArrayList<>();
+        for (int i = 0; i < result.getQuestions().size(); i++) {
+            PreviewTaskGenerationResult.Question question = result.getQuestions().get(i);
+            if (question.getOptions() != null && !question.getOptions().isEmpty()) {
+                boolean answerExists = question.getOptions().stream()
+                        .anyMatch(option -> option.getKey().equals(question.getCorrectKey()));
+                if (!answerExists) violations.add("questions[" + i + "].correctKey: must reference an option");
+            }
+        }
+        if (!violations.isEmpty()) throw new StructuredOutputValidationException(violations);
     }
 
     private String toJson(Object obj) {

@@ -13,7 +13,7 @@
       <!-- 导读材料 -->
       <section class="guide-card">
         <h2>📋 课前导读</h2>
-        <div class="guide-body markdown-body" v-html="renderMd(task.guideText)"></div>
+        <div class="guide-body markdown-body" v-html="renderMarkdown(task.guideText)"></div>
       </section>
 
       <!-- 自测题 -->
@@ -69,18 +69,13 @@
 import { ref, reactive, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { getPreviewTask, type PreviewTaskDTO } from '../api/preview'
-import { marked } from 'marked'
+import { renderMarkdown } from '@/utils/safeHtml'
 
 const route = useRoute()
 const task = ref<PreviewTaskDTO | null>(null)
 const loading = ref(true)
 const selections = reactive<Record<number, string>>({})
 const revealed = reactive<Record<number, boolean>>({})
-
-function renderMd(text: string) {
-  if (!text) return ''
-  return marked.parse(text) as string
-}
 
 function selectOption(qi: number, key: string) {
   if (revealed[qi]) return

@@ -195,7 +195,8 @@ npm run test                                   # Vitest 单元测试
 项目内置了完整的可观测性栈：
 
 - **`/actuator/prometheus`** — JVM、HTTP、RAG 检索等指标
-- **Grafana Dashboard** — JVM 内存/GC、API QPS/延迟、5xx 错误率、RAG 耗时
+- **Grafana Dashboard** — JVM 内存/GC、API QPS/延迟、5xx 错误率、RAG 耗时与最新质量分数
+- **结构化输出可靠性** — JSON 严格解析/修复/语义校验/重试结果与 Repair p95
 - **结构化日志** — JSON 格式，自动携带 `requestId` + `userId`
 - **Request ID 追踪** — 每个请求贯穿 Nginx → 应用 → 响应头
 
@@ -208,14 +209,39 @@ grafana.bat
 
 ## 📊 RAG 评测
 
-项目包含 15 条 C 语言知识点的检索评测数据集和自动化评测脚本：
+评测链路运行真实的“检索 → 生成 → LLM-as-Judge”流程，不会拿参考答案冒充模型答案。每次运行都会保存数据集 SHA-256、Git 提交、模型与 Top-K/Reranker 配置，以及逐题的参考答案、生成答案、召回证据、分数和耗时。
+
+指标包括 Keyword Recall、Content Coverage、Hit Rate、MRR、nDCG、Faithfulness 和 Answer Relevancy；默认阈值由 `RAG_EVAL_MIN_*` 环境变量配置。任意评测用例报错或所选指标低于阈值时，`qualityGatePassed` 为 `false`，真实管线测试会直接失败。
 
 ```bash
 cd edumind
-EVALUATION_ENABLED=true ./mvnw test -Dtest="RagEvalRunner"
+# Bash
+EVALUATION_ENABLED=true ./mvnw test -Dtest="RagEvalRunner" -Dspring.profiles.active=local
+
+# PowerShell
+$env:EVALUATION_ENABLED="true"
+.\mvnw.cmd --% test -Dtest=RagEvalRunner -Dspring.profiles.active=local
 ```
 
-评测指标：Keyword Recall@5、Content Coverage@5、MRR（Mean Reciprocal Rank）。
+也可以通过 API 发起实验并查看历史：
+
+```http
+POST /api/eval/run
+Content-Type: application/json
+
+{
+  "metrics": ["keyword_recall", "content_coverage", "hit_rate", "mrr", "ndcg", "faithfulness", "answer_relevancy"],
+  "topK": 5,
+  "enableReranker": true,
+  "generateAnswers": true,
+  "datasetVersion": "rag-eval-v1"
+}
+
+GET /api/eval/runs?limit=20
+GET /api/eval/runs/{runId}
+```
+
+Prometheus 暴露 `edumind_rag_eval_score{metric="..."}` 和 `edumind_rag_eval_runs_total{outcome="..."}`；Grafana 的 AI/RAG Dashboard 展示最新质量分数与通过、门禁失败、运行错误次数。
 
 ---
 

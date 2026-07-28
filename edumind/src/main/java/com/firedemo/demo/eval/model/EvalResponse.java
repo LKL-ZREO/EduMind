@@ -20,10 +20,14 @@ import java.util.Map;
 public class EvalResponse {
 
     private String status;
+    private Long runId;
+    private EvalRunConfig config;
     private Map<String, Double> summary;
-    private List<Map<String, Double>> perCase;
+    private List<EvalCaseResult> perCase;
     private int numCases;
     private double evalDurationSeconds;
+    private boolean qualityGatePassed;
+    private List<String> qualityGateFailures;
     private String error;
 
     public boolean isOk() {
@@ -31,11 +35,11 @@ public class EvalResponse {
     }
 
     public Double faithfulness() {
-        return summary != null ? summary.get("faithfulness") : null;
+        return summary != null ? summary.getOrDefault("faithfulness", summary.get("faithfulness_pct")) : null;
     }
 
     public Double answerRelevancy() {
-        return summary != null ? summary.get("answer_relevancy") : null;
+        return summary != null ? summary.getOrDefault("answer_relevancy", summary.get("answer_relevancy_pct")) : null;
     }
 
     public Double contextPrecision() {
