@@ -31,7 +31,7 @@ class SmartChunkServiceTest {
 
     @BeforeEach
     void setUp() {
-        when(embeddingService.embed(anyString())).thenReturn(FAKE_EMBEDDING);
+        when(embeddingService.embedDocument(anyString())).thenReturn(FAKE_EMBEDDING);
     }
 
     @Nested

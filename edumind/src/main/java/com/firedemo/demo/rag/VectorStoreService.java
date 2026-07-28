@@ -46,13 +46,6 @@ public class VectorStoreService {
     }
 
     /**
-     * 保存文档块（兼容旧调用，不传用户信息）
-     */
-    public void saveChunks(String documentId, List<DocumentChunk> chunks) {
-        saveChunks(documentId, chunks, null, null);
-    }
-
-    /**
      * 保存文档块（带用户隔离信息）
      *
      * @param documentId 文档ID

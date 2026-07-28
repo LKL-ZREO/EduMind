@@ -66,7 +66,7 @@ public class SmartChunkService {
 
         // 4. 生成嵌入向量
         chunks.forEach(chunk -> {
-            chunk.setEmbedding(embeddingService.embed(chunk.getContent()));
+            chunk.setEmbedding(embeddingService.embedDocument(chunk.getContent()));
         });
 
         log.info("Chunked {} into {} chunks", docType, chunks.size());
