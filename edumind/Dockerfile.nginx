@@ -1,0 +1,22 @@
+FROM node:22-alpine AS frontend-builder
+WORKDIR /build
+
+COPY vue-project/package.json vue-project/package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --no-audit --no-fund
+
+COPY vue-project/ ./
+RUN npm run build
+
+FROM nginx:1.28-alpine
+
+COPY --from=frontend-builder /build/dist /usr/share/nginx/html
+COPY edumind/nginx.conf.template /etc/nginx/edumind/nginx.https.conf.template
+COPY edumind/nginx.bootstrap.conf.template /etc/nginx/edumind/nginx.http.conf.template
+COPY edumind/scripts/nginx-entrypoint.sh /usr/local/bin/edumind-nginx-entrypoint
+
+RUN chmod 0755 /usr/local/bin/edumind-nginx-entrypoint
+
+EXPOSE 80 443
+
+ENTRYPOINT ["/usr/local/bin/edumind-nginx-entrypoint"]

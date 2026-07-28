@@ -1,6 +1,10 @@
 node_modules/
 target/
 dist/
+.env
+.env.*
+!.env.example
+.git/
 .vscode/
 .idea/
 *.iml
@@ -9,3 +13,7 @@ RAG_README.md
 **/node_modules/
 **/.git
 *.log
+hs_err_pid*.log
+test-data/
+pgbackups/
+models/

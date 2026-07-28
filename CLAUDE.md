@@ -29,7 +29,7 @@ cd edumind && docker compose up -d
 
 The app runs on `http://localhost:8080`. Swagger UI at `http://localhost:8080/swagger-ui.html`.
 
-Environment config: copy `edumind/.env.example` to `edumind/.env` and fill in required values (`DB_PASS`, `LIVE_SESSION_TOKEN_SECRET`, `LLM_API_KEY`, `ONEBOT_WS_TOKEN`).
+Environment config: copy `edumind/.env.example` to `edumind/.env` and fill in the values marked REQUIRED. `ONEBOT_WS_TOKEN` is required only when OneBot is enabled.
 
 ### Frontend (`vue-project/`)
 
@@ -46,7 +46,6 @@ npm run format       # Prettier
 
 | Service | Purpose | Default Address |
 |---------|---------|-----------------|
-| OpenClaw | AI gateway (LLM API key management, model routing, tool calling) | `localhost:18789` |
 | OneBot/NapCat | QQ bot WebSocket service | `localhost:3001` |
 
 ## Architecture
@@ -64,7 +63,7 @@ npm run format       # Prettier
 
 **MCP tool system** (`mcp/`) — implements the Model Context Protocol JSON-RPC endpoint at `/mcp`:
 - `McpController` — JSON-RPC handler (initialize, tools/list, tools/call)
-- `ToolDefinition` — interface; implementations in `mcp/tools/` are auto-discovered by Spring and exposed to OpenClaw's agent
+- `ToolDefinition` — interface; implementations in `mcp/tools/` are auto-discovered by Spring, used locally through `LangChain4jToolBridge`, and optionally exposed to external MCP clients
 - `ToolContextHolder` — ThreadLocal context carrying user/session info injected from MCP session store
 - Tools: `KnowledgeSearchTool`, `ClassStatusTool`, `HomeworkTasksTool`, `StudentStatsTool`, `CurrentTimeTool`
 
@@ -91,7 +90,7 @@ npm run format       # Prettier
 
 **Data layer**: MyBatis-Plus mappers in `mapper/`, entities in `Entity/`, DTOs in `DTO/`. Flyway migrations at `src/main/resources/db/migration/`.
 
-**Key dependencies**: PostgreSQL 16 + pgvector, Redis 7 (Redisson), MinIO (S3), LangChain4j 1.13.0 (OpenAI-compatible via OpenClaw), DJL 0.28.0 + ONNX Runtime, Resilience4j circuit breaker on AI calls.
+**Key dependencies**: PostgreSQL 16 + pgvector, Redis 7 (Redisson), MinIO (S3), LangChain4j 1.15.1 (direct OpenAI-compatible model integration), DJL 0.28.0 + ONNX Runtime, Resilience4j circuit breaker on AI calls.
 
 ### Frontend (`vue-project/src/`)
 
@@ -114,8 +113,9 @@ npm run format       # Prettier
 
 ## Key Architectural Patterns
 
-- **All LLM calls go through OpenClaw** at `OPENCLAW_BASE_URL` (default `http://localhost:18789/v1`), never directly to model providers. OpenClaw handles API key management, model routing, and agent tool calling.
-- **MCP tools are the bridge** between the LLM agent and backend data — when the AI needs to search knowledge, check class status, or query student stats, OpenClaw routes these as MCP tool calls to `/mcp`.
+- **The built-in LangChain4j Agent is the active LLM path** — it connects directly to the OpenAI-compatible endpoint configured by `LLM_BASE_URL`/`LLM_API_KEY`; optional vision settings may use a separate endpoint. OpenClaw is not a runtime or deployment dependency.
+- **Local tools and external MCP share tool definitions** — the built-in Agent executes `ToolDefinition` beans through `LangChain4jToolBridge`; `/mcp` exposes the same business capabilities only for optional external clients.
+- **`OpenClawService` is a historical interface name** — its active implementation is `LangChain4jAgentService`. Do not infer an OpenClaw dependency from that name; keep new code provider-neutral until the interface is renamed in a dedicated refactor.
 - **RAG is the single truth** for knowledge retrieval — `RagService.search()` is the only retrieval implementation; all callers (MCP tools, QQ bot, document service) route through it.
 - **Redis Streams for async work** — homework grading is queued via Redis Streams, consumed asynchronously with distributed locks preventing duplicate processing.
 - **Rate limiting is at the interceptor layer** — per-endpoint configurable token buckets in `application.properties` under `rate-limit.rules[...]`.
