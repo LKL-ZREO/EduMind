@@ -8,7 +8,8 @@ import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 @SpringBootApplication
-@MapperScan({"com.firedemo.demo.mapper", "com.firedemo.demo.rag"})
+@MapperScan({"com.firedemo.demo.mapper", "com.firedemo.demo.rag",
+        "com.firedemo.demo.eval.persistence"})
 @EnableAsync
 @EnableScheduling
 @EnableCaching
