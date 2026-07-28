@@ -1,27 +1,43 @@
 #!/bin/sh
-# PostgreSQL 自动备份脚本（每天凌晨 3 点由 pgbackup 容器执行）
-# 保留最近 7 天的备份，自动清理过期文件
+set -eu
 
-BACKUP_DIR="/backups"
-DB_NAME="postgres"
-RETENTION_DAYS=7
+BACKUP_DIR="${BACKUP_DIR:-/backups}"
+DB_NAME="${PGDATABASE:-postgres}"
+RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-7}"
+TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
+BACKUP_FILE="${BACKUP_DIR}/${DB_NAME}_${TIMESTAMP}.dump"
+TEMP_FILE="${BACKUP_FILE}.tmp"
 
-TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-BACKUP_FILE="$BACKUP_DIR/${DB_NAME}_${TIMESTAMP}.sql.gz"
+cleanup() {
+    rm -f "${TEMP_FILE}"
+}
+trap cleanup EXIT INT TERM
 
-echo "[$(date)] 开始备份 $DB_NAME → $BACKUP_FILE"
+mkdir -p "${BACKUP_DIR}"
+echo "[$(date)] Starting PostgreSQL backup: ${DB_NAME} -> ${BACKUP_FILE}"
 
-pg_dump -h postgres -U "$PGUSER" "$DB_NAME" | gzip > "$BACKUP_FILE"
+pg_dump \
+    --host="${PGHOST:-postgres}" \
+    --port="${PGPORT:-5432}" \
+    --username="${PGUSER:-postgres}" \
+    --dbname="${DB_NAME}" \
+    --format=custom \
+    --compress=6 \
+    --file="${TEMP_FILE}"
 
-if [ $? -eq 0 ]; then
-    echo "[$(date)] 备份成功 ($(du -h "$BACKUP_FILE" | cut -f1))"
-else
-    echo "[$(date)] 备份失败！"
+if [ ! -s "${TEMP_FILE}" ]; then
+    echo "[$(date)] Backup failed: generated file is empty" >&2
     exit 1
 fi
 
-# 清理超过 ${RETENTION_DAYS} 天的旧备份
-DELETED=$(find "$BACKUP_DIR" -name "${DB_NAME}_*.sql.gz" -mtime +${RETENTION_DAYS} -delete -print | wc -l)
-if [ "$DELETED" -gt 0 ]; then
-    echo "[$(date)] 已清理 $DELETED 个过期备份"
+pg_restore --list "${TEMP_FILE}" >/dev/null
+chmod 0600 "${TEMP_FILE}"
+mv "${TEMP_FILE}" "${BACKUP_FILE}"
+trap - EXIT INT TERM
+
+echo "[$(date)] Backup completed: $(du -h "${BACKUP_FILE}" | cut -f1)"
+
+DELETED="$(find "${BACKUP_DIR}" -name "${DB_NAME}_*.dump" -type f -mtime "+${RETENTION_DAYS}" -delete -print | wc -l | tr -d ' ')"
+if [ "${DELETED}" -gt 0 ]; then
+    echo "[$(date)] Removed ${DELETED} backup(s) older than ${RETENTION_DAYS} days"
 fi

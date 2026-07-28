@@ -1,0 +1,15 @@
+.git
+.github
+.idea
+.vscode
+**/.env
+**/.env.*
+!**/.env.example
+**/node_modules
+**/dist
+**/target
+**/*.log
+**/hs_err_pid*.log
+edumind/test-data
+edumind/pgbackups
+edumind/models

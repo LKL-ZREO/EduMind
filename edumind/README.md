@@ -31,23 +31,23 @@
 │ OneBot   │
 │ (NapCat) │
 │127.0.0.1 │
-│:3000     │
+│:3001     │
 └──────────┘
 ```
 
-本项目（docker-compose）自动启动：PostgreSQL、Redis、MinIO、Nginx、应用。
+Docker Compose 默认启动 PostgreSQL、Redis、MinIO、应用、Nginx、备份任务。Vue 前端会在 Nginx 镜像中完成生产构建，不需要在服务器额外运行 Vite。
 
 以下服务需要**另行启动**：
 
 | 服务 | 说明 | 安装指南 |
 |------|------|---------|
-| **OneBot / NapCat** | QQ 机器人客户端，将 QQ 消息转发到 HTTP | 见下方 |
+| **OneBot / NapCat** | QQ 机器人客户端，通过 WebSocket 与应用双向通信 | 见下方 |
 
-> **LLM 调用**：默认直连模型 API（Kimi 等），无需额外网关。也可通过 `edumind.llm.backend=openclaw` 切回 OpenClaw 网关。
+> **LLM 调用**：应用使用内置 LangChain4j Agent，直接连接 `.env` 中配置的 OpenAI 兼容模型端点，不依赖 OpenClaw。
 
 ---
 
-## 🚀 快速开始
+## 🚀 本地快速开始
 
 ### 1. 克隆项目
 
@@ -62,46 +62,40 @@ cd EduMind/edumind
 cp .env.example .env
 ```
 
-编辑 `.env`，填入真实值：
+编辑 `.env`，至少填入所有标记为 REQUIRED 的值。可使用以下命令生成随机密钥：
 
 ```bash
-DB_PASS=你的数据库密码
-LIVE_SESSION_TOKEN_SECRET=$(openssl rand -base64 32)   # 学生课堂范围令牌
-LLM_API_KEY=你的LLM API密钥（如 Kimi API Key）
-ONEBOT_TOKEN=你的QQ机器人token
+openssl rand -base64 48  # LIVE_SESSION_TOKEN_SECRET / MCP_API_KEY
+openssl rand -base64 32  # ENCRYPT_AES_KEY
 ```
 
-### 3. 启动基础设施
+本地开发可以设置 `DOMAIN=localhost`，Nginx 会自动使用 HTTP 配置。
+
+### 3. 构建并启动
 
 ```bash
-docker compose up -d
+docker compose up -d --build
 ```
 
-自动启动：PostgreSQL (+pgvector) + Redis + MinIO + Nginx + 应用。
+访问 `http://localhost`。PostgreSQL、Redis 和 MinIO 端口只绑定 `127.0.0.1`，可供本机开发工具连接，但不会监听公网网卡。
 
-### 4. （可选）使用 OpenClaw 网关
+### 4. （可选）启动监控
 
-默认使用直连 LLM API。如需通过 OpenClaw 网关，在 `.env` 中设置：
-
-```bash
-EDUMIND_LLM_BACKEND=openclaw
-OPENCLAW_API_KEY=你的OpenClaw API Key
-OPENCLAW_BASE_URL=http://localhost:18789/v1
+```sh
+docker compose --profile observability up -d prometheus grafana
 ```
 
-然后启动 OpenClaw 网关，确保能访问：
+Prometheus 和 Grafana 分别只绑定本机 `9090` 和 `3002`，建议通过 SSH 隧道访问。
 
-```bash
-curl http://localhost:18789/v1/models
-```
-
-### 5. 启动 OneBot / NapCat（QQ 机器人）
+### 5. （可选）启动 OneBot / NapCat
 
 1. 下载 [NapCat](https://github.com/NapNeko/NapCatQQ)
-2. 配置 HTTP 服务端：
-   - 地址：`http://127.0.0.1:3000`
-   - Token：与 `.env` 中 `ONEBOT_TOKEN` 一致
-3. 扫码登录 QQ
+2. 在 NapCat WebUI 的网络配置中，新建并启用 **WebSocket 服务端（正向 WS）**：
+   - 监听地址：`0.0.0.0`
+   - 端口：`3001`
+   - Access Token：与 `.env` 中 `ONEBOT_WS_TOKEN` 一致
+3. 在 `.env` 中设置 `ONEBOT_WS_ENABLED=true` 和相同的 `ONEBOT_WS_TOKEN`
+4. 扫码登录 QQ，并重启应用：`docker compose up -d app`
 
 ### 6. 导入数据库
 
@@ -109,9 +103,19 @@ Flyway 会在应用启动时自动执行迁移脚本，无需手动导入。
 
 ### 7. 开始使用
 
-- **Web 前端**：打开 `http://localhost`（Vue 项目需单独启动，见下方）
+- **Web 前端**：打开 `http://localhost`
 - **QQ 群**：将机器人拉入群，@它提问
-- **Swagger 文档**：`http://localhost:8080/swagger-ui.html`
+
+## 🌐 单机服务器部署
+
+服务器需要提前完成域名 DNS 解析，并只向公网开放 `80`、`443` 和受限的 SSH 端口。填好 `.env` 后执行：
+
+```sh
+/bin/sh scripts/preflight.sh
+/bin/sh scripts/deploy.sh
+```
+
+部署脚本会依次构建前后端、等待数据服务和应用健康、申请 Let's Encrypt 证书、切换 HTTPS，并启动备份与证书续期服务。完整部署、更新、备份恢复和排障步骤见 [生产部署指南](docs/production-deployment.md)。
 
 ---
 
@@ -133,24 +137,24 @@ npm run dev
 |------|------|--------|
 | `DB_PASS` | 数据库密码 | **必填** |
 | `DB_USER` | 数据库用户 | `postgres` |
-| `DB_HOST` | 数据库地址 | `localhost` |
-| `REDIS_HOST` | Redis 地址 | `localhost` |
 | `REDIS_PORT` | Redis 端口 | `6379` |
 | `LIVE_SESSION_TOKEN_SECRET` | 学生课堂范围令牌签名密钥（至少 32 字节） | **必填** |
-| `LLM_API_KEY` | LLM API Key（直连模型） | **必填** |
-| `LLM_BASE_URL` | LLM API 地址 | `https://api.moonshot.cn/v1` |
-| `LLM_MODEL` | LLM 模型名 | `kimi-k2-0701-preview` |
-| `EDUMIND_LLM_BACKEND` | LLM 后端模式（`built-in`/`openclaw`） | `built-in` |
-| `OPENCLAW_API_KEY` | OpenClaw API Key（仅 openclaw 模式） | 可选 |
-| `OPENCLAW_BASE_URL` | OpenClaw 地址（仅 openclaw 模式） | `http://localhost:18789/v1` |
-| `ONEBOT_TOKEN` | QQ 机器人 Token | **必填** |
-| `ONEBOT_HTTP_URL` | OneBot HTTP 地址 | `http://127.0.0.1:3000` |
+| `ENCRYPT_AES_KEY` | PII 数据加密密钥（至少 32 字节） | **必填** |
+| `MCP_API_KEY` | MCP 服务间认证密钥（至少 32 字节） | **必填** |
+| `LLM_BASE_URL` | OpenAI 兼容模型端点 | `https://api.moonshot.cn/v1` |
+| `LLM_API_KEY` | 模型供应商 API Key | **必填** |
+| `LLM_VISION_BASE_URL` | 可选的视觉模型端点；留空复用文本端点 | 可选 |
+| `LLM_VISION_API_KEY` | 可选的视觉模型 API Key；留空复用文本 Key | 可选 |
+| `LLM_MODEL` | LLM 模型名 | `kimi-k2.5` |
+| `ONEBOT_WS_ENABLED` | 是否连接 NapCat | `false` |
+| `ONEBOT_WS_URL` | OneBot WebSocket 地址 | Compose：`ws://host.docker.internal:3001`；本地直跑：`ws://127.0.0.1:3001` |
+| `ONEBOT_WS_TOKEN` | OneBot WebSocket Access Token | 启用 OneBot 时必填 |
 | `STORAGE_TYPE` | 文件存储类型 | `local`（`s3` 用 MinIO） |
-| `S3_ENDPOINT` | S3 端点 | `http://localhost:9000` |
-| `S3_ACCESS_KEY` | S3 Access Key | `minioadmin` |
-| `S3_SECRET_KEY` | S3 Secret Key | `minioadmin` |
+| `S3_ACCESS_KEY` | MinIO/S3 Access Key | **必填** |
+| `S3_SECRET_KEY` | MinIO/S3 Secret Key | **必填** |
 | `S3_BUCKET` | S3 存储桶 | `homework-files` |
-| `AI_MODEL_DIR` | ONNX 本地模型路径 | 下载 bge-reranker-base 的目录 |
+| `RERANKER_MODEL_DIR` | 宿主机上的 bge-reranker-base 目录 | `./models/bge-reranker-base` |
+| `GRAFANA_PASSWORD` | Grafana 管理员密码 | **必填** |
 
 ---
 
@@ -198,8 +202,15 @@ edumind/
 │   ├── db/migration/       # Flyway 数据库迁移脚本
 │   ├── prompts/            # LLM Prompt 模板
 │   └── application.properties
-├── docker-compose.yml      # 本地基础设施编排
-├── Dockerfile              # 多阶段构建镜像
+├── docker-compose.yml      # 本地与单机生产编排
+├── Dockerfile              # 后端多阶段构建镜像
+├── Dockerfile.nginx        # 前端构建 + Nginx 运行镜像
+├── nginx*.conf.template    # HTTP 引导与 HTTPS 配置
+├── scripts/
+│   ├── preflight.sh        # 生产部署预检
+│   ├── deploy.sh           # 单机部署入口
+│   ├── setup-ssl.sh        # 首次签发/复用证书
+│   └── backup.sh           # PostgreSQL 可验证备份
 └── pom.xml
 vue-project/                # Vue 3 前端
 ```

@@ -1,29 +1,35 @@
-version: '3.8'
+name: edumind
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "${DOCKER_LOG_MAX_SIZE:-20m}"
+    max-file: "${DOCKER_LOG_MAX_FILES:-5}"
 
 services:
-  # ======================== PostgreSQL ========================
   postgres:
     image: pgvector/pgvector:pg16
-    container_name: firedemo-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: postgres
+      POSTGRES_DB: ${DB_NAME:-postgres}
       POSTGRES_USER: ${DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${DB_PASS:?请设置 DB_PASS 环境变量或创建 .env 文件}
+      POSTGRES_PASSWORD: ${DB_PASS:?请在 .env 中设置 DB_PASS}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    networks:
+      - data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres}"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-postgres}"]
       interval: 5s
       timeout: 3s
-      retries: 10
+      retries: 12
+      start_period: 10s
+    logging: *default-logging
 
-  # ======================== Redis（AOF 持久化） ========================
   redis:
     image: redis:7-alpine
-    container_name: firedemo-redis
     restart: unless-stopped
     command: >
       redis-server
@@ -34,74 +40,92 @@ services:
       --save 900 1
       --save 300 10
     ports:
-      - "6379:6379"
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
+    networks:
+      - data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
-      retries: 10
+      retries: 12
+      start_period: 5s
+    logging: *default-logging
 
-  # ======================== PostgreSQL 自动备份 ========================
   pgbackup:
     image: postgres:16-alpine
-    container_name: firedemo-pgbackup
     restart: unless-stopped
     environment:
       PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: ${DB_NAME:-postgres}
       PGUSER: ${DB_USER:-postgres}
-      PGPASSWORD: ${DB_PASS:?请设置 DB_PASS 环境变量或创建 .env 文件}
+      PGPASSWORD: ${DB_PASS:?请在 .env 中设置 DB_PASS}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
+      TZ: CST-8
     volumes:
       - pgbackups:/backups
       - ./scripts/backup.sh:/backup.sh:ro
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        echo "0 3 * * * /backup.sh" > /var/spool/cron/crontabs/root
-        crond -f -l 2
+        echo "0 3 * * * /bin/sh /backup.sh >> /proc/1/fd/1 2>> /proc/1/fd/2" > /var/spool/cron/crontabs/root
+        exec crond -f -l 2
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - data
+    security_opt:
+      - no-new-privileges:true
+    logging: *default-logging
 
-  # ======================== MinIO 对象存储 ========================
   minio:
-    image: minio/minio:latest
-    container_name: firedemo-minio
+    image: minio/minio:${MINIO_IMAGE_TAG:-RELEASE.2025-07-23T15-54-02Z}
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-minioadmin}
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:?请在 .env 中设置 S3_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:?请在 .env 中设置 S3_SECRET_KEY}
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "127.0.0.1:${MINIO_API_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - minio_data:/data
+    networks:
+      - data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
       interval: 5s
       timeout: 3s
-      retries: 10
+      retries: 12
+      start_period: 10s
+    logging: *default-logging
 
-  # ======================== Spring Boot 应用 ========================
   app:
-    build: .
+    image: edumind-app:${IMAGE_TAG:-local}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MAVEN_MIRROR_URL: ${MAVEN_MIRROR_URL:-https://repo.maven.apache.org/maven2}
     restart: unless-stopped
+    init: true
     expose:
       - "8080"
     environment:
       SPRING_PROFILES_ACTIVE: prod
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/postgres
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${DB_NAME:-postgres}
       SPRING_DATASOURCE_USERNAME: ${DB_USER:-postgres}
-      SPRING_DATASOURCE_PASSWORD: ${DB_PASS:?请设置 DB_PASS 环境变量或创建 .env 文件}
+      SPRING_DATASOURCE_PASSWORD: ${DB_PASS:?请在 .env 中设置 DB_PASS}
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: 6379
-      LIVE_SESSION_TOKEN_SECRET: ${LIVE_SESSION_TOKEN_SECRET:?请设置 LIVE_SESSION_TOKEN_SECRET 环境变量}
-      ENCRYPT_AES_KEY: ${ENCRYPT_AES_KEY:?请设置 ENCRYPT_AES_KEY 环境变量}
-      MCP_API_KEY: ${MCP_API_KEY:-change-me}
+      LIVE_SESSION_TOKEN_SECRET: ${LIVE_SESSION_TOKEN_SECRET:?请在 .env 中设置 LIVE_SESSION_TOKEN_SECRET}
+      ENCRYPT_AES_KEY: ${ENCRYPT_AES_KEY:?请在 .env 中设置 ENCRYPT_AES_KEY}
+      MCP_API_KEY: ${MCP_API_KEY:?请在 .env 中设置 MCP_API_KEY}
       LLM_BASE_URL: ${LLM_BASE_URL:-https://api.moonshot.cn/v1}
-      LLM_API_KEY: ${LLM_API_KEY:?请设置 LLM_API_KEY 环境变量}
+      LLM_API_KEY: ${LLM_API_KEY:?请在 .env 中设置 LLM_API_KEY}
       LLM_MODEL: ${LLM_MODEL:-kimi-k2.5}
       LLM_TEXT_MODEL: ${LLM_TEXT_MODEL:-${LLM_MODEL:-kimi-k2.5}}
       LLM_VISION_BASE_URL: ${LLM_VISION_BASE_URL:-${LLM_BASE_URL:-https://api.moonshot.cn/v1}}
@@ -112,29 +136,36 @@ services:
       AGENT_MEMORY_TOKEN_ESTIMATOR_MODEL: ${AGENT_MEMORY_TOKEN_ESTIMATOR_MODEL:-gpt-4o-mini}
       AGENT_MEMORY_MAX_ACTIVE_SESSIONS: ${AGENT_MEMORY_MAX_ACTIVE_SESSIONS:-10000}
       AGENT_MEMORY_EXPIRE_AFTER_ACCESS: ${AGENT_MEMORY_EXPIRE_AFTER_ACCESS:-PT2H}
+      AI_STRUCTURED_MAX_ATTEMPTS: ${AI_STRUCTURED_MAX_ATTEMPTS:-2}
+      AI_STRUCTURED_MAX_RESPONSE_CHARS: ${AI_STRUCTURED_MAX_RESPONSE_CHARS:-100000}
       HELICONE_ENABLED: ${HELICONE_ENABLED:-false}
       HELICONE_API_KEY: ${HELICONE_API_KEY:-}
       HELICONE_GATEWAY_URL: ${HELICONE_GATEWAY_URL:-https://gateway.helicone.ai/v1}
       HELICONE_OMIT_CONTENT: ${HELICONE_OMIT_CONTENT:-true}
       HELICONE_ENVIRONMENT: ${HELICONE_ENVIRONMENT:-production}
-      ONEBOT_HTTP_URL: http://host.docker.internal:3000
-      ONEBOT_HTTP_TOKEN: ${ONEBOT_TOKEN:-change-me}
+      ONEBOT_WS_ENABLED: ${ONEBOT_WS_ENABLED:-false}
       ONEBOT_WS_URL: ${ONEBOT_WS_URL:-ws://host.docker.internal:3001}
-      ONEBOT_WS_TOKEN: ${ONEBOT_WS_TOKEN:-change-me}
-      AI_MODEL_DIR: ${AI_MODEL_DIR:-/app/models}
-      LOG_DIR: /root/.edumind/logs
+      ONEBOT_WS_TOKEN: ${ONEBOT_WS_TOKEN:-}
+      VISION_ALLOWED_HOSTS: ${VISION_ALLOWED_HOSTS:-multimedia.nt.qq.com.cn}
+      AI_MODEL_DIR: /app/models/reranker
+      LOG_DIR: /home/edumind/.edumind/logs
       APP_CORS_ALLOWED_ORIGINS: ${APP_CORS_ALLOWED_ORIGINS:-https://${DOMAIN:-localhost}}
       STORAGE_TYPE: ${STORAGE_TYPE:-local}
-      S3_ENDPOINT: ${S3_DOCKER_ENDPOINT:-http://minio:9000}
+      S3_ENDPOINT: http://minio:9000
       S3_REGION: ${S3_REGION:-us-east-1}
       S3_BUCKET: ${S3_BUCKET:-homework-files}
-      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-minioadmin}
-      S3_SECRET_KEY: ${S3_SECRET_KEY:-minioadmin}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?请在 .env 中设置 S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?请在 .env 中设置 S3_SECRET_KEY}
       S3_PATH_STYLE: ${S3_PATH_STYLE:-true}
+      GIT_COMMIT: ${GIT_COMMIT:-unknown}
     volumes:
-      - uploads:/root/.homework-grader/uploads
-      - djl_models:/root/.djl
-      - logs:/root/.edumind/logs
+      - uploads:/home/edumind/.homework-grader/uploads
+      - djl_models:/home/edumind/.djl
+      - logs:/home/edumind/.edumind/logs
+      - type: bind
+        source: ${RERANKER_MODEL_DIR:-./models/bge-reranker-base}
+        target: /app/models/reranker
+        read_only: true
     depends_on:
       postgres:
         condition: service_healthy
@@ -144,100 +175,130 @@ services:
         condition: service_healthy
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    networks:
+      - edge
+      - data
+      - monitoring
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health | grep -q UP"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/actuator/health | grep -q UP"]
       interval: 10s
       timeout: 5s
-      retries: 5
-      start_period: 40s
+      retries: 12
+      start_period: 180s
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 45s
+    logging: *default-logging
 
-  # ======================== Nginx 反向代理（HTTPS 终结） ========================
   nginx:
-    image: nginx:1.25-alpine
-    container_name: firedemo-nginx
+    image: edumind-nginx:${IMAGE_TAG:-local}
+    build:
+      context: ..
+      dockerfile: edumind/Dockerfile.nginx
     restart: unless-stopped
     ports:
       - "80:80"
       - "443:443"
     environment:
-      - DOMAIN=${DOMAIN:-localhost}
+      DOMAIN: ${DOMAIN:-localhost}
     volumes:
-      - ./nginx.conf.template:/etc/nginx/nginx.conf.template:ro
       - certbot_conf:/etc/letsencrypt:ro
       - certbot_www:/var/www/certbot:ro
-    # 启动时用 envsubst 将模板中 ${DOMAIN} 替换为实际域名
-    command: >
-      /bin/sh -c "envsubst '$${DOMAIN}' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf && exec nginx -g 'daemon off;'"
     depends_on:
-      - app
+      app:
+        condition: service_healthy
+        restart: true
+    networks:
+      - edge
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost/health"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/health"]
       interval: 10s
       timeout: 3s
-      retries: 3
+      retries: 6
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    logging: *default-logging
 
-  # ======================== Certbot（SSL 证书自动续期） ========================
   certbot:
-    image: certbot/certbot
-    container_name: firedemo-certbot
+    image: certbot/certbot:${CERTBOT_IMAGE_TAG:-v5.7.0}
     restart: unless-stopped
+    profiles:
+      - tls
     volumes:
       - certbot_conf:/etc/letsencrypt
       - certbot_www:/var/www/certbot
-    # 每 12 小时检查一次，证书到期前 30 天内自动续期
-    entrypoint: "/bin/sh -c"
+    entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        trap exit TERM
+        trap exit TERM INT
         while :; do
-          certbot renew --quiet
+          certbot renew --quiet --webroot -w /var/www/certbot
           sleep 12h & wait $${!}
         done
+    networks:
+      - edge
+    security_opt:
+      - no-new-privileges:true
+    logging: *default-logging
 
-  # ======================== Prometheus ========================
   prometheus:
     image: prom/prometheus:v2.55.0
-    container_name: firedemo-prometheus
     restart: unless-stopped
+    profiles:
+      - observability
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
       - "--storage.tsdb.retention.time=15d"
       - "--web.enable-lifecycle"
     ports:
-      - "9090:9090"
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
+    networks:
+      - monitoring
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/healthy"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9090/-/healthy"]
       interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 6
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    logging: *default-logging
 
-  # ======================== Grafana ========================
   grafana:
     image: grafana/grafana:11.2.0
-    container_name: firedemo-grafana
     restart: unless-stopped
+    profiles:
+      - observability
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?请在 .env 中设置 GRAFANA_PASSWORD}
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_INSTALL_PLUGINS: ""
     ports:
-      - "3001:3000"
+      - "127.0.0.1:${GRAFANA_PORT:-3002}:3000"
     volumes:
       - grafana_data:/var/lib/grafana
       - ./grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
       - ./grafana/datasources:/etc/grafana/provisioning/datasources:ro
     depends_on:
-      - prometheus
+      prometheus:
+        condition: service_healthy
+    networks:
+      - monitoring
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
       interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 6
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    logging: *default-logging
 
 volumes:
   pgdata:
@@ -251,3 +312,8 @@ volumes:
   grafana_data:
   certbot_conf:
   certbot_www:
+
+networks:
+  edge:
+  data:
+  monitoring:
