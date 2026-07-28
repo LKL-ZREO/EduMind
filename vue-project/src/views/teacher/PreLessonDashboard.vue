@@ -182,7 +182,7 @@
 
     <!-- 教案结果弹窗 -->
     <el-dialog v-model="planResultDialog" title="📝 教案大纲" width="750px">
-      <div class="plan-result" v-html="planHtml"></div>
+      <div class="plan-result" v-html="safePlanHtml"></div>
       <template #footer>
         <el-button @click="planResultDialog = false">关闭</el-button>
         <el-button type="primary" @click="copyPlan">📋 复制教案</el-button>
@@ -192,7 +192,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   getDashboardClasses,
@@ -208,6 +208,7 @@ import {
 } from '../../api/dashboard'
 import { ElMessage } from 'element-plus'
 import { getApiErrorMessage } from '../../api/errors'
+import { sanitizeHtml } from '@/utils/safeHtml'
 
 const router = useRouter()
 const classList = ref<{ id: number; name: string }[]>([])
@@ -223,6 +224,7 @@ const planResultDialog = ref(false)
 const planGoals = ref<string[]>(['review', 'basic'])
 const planGenerating = ref(false)
 const planHtml = ref('')
+const safePlanHtml = computed(() => sanitizeHtml(planHtml.value))
 
 // ── 数据加载 ──
 

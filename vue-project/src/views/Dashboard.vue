@@ -449,7 +449,7 @@
           </div>
           <div v-if="generatedPlan" class="plan-preview">
             <h4>生成结果预览</h4>
-            <div class="plan-content" v-html="generatedPlan"></div>
+            <div class="plan-content" v-html="safeGeneratedPlan"></div>
           </div>
         </div>
         <div class="modal-footer">
@@ -470,6 +470,7 @@
 <script lang="js">
 import * as echarts from 'echarts'
 import request from '@/api/request'
+import { sanitizeHtml } from '@/utils/safeHtml'
 
 export default {
   name: 'TeacherDashboard',
@@ -586,6 +587,10 @@ export default {
   },
 
   computed: {
+    safeGeneratedPlan() {
+      return sanitizeHtml(this.generatedPlan)
+    },
+
     // 合并 QQ + 活课堂的不懂统计
     allConfusionStats() {
       const map = {}

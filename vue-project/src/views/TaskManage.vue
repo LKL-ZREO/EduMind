@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { sanitizeHtml } from '@/utils/safeHtml'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import RichTextEditor from '@/components/RichTextEditor.vue'
@@ -520,7 +521,10 @@ function escapeHtml(value: string) {
               }}</strong>
             </div>
           </div>
-          <div class="question-preview" v-html="activeGroup.description || '暂无作业内容'"></div>
+          <div
+            class="question-preview"
+            v-html="sanitizeHtml(activeGroup.description || '暂无作业内容')"
+          ></div>
         </template>
 
         <template v-else>

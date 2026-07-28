@@ -8,6 +8,7 @@ import 'highlight.js/styles/github-dark.css'
 import request, { getCsrfHeaders } from '@/api/request'
 import { getApiErrorMessage, isAbortError } from '@/api/errors'
 import { useChatStore } from '@/stores/chat'
+import { renderMarkdown } from '@/utils/safeHtml'
 
 /* ====== Markdown Setup ====== */
 marked.use(
@@ -26,7 +27,7 @@ marked.setOptions({ breaks: true, gfm: true })
 function md2html(text: string): string {
   if (!text) return ''
   try {
-    return marked.parse(text) as string
+    return renderMarkdown(text)
   } catch {
     return text.replace(/</g, '&lt;').replace(/>/g, '&gt;')
   }
