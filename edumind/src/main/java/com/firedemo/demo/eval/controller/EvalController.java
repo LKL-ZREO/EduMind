@@ -1,9 +1,13 @@
 package com.firedemo.demo.eval.controller;
 
+import com.firedemo.demo.eval.model.DatasetGenerationRequest;
 import com.firedemo.demo.eval.model.EvalCase;
 import com.firedemo.demo.eval.model.EvalResponse;
+import com.firedemo.demo.eval.model.EvalRunDetails;
 import com.firedemo.demo.eval.model.EvalRunRequest;
+import com.firedemo.demo.eval.persistence.EvalRunEntity;
 import com.firedemo.demo.eval.service.EvalService;
+import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -17,6 +21,8 @@ import java.util.Map;
  * <ul>
  *   <li>{@code POST /api/eval/run} — 执行评估</li>
  *   <li>{@code POST /api/eval/dataset/generate} — 从 DB 自动生成评测数据集</li>
+ *   <li>{@code GET /api/eval/runs} — 查询历史运行</li>
+ *   <li>{@code GET /api/eval/runs/{runId}} — 查询逐条评测证据</li>
  *   <li>{@code GET /api/eval/health} — 健康检查</li>
  * </ul>
  */
@@ -40,14 +46,10 @@ public class EvalController {
      * </pre>
      */
     @PostMapping("/run")
-    public ResponseEntity<EvalResponse> runEvaluation(@RequestBody EvalRunRequest request) {
+    public ResponseEntity<EvalResponse> runEvaluation(@Valid @RequestBody EvalRunRequest request) {
         log.info("评估请求: metrics={}, topK={}", request.getMetrics(), request.getTopK());
 
-        EvalResponse response = evalService.runEvaluation(
-                request.getMetrics(),
-                request.getTopK(),
-                request.isEnableReranker(),
-                request.isGenerateAnswers());
+        EvalResponse response = evalService.runEvaluation(request);
 
         if (response.isOk()) {
             return ResponseEntity.ok(response);
@@ -66,14 +68,9 @@ public class EvalController {
      */
     @PostMapping("/dataset/generate")
     public ResponseEntity<Map<String, Object>> generateDataset(
-            @RequestBody Map<String, Object> body) {
-
-        @SuppressWarnings("unchecked")
-        List<String> docIds = (List<String>) body.getOrDefault("docIds", List.of());
-        int questionCount = body.containsKey("questionCount")
-                ? ((Number) body.get("questionCount")).intValue() : 3;
-
-        List<EvalCase> cases = evalService.generateDatasetFromDb(docIds, questionCount);
+            @Valid @RequestBody DatasetGenerationRequest request) {
+        List<EvalCase> cases = evalService.generateDatasetFromDb(
+                request.getDocIds(), request.getQuestionCount());
 
         return ResponseEntity.ok(Map.of(
                 "status", "ok",
@@ -81,11 +78,22 @@ public class EvalController {
                 "cases", cases));
     }
 
+    @GetMapping("/runs")
+    public List<EvalRunEntity> listRuns(@RequestParam(defaultValue = "20") int limit) {
+        return evalService.listRuns(limit);
+    }
+
+    @GetMapping("/runs/{runId}")
+    public ResponseEntity<EvalRunDetails> getRun(@PathVariable Long runId) {
+        EvalRunDetails details = evalService.getRun(runId);
+        return details == null ? ResponseEntity.notFound().build() : ResponseEntity.ok(details);
+    }
+
     @GetMapping("/health")
     public ResponseEntity<Map<String, String>> health() {
         return ResponseEntity.ok(Map.of(
                 "status", "ok",
                 "method", "LLM-as-Judge (纯 Java)",
-                "metrics", "faithfulness + answer_relevancy"));
+                "metrics", "retrieval + faithfulness + answer_relevancy"));
     }
 }

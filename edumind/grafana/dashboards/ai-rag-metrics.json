@@ -226,6 +226,34 @@
       ],
       "title": "JSON Repair Latency (p95)",
       "type": "timeseries"
+    },
+    {
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "palette-classic"}, "min": 0, "max": 1, "unit": "percentunit"},
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 16, "x": 0, "y": 42},
+      "id": 12,
+      "options": {"legend": {"displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"expr": "edumind_rag_eval_score{application=\"edumind\"}", "legendFormat": "{{metric}}", "refId": "A"}
+      ],
+      "title": "Latest RAG Quality Scores",
+      "type": "timeseries"
+    },
+    {
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "palette-classic"}, "custom": {"drawStyle": "bars", "fillOpacity": 25, "lineWidth": 1, "showPoints": "never", "spanNulls": true}, "unit": "ops"},
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 42},
+      "id": 13,
+      "options": {"legend": {"displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"expr": "sum(increase(edumind_rag_eval_runs_total{application=\"edumind\"}[24h])) by (outcome)", "legendFormat": "{{outcome}}", "refId": "A"}
+      ],
+      "title": "RAG Evaluation Outcomes (24h)",
+      "type": "timeseries"
     }
   ],
   "refresh": "10s",

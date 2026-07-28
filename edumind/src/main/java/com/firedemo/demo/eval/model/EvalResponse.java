@@ -20,10 +20,14 @@ import java.util.Map;
 public class EvalResponse {
 
     private String status;
+    private Long runId;
+    private EvalRunConfig config;
     private Map<String, Double> summary;
-    private List<Map<String, Double>> perCase;
+    private List<EvalCaseResult> perCase;
     private int numCases;
     private double evalDurationSeconds;
+    private boolean qualityGatePassed;
+    private List<String> qualityGateFailures;
     private String error;
 
     public boolean isOk() {
