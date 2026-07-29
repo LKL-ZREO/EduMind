@@ -11,6 +11,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class LlmPropertiesTest {
 
     @Test
+    void defaultsRouteTextToDeepSeekAndVisionToKimi() {
+        LlmProperties properties = new LlmProperties();
+
+        assertEquals("https://api.deepseek.com", properties.getBaseUrl());
+        assertEquals("deepseek-v4-flash", properties.resolveTextModel());
+        assertEquals("https://api.moonshot.cn/v1", properties.resolveVisionBaseUrl());
+        assertEquals("kimi-k2.5", properties.resolveVisionModel());
+    }
+
+    @Test
     void visionTemperatureIsIndependentFromTextTemperature() {
         LlmProperties properties = new LlmProperties();
         properties.setTemperature(0.2);

@@ -12,6 +12,7 @@ import java.util.Map;
 public class InteractionDetailDTO {
     // 题目信息
     private Long interactionId;
+    private Long questionId;
     private String type;
     private String title;
     private String description;
@@ -19,6 +20,8 @@ public class InteractionDetailDTO {
     private String correctKey;
     private Integer timeLimit;
     private String status;
+    private String difficulty;
+    private String explanation;
     // 统计
     private int totalStudents;
     private int respondedCount;

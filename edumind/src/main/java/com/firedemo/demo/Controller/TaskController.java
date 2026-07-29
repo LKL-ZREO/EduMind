@@ -1,5 +1,6 @@
 package com.firedemo.demo.Controller;
 
+import com.firedemo.demo.DTO.QuestionDTO;
 import com.firedemo.demo.Entity.ClassInfo;
 import com.firedemo.demo.Entity.HomeworkDraft;
 import com.firedemo.demo.Entity.HomeworkDraftQuestion;
@@ -8,12 +9,12 @@ import com.firedemo.demo.Entity.QuestionBankItem;
 import com.firedemo.demo.Entity.Submission;
 import com.firedemo.demo.Service.ClassService;
 import com.firedemo.demo.Service.HomeworkTaskService;
+import com.firedemo.demo.Service.QuestionService;
 import com.firedemo.demo.Service.SubmissionService;
 import com.firedemo.demo.Service.TaskReminderService;
 import com.firedemo.demo.common.result.Result;
 import com.firedemo.demo.mapper.HomeworkDraftMapper;
 import com.firedemo.demo.mapper.HomeworkDraftQuestionMapper;
-import com.firedemo.demo.mapper.QuestionBankItemMapper;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -43,7 +44,7 @@ public class TaskController {
     private final TaskReminderService taskReminderService;
     private final HomeworkDraftMapper draftMapper;
     private final HomeworkDraftQuestionMapper draftQuestionMapper;
-    private final QuestionBankItemMapper questionBankItemMapper;
+    private final QuestionService questionService;
 
     /**
      * 创建作业 — 需是该班级的教师
@@ -137,45 +138,6 @@ public class TaskController {
         if (draft == null) return Result.success(null);
         if (!userId.equals(draft.getTeacherId())) return Result.error(403, "Forbidden");
         draftMapper.deleteById(id);
-        return Result.success(null);
-    }
-
-    @GetMapping("/questions")
-    public Result<List<DraftQuestionDTO>> searchQuestionBank(@RequestParam(required = false) String keyword) {
-        Long userId = getCurrentUserId();
-        if (userId == null) return Result.error(401, "Unauthorized");
-        return Result.success(questionBankItemMapper.searchByTeacher(userId, keyword).stream()
-                .map(this::toQuestionDTO)
-                .toList());
-    }
-
-    @PostMapping("/questions")
-    public Result<DraftQuestionDTO> createQuestion(@RequestBody DraftQuestionDTO req) {
-        Long userId = getCurrentUserId();
-        if (userId == null) return Result.error(401, "Unauthorized");
-        QuestionBankItem item = upsertQuestion(userId, req);
-        return Result.success(toQuestionDTO(item));
-    }
-
-    @PutMapping("/questions/{id}")
-    public Result<DraftQuestionDTO> updateQuestion(@PathVariable Long id, @RequestBody DraftQuestionDTO req) {
-        Long userId = getCurrentUserId();
-        if (userId == null) return Result.error(401, "Unauthorized");
-        QuestionBankItem item = questionBankItemMapper.selectById(id);
-        if (item == null) return Result.error(404, "Question not found");
-        if (!userId.equals(item.getTeacherId())) return Result.error(403, "Forbidden");
-        req.setId(id);
-        return Result.success(toQuestionDTO(upsertQuestion(userId, req)));
-    }
-
-    @DeleteMapping("/questions/{id}")
-    public Result<Void> deleteQuestion(@PathVariable Long id) {
-        Long userId = getCurrentUserId();
-        if (userId == null) return Result.error(401, "Unauthorized");
-        QuestionBankItem item = questionBankItemMapper.selectById(id);
-        if (item == null) return Result.success(null);
-        if (!userId.equals(item.getTeacherId())) return Result.error(403, "Forbidden");
-        questionBankItemMapper.deleteById(id);
         return Result.success(null);
     }
 
@@ -415,7 +377,7 @@ public class TaskController {
         private LocalDateTime deadline;
         private Boolean allowLate;
         private Integer latePenalty;
-        private List<DraftQuestionDTO> questions = new ArrayList<>();
+        private List<QuestionDTO> questions = new ArrayList<>();
     }
 
     @Data
@@ -438,16 +400,7 @@ public class TaskController {
         private String status;
         private LocalDateTime createdAt;
         private LocalDateTime updatedAt;
-        private List<DraftQuestionDTO> questions = new ArrayList<>();
-    }
-
-    @Data
-    public static class DraftQuestionDTO {
-        private Long id;
-        private String title;
-        private String requirement;
-        private Integer score;
-        private Boolean uploadRequired;
+        private List<QuestionDTO> questions = new ArrayList<>();
     }
 
     private void applyDraftRequest(HomeworkDraft draft, SaveDraftRequest req) {
@@ -458,14 +411,20 @@ public class TaskController {
         draft.setLatePenalty(req.getLatePenalty() != null ? req.getLatePenalty() : 0);
     }
 
-    private void syncDraftQuestions(Long draftId, Long teacherId, List<DraftQuestionDTO> questions) {
+    private void syncDraftQuestions(Long draftId, Long teacherId, List<QuestionDTO> questions) {
         draftQuestionMapper.deleteByDraftId(draftId);
         if (questions == null || questions.isEmpty()) return;
 
         int order = 0;
-        for (DraftQuestionDTO dto : questions) {
+        for (QuestionDTO dto : questions) {
             if (dto == null) continue;
-            QuestionBankItem item = upsertQuestion(teacherId, dto);
+            QuestionBankItem item = questionService.saveHomeworkQuestion(
+                    teacherId,
+                    dto.getId(),
+                    dto.getTitle(),
+                    dto.getRequirement(),
+                    dto.getScore(),
+                    dto.getUploadRequired());
 
             HomeworkDraftQuestion relation = new HomeworkDraftQuestion();
             relation.setDraftId(draftId);
@@ -474,36 +433,6 @@ public class TaskController {
             relation.setCreatedAt(LocalDateTime.now());
             draftQuestionMapper.insert(relation);
         }
-    }
-
-    private QuestionBankItem upsertQuestion(Long teacherId, DraftQuestionDTO dto) {
-        QuestionBankItem item = null;
-        if (dto.getId() != null) {
-            item = questionBankItemMapper.selectById(dto.getId());
-            if (item != null && !teacherId.equals(item.getTeacherId())) {
-                item = null;
-            }
-        }
-
-        LocalDateTime now = LocalDateTime.now();
-        if (item == null) {
-            item = new QuestionBankItem();
-            item.setTeacherId(teacherId);
-            item.setCreatedAt(now);
-        }
-
-        item.setTitle(blankToDefault(dto.getTitle(), "Untitled question"));
-        item.setRequirement(dto.getRequirement());
-        item.setScore(dto.getScore() != null ? dto.getScore() : 0);
-        item.setUploadRequired(dto.getUploadRequired() != null ? dto.getUploadRequired() : true);
-        item.setUpdatedAt(now);
-
-        if (item.getId() == null) {
-            questionBankItemMapper.insert(item);
-        } else {
-            questionBankItemMapper.updateById(item);
-        }
-        return item;
     }
 
     private DraftResponse toDraftResponse(HomeworkDraft draft) {
@@ -519,28 +448,17 @@ public class TaskController {
         response.setUpdatedAt(draft.getUpdatedAt());
         response.setQuestions(draftQuestionMapper.selectByDraftId(draft.getId()).stream()
                 .map(HomeworkDraftQuestion::getQuestionId)
-                .map(questionBankItemMapper::selectById)
+                .map(questionService::findDTO)
                 .filter(Objects::nonNull)
-                .map(this::toQuestionDTO)
                 .toList());
         return response;
     }
 
-    private DraftQuestionDTO toQuestionDTO(QuestionBankItem item) {
-        DraftQuestionDTO dto = new DraftQuestionDTO();
-        dto.setId(item.getId());
-        dto.setTitle(item.getTitle());
-        dto.setRequirement(item.getRequirement());
-        dto.setScore(item.getScore());
-        dto.setUploadRequired(item.getUploadRequired());
-        return dto;
-    }
-
     private String buildDescriptionFromDraft(HomeworkDraft draft) {
-        List<DraftQuestionDTO> questions = toDraftResponse(draft).getQuestions();
+        List<QuestionDTO> questions = toDraftResponse(draft).getQuestions();
         StringBuilder html = new StringBuilder();
         for (int i = 0; i < questions.size(); i++) {
-            DraftQuestionDTO question = questions.get(i);
+            QuestionDTO question = questions.get(i);
             html.append("""
                 <section class="assignment-question">
                   <h3>\u9898\u76ee %d: %s</h3>
@@ -550,7 +468,7 @@ public class TaskController {
                 """.formatted(
                     i + 1,
                     escapeHtml(blankToDefault(question.getTitle(), "")),
-                    question.getRequirement() != null ? question.getRequirement() : "",
+                    renderQuestionBody(question),
                     defaultInt(question.getScore(), 0),
                     defaultBool(question.getUploadRequired(), true)
                             ? "\u6309\u9898\u4e0a\u4f20\u9644\u4ef6"
@@ -558,6 +476,21 @@ public class TaskController {
                 ));
         }
         return html.toString();
+    }
+
+    private String renderQuestionBody(QuestionDTO question) {
+        StringBuilder body = new StringBuilder();
+        if (question.getRequirement() != null) body.append(question.getRequirement());
+        if (question.getOptions() != null && !question.getOptions().isEmpty()) {
+            body.append("<ol type=\"A\" class=\"assignment-options\">");
+            for (QuestionDTO.OptionDTO option : question.getOptions()) {
+                body.append("<li>")
+                        .append(escapeHtml(blankToDefault(option.getText(), "")))
+                        .append("</li>");
+            }
+            body.append("</ol>");
+        }
+        return body.toString();
     }
 
     private String escapeHtml(String value) {

@@ -19,7 +19,7 @@ import com.firedemo.demo.Service.OpenClawService;
 import com.firedemo.demo.infrastructure.ai.StructuredOutputInvoker;
 import com.firedemo.demo.infrastructure.ai.StructuredOutputValidationException;
 import com.firedemo.demo.mapper.ClassInfoMapper;
-import com.firedemo.demo.mapper.HomeworkEvaluationMapper;
+import com.firedemo.demo.mapper.LegacyHomeworkEvaluationStatsMapper;
 import com.firedemo.demo.mapper.SubmissionErrorMapper;
 import com.firedemo.demo.mapper.SubmissionMapper;
 import com.firedemo.demo.mapper.TeacherKnowledgeMapper;
@@ -61,7 +61,7 @@ public class DashboardServiceImpl implements DashboardService {
     /** 从 concept-keywords.properties 加载的概念关键词映射 */
     private final Map<String, String> conceptKeywords = new HashMap<>();
 
-    private final HomeworkEvaluationMapper evaluationMapper;
+    private final LegacyHomeworkEvaluationStatsMapper legacyEvaluationStatsMapper;
     private final UserMapper userMapper;
     private final ClassInfoMapper classInfoMapper;
     private final SubmissionMapper submissionMapper;
@@ -98,16 +98,16 @@ public class DashboardServiceImpl implements DashboardService {
         metrics.setTotalStudents(studentCount != null ? studentCount : 0);
         metrics.setStudentTrend(0);
 
-        Integer totalHomework = evaluationMapper.countByClassId(classId);
+        Integer totalHomework = legacyEvaluationStatsMapper.countByClassId(classId);
         Integer submissionCount = submissionMapper.countByClassId(classId);
         metrics.setTotalHomework((totalHomework != null ? totalHomework : 0) + (submissionCount != null ? submissionCount : 0));
 
         LocalDateTime weekAgo = LocalDateTime.now().minusDays(7);
-        Integer newHomework = evaluationMapper.countNewByClassId(classId, weekAgo);
+        Integer newHomework = legacyEvaluationStatsMapper.countNewByClassId(classId, weekAgo);
         Integer newSubmission = submissionMapper.countNewByClassId(classId, weekAgo);
         metrics.setNewHomework((newHomework != null ? newHomework : 0) + (newSubmission != null ? newSubmission : 0));
 
-        List<Integer> evalScores = evaluationMapper.selectScoresByClassId(classId);
+        List<Integer> evalScores = legacyEvaluationStatsMapper.selectScoresByClassId(classId);
         List<Integer> submissionScores = submissionMapper.selectScoresByClassId(classId);
         List<Integer> allScores = new ArrayList<>(evalScores);
         allScores.addAll(submissionScores);
@@ -271,7 +271,7 @@ public class DashboardServiceImpl implements DashboardService {
         List<Map<String, Object>> submissionStudents = submissionMapper.selectStudentOverviewByClassId(classId);
         Map<String, StudentOverviewDTO> studentMap = new LinkedHashMap<>();
 
-        List<Map<String, Object>> teacherStats = evaluationMapper.selectStudentStatsByClassId(classId);
+        List<Map<String, Object>> teacherStats = legacyEvaluationStatsMapper.selectStudentStatsByClassId(classId);
         Map<Long, Map<String, Object>> statsMap = new HashMap<>();
         for (Map<String, Object> row : teacherStats) {
             statsMap.put(((Number) row.get("user_id")).longValue(), row);
@@ -567,7 +567,7 @@ public class DashboardServiceImpl implements DashboardService {
         Map<String, Double> studentAvgs = new LinkedHashMap<>();
 
         // 1. homework_evaluation 表：按 user_id 聚合
-        List<Map<String, Object>> evalStats = evaluationMapper.selectStudentStatsByClassId(classId);
+        List<Map<String, Object>> evalStats = legacyEvaluationStatsMapper.selectStudentStatsByClassId(classId);
         Map<Long, Double> userIdAvgMap = new HashMap<>();
         for (Map<String, Object> row : evalStats) {
             long userId = ((Number) row.get("user_id")).longValue();

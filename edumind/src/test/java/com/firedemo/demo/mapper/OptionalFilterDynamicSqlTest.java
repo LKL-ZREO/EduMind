@@ -50,7 +50,8 @@ class OptionalFilterDynamicSqlTest {
         BoundSql boundSql = boundSql(QuestionBankItemMapper.class, "searchByTeacher", parameters);
 
         assertThat(normalize(boundSql.getSql()))
-                .isEqualTo("SELECT * FROM question_bank_item WHERE teacher_id = ? ORDER BY updated_at DESC LIMIT 200");
+                .isEqualTo("SELECT * FROM question_bank_item WHERE teacher_id = ? "
+                        + "AND archived = FALSE ORDER BY updated_at DESC LIMIT 200");
         assertThat(boundSql.getParameterMappings()).hasSize(1);
     }
 
@@ -64,8 +65,9 @@ class OptionalFilterDynamicSqlTest {
 
         assertThat(normalize(boundSql.getSql()))
                 .contains("title ILIKE CONCAT('%', ?, '%')")
-                .contains("requirement ILIKE CONCAT('%', ?, '%')");
-        assertThat(boundSql.getParameterMappings()).hasSize(3);
+                .contains("requirement ILIKE CONCAT('%', ?, '%')")
+                .contains("knowledge_point ILIKE CONCAT('%', ?, '%')");
+        assertThat(boundSql.getParameterMappings()).hasSize(4);
     }
 
     @Test

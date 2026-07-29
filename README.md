@@ -98,9 +98,14 @@ LIVE_SESSION_TOKEN_SECRET=<随机密钥，至少 32 个字符>
 ENCRYPT_AES_KEY=<随机密钥，至少 32 个字符>
 MCP_API_KEY=<随机密钥，至少 32 个字符>
 
-LLM_BASE_URL=https://api.moonshot.cn/v1
-LLM_API_KEY=<模型供应商 API Key>
-LLM_MODEL=kimi-k2.5
+LLM_BASE_URL=https://api.deepseek.com
+LLM_API_KEY=<DeepSeek API Key>
+LLM_MODEL=deepseek-v4-flash
+LLM_TEXT_MODEL=deepseek-v4-flash
+
+LLM_VISION_BASE_URL=https://api.moonshot.cn/v1
+LLM_VISION_API_KEY=<Moonshot API Key>
+LLM_VISION_MODEL=kimi-k2.5
 
 S3_ACCESS_KEY=<MinIO Access Key>
 S3_SECRET_KEY=<MinIO Secret Key，至少 16 个字符>
@@ -197,21 +202,21 @@ CI 会执行后端测试、Session 安全集成测试、前端格式/类型/静�
 
 ## 关键配置
 
-| 变量                              | 用途                         | 默认/要求                         |
-| --------------------------------- | ---------------------------- | --------------------------------- |
-| `LLM_BASE_URL`                    | OpenAI 兼容文本模型端点      | 默认 Moonshot 示例，可替换        |
-| `LLM_API_KEY`                     | 文本模型 API Key             | 必填                              |
-| `LLM_TEXT_MODEL` / `LLM_MODEL`    | 文本模型名                   | 必填或使用示例默认值              |
-| `LLM_VISION_*`                    | 独立视觉端点、Key 与模型名   | 可选；留空复用文本配置            |
-| `DB_PASS`                         | PostgreSQL 密码              | 至少 16 个字符                    |
-| `LIVE_SESSION_TOKEN_SECRET`       | 课堂范围令牌签名密钥         | 至少 32 个字符                    |
-| `ENCRYPT_AES_KEY`                 | 敏感字段加密密钥             | 至少 32 个字符                    |
-| `MCP_API_KEY`                     | 外部 MCP 调用认证            | 至少 32 个字符                    |
-| `STORAGE_TYPE`                    | `local` 或 `s3` 文件存储实现 | 默认 `local`                      |
-| `S3_ACCESS_KEY` / `S3_SECRET_KEY` | Compose 内置 MinIO 凭据      | 必填                              |
-| `RERANKER_MODEL_DIR`              | 宿主机 Reranker 模型目录     | 默认 `./models/bge-reranker-base` |
-| `ONEBOT_WS_ENABLED`               | 是否连接 OneBot/NapCat       | 默认 `false`                      |
-| `ENABLE_OBSERVABILITY`            | 部署脚本是否启动监控栈       | 默认 `false`                      |
+| 变量                              | 用途                          | 默认/要求                         |
+| --------------------------------- | ----------------------------- | --------------------------------- |
+| `LLM_BASE_URL`                    | OpenAI 兼容文本模型端点       | 默认 DeepSeek                     |
+| `LLM_API_KEY`                     | 文本模型 API Key              | 必填                              |
+| `LLM_TEXT_MODEL` / `LLM_MODEL`    | 文本模型名                    | 默认 `deepseek-v4-flash`          |
+| `LLM_VISION_*`                    | Moonshot 视觉端点、Key 与模型 | Key 必填；默认 `kimi-k2.5`        |
+| `DB_PASS`                         | PostgreSQL 密码               | 至少 16 个字符                    |
+| `LIVE_SESSION_TOKEN_SECRET`       | 课堂范围令牌签名密钥          | 至少 32 个字符                    |
+| `ENCRYPT_AES_KEY`                 | 敏感字段加密密钥              | 至少 32 个字符                    |
+| `MCP_API_KEY`                     | 外部 MCP 调用认证             | 至少 32 个字符                    |
+| `STORAGE_TYPE`                    | `local` 或 `s3` 文件存储实现  | 默认 `local`                      |
+| `S3_ACCESS_KEY` / `S3_SECRET_KEY` | Compose 内置 MinIO 凭据       | 必填                              |
+| `RERANKER_MODEL_DIR`              | 宿主机 Reranker 模型目录      | 默认 `./models/bge-reranker-base` |
+| `ONEBOT_WS_ENABLED`               | 是否连接 OneBot/NapCat        | 默认 `false`                      |
+| `ENABLE_OBSERVABILITY`            | 部署脚本是否启动监控栈        | 默认 `false`                      |
 
 Reranker 模型不是启动硬依赖。缺少 `onnx/model.onnx` 时应用会关闭精排能力，其他检索链路仍可运行。
 

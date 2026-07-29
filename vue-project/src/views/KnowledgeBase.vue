@@ -1,35 +1,42 @@
 <template>
   <div class="kb-container">
-    <!-- 工具栏 -->
+    <!-- 顶部工作区 -->
     <div class="kb-toolbar">
       <div class="toolbar-left">
-        <el-icon class="toolbar-icon" :size="20"><FolderOpened /></el-icon>
-        <span class="toolbar-title">知识库</span>
+        <div class="toolbar-brand-icon">
+          <el-icon :size="22"><FolderOpened /></el-icon>
+        </div>
+        <div>
+          <div class="toolbar-title">知识库管理</div>
+          <div class="toolbar-subtitle">集中整理资料、预览内容和生成教学材料</div>
+        </div>
       </div>
       <div class="toolbar-center">
         <el-input
           v-model="searchQuery"
-          placeholder="搜索目录..."
+          placeholder="搜索当前目录和文件..."
           prefix-icon="Search"
           clearable
-          size="small"
           class="search-input"
           @input="filterTree"
         />
       </div>
       <div class="toolbar-right">
-        <el-button size="small" @click="showJoinDialog = true"
-          ><el-icon><Link /></el-icon>加入共享</el-button
-        >
-        <el-button size="small" @click="handleAddRootFolder"
-          ><el-icon><FolderAdd /></el-icon>新建文件夹</el-button
-        >
-        <el-button size="small" @click="handleUploadFile"
-          ><el-icon><Upload /></el-icon>上传文件</el-button
-        >
-        <el-button type="primary" size="small" @click="showCreateKbDialog = true"
-          ><el-icon><FolderAdd /></el-icon>新建知识库</el-button
-        >
+        <el-button type="primary" @click="handleUploadToCurrent">
+          <el-icon><Upload /></el-icon>上传文件
+        </el-button>
+        <el-dropdown trigger="click" @command="handleCreateCommand">
+          <el-button
+            ><el-icon><FolderAdd /></el-icon>新建</el-button
+          >
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="folder">新建文件夹</el-dropdown-item>
+              <el-dropdown-item command="knowledge-base">新建团队知识库</el-dropdown-item>
+              <el-dropdown-item command="join" divided>加入团队知识库</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
       </div>
     </div>
 
@@ -39,9 +46,10 @@
           <el-icon class="is-loading" :size="20"><Loading /></el-icon><span>加载中...</span>
         </div>
         <template v-else>
-          <!-- 我的知识库 -->
+          <!-- 个人空间 -->
           <div class="section-header">
-            <el-icon :size="14"><FolderOpened /></el-icon><span>我的知识库</span>
+            <el-icon :size="14"><FolderOpened /></el-icon><span>个人空间</span>
+            <span class="section-count">{{ personalDocumentCount }} 个文档</span>
           </div>
           <el-tree
             ref="treeRef"
@@ -54,7 +62,6 @@
             :allow-drag="() => true"
             :highlight-current="true"
             :expand-on-click-node="false"
-            default-expand-all
             @node-click="handleNodeClick"
             @node-drop="handleNodeDrop"
             @node-contextmenu="handleContextMenu"
@@ -89,14 +96,19 @@
             </template>
           </el-tree>
 
-          <!-- 我创建的 -->
-          <div v-if="myKbs.length > 0" class="section-header shared-header">
-            <el-icon :size="14"><Star /></el-icon><span>我创建的</span>
+          <div class="section-header shared-header team-header">
+            <el-icon :size="14"><Share /></el-icon><span>团队知识库</span>
+            <el-button link size="small" @click="showJoinDialog = true">加入</el-button>
+          </div>
+          <!-- 我管理的 -->
+          <div v-if="myKbs.length > 0" class="subsection-label">
+            <el-icon :size="13"><Star /></el-icon><span>我管理的</span>
           </div>
           <template v-for="kb in myKbs" :key="kb.id">
             <div
               class="kb-list-item"
-              @click="toggleKbExpand(kb.id)"
+              :class="{ active: activeSpaceKbId === kb.id }"
+              @click="selectKnowledgeBase(kb.id)"
               @contextmenu.prevent="openKbSettings(kb)"
             >
               <el-icon
@@ -131,7 +143,6 @@
                 :draggable="false"
                 :highlight-current="true"
                 :expand-on-click-node="false"
-                default-expand-all
                 @node-click="handleNodeClick"
                 @node-contextmenu="handleContextMenu"
                 class="kb-inline-tree"
@@ -154,11 +165,16 @@
           </template>
 
           <!-- 我加入的 -->
-          <div v-if="joinedKbs.length > 0" class="section-header shared-header">
-            <el-icon :size="14"><Share /></el-icon><span>我加入的</span>
+          <div v-if="joinedKbs.length > 0" class="subsection-label joined-label">
+            <el-icon :size="13"><Link /></el-icon><span>我加入的</span>
           </div>
           <template v-for="kb in joinedKbs" :key="kb.id">
-            <div class="kb-list-item" @click="toggleKbExpand(kb.id)" @contextmenu.prevent="null">
+            <div
+              class="kb-list-item"
+              :class="{ active: activeSpaceKbId === kb.id }"
+              @click="selectKnowledgeBase(kb.id)"
+              @contextmenu.prevent="null"
+            >
               <el-icon
                 :size="14"
                 color="#999"
@@ -188,7 +204,6 @@
                 :draggable="false"
                 :highlight-current="true"
                 :expand-on-click-node="false"
-                default-expand-all
                 @node-click="handleNodeClick"
                 @node-contextmenu="handleContextMenu"
                 class="kb-inline-tree"
@@ -222,108 +237,272 @@
       </aside>
 
       <main class="kb-content">
-        <div v-if="!selectedNode" class="content-empty">
-          <el-icon :size="64" color="#dcdfe6"><FolderOpened /></el-icon>
-          <p>从左侧目录选择一个文件查看内容</p>
-        </div>
-        <div v-else-if="selectedNode.type === 'folder'" class="content-folder">
-          <div class="folder-header">
-            <el-icon :size="28" color="#e6a23c"><FolderOpened /></el-icon>
-            <h2>{{ selectedNode.label }}</h2>
+        <section class="directory-pane">
+          <div class="directory-header">
+            <el-breadcrumb separator="/" class="kb-breadcrumb">
+              <el-breadcrumb-item>
+                <span class="breadcrumb-link" @click="clearSelection">{{ selectedSpaceName }}</span>
+              </el-breadcrumb-item>
+              <el-breadcrumb-item v-for="item in currentPath" :key="item.id">
+                <span class="breadcrumb-link" @click="handleNodeClick(item)">{{ item.label }}</span>
+              </el-breadcrumb-item>
+            </el-breadcrumb>
+            <div class="directory-title-row">
+              <div>
+                <h2>{{ currentDirectoryTitle }}</h2>
+                <p>{{ visibleCurrentItems.length }} 项内容</p>
+              </div>
+              <div class="directory-actions">
+                <el-button size="small" @click="handleAddToCurrent">
+                  <el-icon><FolderAdd /></el-icon>文件夹
+                </el-button>
+                <el-button size="small" type="primary" @click="handleUploadToCurrent">
+                  <el-icon><Upload /></el-icon>上传到这里
+                </el-button>
+              </div>
+            </div>
           </div>
-          <div class="folder-stats">
-            <div class="stat-card">
-              <span class="stat-num">{{ countItems(selectedNode, 'folder') }}</span
-              ><span class="stat-label">子文件夹</span>
+
+          <div class="resource-table">
+            <div class="resource-table-head">
+              <span>名称</span><span>状态</span><span>更新时间</span><span>操作</span>
             </div>
-            <div class="stat-card">
-              <span class="stat-num">{{ countItems(selectedNode, 'file') }}</span
-              ><span class="stat-label">文档</span>
+            <div
+              v-for="item in visibleCurrentItems"
+              :key="item.id"
+              class="resource-row"
+              :class="{ selected: selectedNode?.id === item.id }"
+              @click="handleNodeClick(item)"
+              @dblclick="item.type === 'folder' && handleNodeClick(item)"
+              @contextmenu="handleContextMenu($event, item)"
+            >
+              <div class="resource-name">
+                <span class="resource-icon" :class="item.type">
+                  <el-icon v-if="item.type === 'folder'" :size="19"><FolderOpened /></el-icon>
+                  <el-icon v-else :size="18"><Document /></el-icon>
+                </span>
+                <div>
+                  <strong :title="item.label">{{ item.label }}</strong>
+                  <small>{{
+                    item.type === 'folder'
+                      ? `${item.children?.length || 0} 项`
+                      : fileType(item.label)
+                  }}</small>
+                </div>
+              </div>
+              <div>
+                <el-tag v-if="item.type === 'folder'" size="small" type="info" effect="plain"
+                  >目录</el-tag
+                >
+                <el-tag v-else size="small" :type="resourceStatusType(item)" effect="plain">
+                  {{ resourceStatus(item) }}
+                </el-tag>
+              </div>
+              <span class="resource-time">{{ formatUpdatedAt(item.updatedAt) }}</span>
+              <div class="resource-actions">
+                <el-button
+                  v-if="item.type === 'folder'"
+                  link
+                  size="small"
+                  @click.stop="openUploadForFolder(item)"
+                  >上传</el-button
+                >
+                <el-button link size="small" @click.stop="openNodeMenu($event, item)"
+                  >更多</el-button
+                >
+              </div>
+            </div>
+            <div v-if="!visibleCurrentItems.length" class="directory-empty">
+              <el-icon :size="42"><FolderOpened /></el-icon>
+              <p>{{ searchQuery ? '没有匹配的文件或文件夹' : '这个目录还是空的' }}</p>
+              <el-button
+                v-if="!searchQuery"
+                type="primary"
+                size="small"
+                @click="handleUploadToCurrent"
+                >上传第一个文件</el-button
+              >
             </div>
           </div>
-        </div>
-        <div v-else class="content-file">
-          <div class="file-header">
-            <div class="file-header-left">
-              <el-icon :size="24" color="#409eff"><Document /></el-icon>
-              <h2>{{ selectedNode.label }}</h2>
-            </div>
-            <div class="file-header-right">
-              <el-tag size="small" type="info" effect="plain">预览</el-tag>
+        </section>
+
+        <aside class="preview-pane">
+          <template v-if="selectedNode?.type === 'file'">
+            <div class="preview-header">
+              <div class="preview-file-title">
+                <span class="resource-icon file"
+                  ><el-icon :size="20"><Document /></el-icon
+                ></span>
+                <div>
+                  <h3>{{ selectedNode.label }}</h3>
+                  <p>{{ fileType(selectedNode.label) }} · {{ resourceStatus(selectedNode) }}</p>
+                </div>
+              </div>
               <el-button
                 v-if="isPptFile(selectedNode.label)"
                 size="small"
                 type="warning"
                 :icon="MagicStick"
                 @click="openGenerateDialog"
-                >🤖 AI 生成教学材料</el-button
+                >AI 生成材料</el-button
               >
             </div>
-          </div>
-          <!-- 已生成的草稿 -->
-          <div v-if="drafts.previews.length || drafts.quizzes.length" class="file-drafts">
-            <el-divider />
-            <h4>📋 已生成的教学材料</h4>
-            <div
-              v-for="p in drafts.previews"
-              :key="'p' + p.id"
-              class="draft-item"
-              style="cursor: pointer"
-              @click="viewDraft('preview', p)"
-            >
-              <div class="draft-info">
-                <span class="draft-tag preview">预习</span><span>{{ p.title }}</span>
+
+            <el-tabs v-model="previewTab" class="preview-tabs">
+              <el-tab-pane label="内容预览" name="content">
+                <div class="preview-scroll file-body">
+                  <div
+                    v-if="selectedNode.loadState === 'ready' && selectedNode.content"
+                    class="markdown-preview"
+                    v-html="renderMarkdown(selectedNode.content)"
+                  />
+                  <div v-else class="content-empty compact">
+                    <el-icon :size="42" color="#c0c4cc"><Loading class="is-loading" /></el-icon>
+                    <p>{{ resourceStatus(selectedNode) }}</p>
+                  </div>
+                </div>
+              </el-tab-pane>
+              <el-tab-pane
+                :label="`教学材料 (${materials.previews.length + materials.questions.length})`"
+                name="materials"
+              >
+                <div class="preview-scroll material-panel">
+                  <div class="material-panel-header">
+                    <div>
+                      <strong>已生成材料</strong>
+                      <p>预习内容和课堂题目统一放在这里</p>
+                    </div>
+                    <el-button
+                      v-if="isPptFile(selectedNode.label)"
+                      size="small"
+                      type="warning"
+                      @click="openGenerateDialog"
+                      >生成材料</el-button
+                    >
+                  </div>
+                  <div
+                    v-if="materials.previews.length || materials.questions.length"
+                    class="file-drafts"
+                  >
+                    <div
+                      v-for="p in materials.previews"
+                      :key="'p' + p.id"
+                      class="draft-item"
+                      @click="viewMaterial('preview', p)"
+                    >
+                      <div class="draft-info">
+                        <span class="draft-tag preview">预习</span><span>{{ p.title }}</span>
+                      </div>
+                      <el-button
+                        text
+                        size="small"
+                        type="danger"
+                        @click.stop="deleteMaterial('preview', p.id)"
+                        >删除</el-button
+                      >
+                    </div>
+                    <div
+                      v-for="q in materials.questions"
+                      :key="'q' + q.id"
+                      class="draft-item"
+                      @click="viewMaterial('quiz', q)"
+                    >
+                      <div class="draft-info">
+                        <el-tag
+                          size="small"
+                          :type="
+                            q.quizType === 'CHOICE'
+                              ? 'primary'
+                              : q.quizType === 'OPEN'
+                                ? 'success'
+                                : 'warning'
+                          "
+                        >
+                          {{ typeLabelZh(q.quizType || q.type) }}
+                        </el-tag>
+                        <span>{{ q.title }}</span>
+                      </div>
+                      <el-button
+                        text
+                        size="small"
+                        type="danger"
+                        @click.stop="deleteMaterial('quiz', q.id)"
+                        >删除</el-button
+                      >
+                    </div>
+                  </div>
+                  <el-empty v-else description="暂未生成教学材料" :image-size="64" />
+                </div>
+              </el-tab-pane>
+              <el-tab-pane label="文件信息" name="info">
+                <div class="preview-scroll file-info-panel">
+                  <div>
+                    <span>文件名称</span><strong>{{ selectedNode.label }}</strong>
+                  </div>
+                  <div>
+                    <span>文件类型</span><strong>{{ fileType(selectedNode.label) }}</strong>
+                  </div>
+                  <div>
+                    <span>当前状态</span
+                    ><el-tag size="small" :type="resourceStatusType(selectedNode)">{{
+                      resourceStatus(selectedNode)
+                    }}</el-tag>
+                  </div>
+                  <div>
+                    <span>更新时间</span
+                    ><strong>{{ formatUpdatedAt(selectedNode.updatedAt) }}</strong>
+                  </div>
+                  <div>
+                    <span>所属空间</span><strong>{{ selectedSpaceName }}</strong>
+                  </div>
+                </div>
+              </el-tab-pane>
+            </el-tabs>
+          </template>
+
+          <template v-else>
+            <div class="overview-panel">
+              <span class="overview-icon"
+                ><el-icon :size="28"><FolderOpened /></el-icon
+              ></span>
+              <h3>{{ selectedNode?.label || '知识库概览' }}</h3>
+              <p>
+                {{
+                  selectedNode
+                    ? '从中间选择文档即可在这里预览'
+                    : '选择左侧知识库或目录开始整理教学资料'
+                }}
+              </p>
+              <div class="overview-stats">
+                <div>
+                  <strong>{{
+                    selectedNode ? countItems(selectedNode, 'folder') : personalFolderCount
+                  }}</strong
+                  ><span>文件夹</span>
+                </div>
+                <div>
+                  <strong>{{
+                    selectedNode ? countItems(selectedNode, 'file') : personalDocumentCount
+                  }}</strong
+                  ><span>文档</span>
+                </div>
+                <div>
+                  <strong>{{ myKbs.length + joinedKbs.length }}</strong
+                  ><span>团队空间</span>
+                </div>
               </div>
-              <div class="draft-actions">
-                <el-button
-                  text
-                  size="small"
-                  type="danger"
-                  @click.stop="deleteDraft('preview', p.id)"
-                  >🗑</el-button
-                >
+              <div class="overview-tips">
+                <strong>快速开始</strong>
+                <button type="button" @click="handleUploadToCurrent">
+                  <el-icon><Upload /></el-icon>上传教学资料
+                </button>
+                <button type="button" @click="handleAddToCurrent">
+                  <el-icon><FolderAdd /></el-icon>创建课程文件夹
+                </button>
               </div>
             </div>
-            <div
-              v-for="q in drafts.quizzes"
-              :key="'q' + q.id"
-              class="draft-item"
-              style="cursor: pointer"
-              @click="viewDraft('quiz', q)"
-            >
-              <div class="draft-info">
-                <el-tag
-                  size="small"
-                  :type="
-                    q.quizType === 'CHOICE'
-                      ? 'primary'
-                      : q.quizType === 'OPEN'
-                        ? 'success'
-                        : 'warning'
-                  "
-                  >{{ typeLabelZh(q.quizType || q.type) }}</el-tag
-                ><span>{{ q.title }}</span>
-              </div>
-              <div class="draft-actions">
-                <el-button text size="small" type="danger" @click.stop="deleteDraft('quiz', q.id)"
-                  >🗑</el-button
-                >
-              </div>
-            </div>
-            <el-divider />
-          </div>
-          <div class="file-body">
-            <div
-              v-if="selectedNode.content"
-              class="markdown-preview"
-              v-html="renderMarkdown(selectedNode.content)"
-            />
-            <div v-else class="content-empty">
-              <el-icon :size="48" color="#dcdfe6"><Tickets /></el-icon>
-              <p>文档正在处理中，请稍后查看...</p>
-            </div>
-          </div>
-        </div>
+          </template>
+        </aside>
       </main>
     </div>
 
@@ -341,7 +520,11 @@
       >
         <el-icon><Upload /></el-icon>上传文件到此
       </div>
-      <div class="context-menu-item" @click="contextAddFolder">
+      <div
+        v-if="contextMenu.node?.type === 'folder'"
+        class="context-menu-item"
+        @click="contextAddFolder"
+      >
         <el-icon><FolderAdd /></el-icon>新建子文件夹
       </div>
       <div class="context-menu-item" @click="contextRename">
@@ -502,7 +685,13 @@
     >
       <div class="upload-target">
         <span class="upload-target-label">上传到：</span>
-        <el-select v-model="uploadKbId" size="small" style="width: 160px" placeholder="我的知识库">
+        <el-select
+          v-model="uploadKbId"
+          size="small"
+          style="width: 180px"
+          placeholder="个人空间"
+          @change="uploadParentNode = null"
+        >
           <el-option :value="null" label="我的知识库" />
           <el-option
             v-for="kb in [...myKbs, ...joinedKbs]"
@@ -511,6 +700,9 @@
             :label="kb.name"
           />
         </el-select>
+        <span v-if="uploadParentNode" class="upload-folder-path">
+          / {{ uploadParentNode.label }}
+        </span>
       </div>
       <el-upload
         ref="uploadRef"
@@ -540,49 +732,205 @@
       >
     </el-dialog>
 
-    <!-- 草稿详情 -->
-    <el-dialog
+    <!-- 教学材料详情 -->
+    <el-drawer
       v-model="showDraftDetail"
-      :title="draftDetail?.type === 'preview' ? '📖 预习作业详情' : '✏️ 试题详情'"
-      width="560px"
+      class="teaching-detail-drawer"
+      size="min(760px, 94vw)"
+      :with-header="false"
       append-to-body
+      destroy-on-close
+      @closed="draftDetail = null"
     >
-      <div v-if="draftDetail?.type === 'preview'" class="draft-detail">
-        <p><strong>知识点：</strong>{{ draftDetail.data.topic || draftDetail.data.title }}</p>
-        <div
-          v-if="draftDetail.data.guideText"
-          class="gen-guide"
-          v-html="renderMarkdown(draftDetail.data.guideText)"
-        ></div>
-        <div v-if="draftDetail.data.discussionQuestion">
-          <p><strong>课堂讨论：</strong>{{ draftDetail.data.discussionQuestion }}</p>
-        </div>
-      </div>
-      <div v-else-if="draftDetail?.type === 'quiz'" class="draft-detail">
-        <p><strong>知识点：</strong>{{ draftDetail.data.knowledgePoint }}</p>
-        <p>
-          <strong>类型：</strong
-          >{{ typeLabelZh(draftDetail.data.quizType || draftDetail.data.type) }}
-        </p>
-        <p><strong>题目：</strong>{{ draftDetail.data.title }}</p>
-        <div v-if="draftDetail.data.options?.length" style="margin: 8px 0">
-          <p><strong>选项：</strong></p>
-          <div
-            v-for="o in draftDetail.data.options"
-            :key="o.key"
-            style="margin: 2px 0 2px 16px; font-size: 13px; color: #606266"
-          >
-            {{ o.key }}. {{ o.text }}
+      <div v-if="draftDetail" class="teaching-detail">
+        <header class="detail-drawer-header">
+          <div>
+            <span class="detail-eyebrow">教学材料详情</span>
+            <h2>{{ draftDetail.type === 'preview' ? '预习材料' : '课堂试题' }}</h2>
           </div>
-        </div>
-        <p v-if="draftDetail.data.correctKey">
-          <strong>答案：</strong>{{ draftDetail.data.correctKey }}
-        </p>
-        <p v-if="draftDetail.data.timeLimit">
-          <strong>限时：</strong>{{ draftDetail.data.timeLimit }}s
-        </p>
+          <el-button
+            class="detail-close"
+            text
+            circle
+            aria-label="关闭详情"
+            @click="showDraftDetail = false"
+          >
+            <el-icon><Close /></el-icon>
+          </el-button>
+        </header>
+
+        <main class="detail-drawer-content">
+          <div class="detail-source-row">
+            <el-icon><Document /></el-icon>
+            <span>来源文件</span>
+            <strong>{{ selectedNode?.label || '当前教学材料' }}</strong>
+            <span v-if="draftDetail.data.createdAt" class="detail-created-at">
+              {{ formatUpdatedAt(draftDetail.data.createdAt) }}
+            </span>
+          </div>
+
+          <template v-if="draftDetail.type === 'quiz'">
+            <div class="detail-tag-row">
+              <el-tag effect="light" type="primary">
+                {{ typeLabelZh(draftDetail.data.quizType || draftDetail.data.type) }}
+              </el-tag>
+              <el-tag v-if="draftDetail.data.difficulty" effect="plain" type="warning">
+                {{ diffLabel(draftDetail.data.difficulty) }}
+              </el-tag>
+              <el-tag :type="draftStatusType(draftDetail.data)" effect="plain">
+                {{ draftStatusLabel(draftDetail.data) }}
+              </el-tag>
+            </div>
+
+            <section class="question-heading">
+              <span class="question-sequence">第 {{ quizDisplayPosition }} 题</span>
+              <h3>{{ draftDetail.data.question || draftDetail.data.title }}</h3>
+            </section>
+
+            <div v-if="draftDetail.data.knowledgePoint" class="knowledge-focus">
+              <span>考查知识点</span>
+              <strong>{{ draftDetail.data.knowledgePoint }}</strong>
+            </div>
+
+            <section v-if="draftDetail.data.options?.length" class="detail-section">
+              <div class="detail-section-title">
+                <span>题目选项</span>
+                <small>正确选项已标记</small>
+              </div>
+              <div class="detail-option-list">
+                <div
+                  v-for="option in draftDetail.data.options"
+                  :key="option.key"
+                  class="detail-option"
+                  :class="{ correct: isCorrectOption(draftDetail.data, option.key) }"
+                >
+                  <span class="detail-option-key">{{ option.key }}</span>
+                  <span class="detail-option-text">{{ option.text }}</span>
+                  <span v-if="isCorrectOption(draftDetail.data, option.key)" class="correct-mark">
+                    <el-icon><CircleCheckFilled /></el-icon>正确答案
+                  </span>
+                </div>
+              </div>
+            </section>
+
+            <section class="answer-panel">
+              <div class="answer-panel-icon">
+                <el-icon><CircleCheckFilled /></el-icon>
+              </div>
+              <div>
+                <span>参考答案</span>
+                <strong>{{ draftDetail.data.correctKey || '暂未设置参考答案' }}</strong>
+                <p v-if="correctOptionText">{{ correctOptionText }}</p>
+              </div>
+            </section>
+
+            <section class="detail-meta-grid">
+              <div class="detail-meta-card">
+                <el-icon><Clock /></el-icon>
+                <span>建议作答时间</span>
+                <strong>{{ formatTimeLimit(draftDetail.data.timeLimit) }}</strong>
+              </div>
+              <div class="detail-meta-card">
+                <el-icon><Star /></el-icon>
+                <span>题目状态</span>
+                <strong>{{ draftStatusLabel(draftDetail.data) }}</strong>
+              </div>
+            </section>
+          </template>
+
+          <template v-else>
+            <div class="detail-tag-row">
+              <el-tag type="warning" effect="light">预习材料</el-tag>
+              <el-tag :type="draftStatusType(draftDetail.data)" effect="plain">
+                {{ draftStatusLabel(draftDetail.data) }}
+              </el-tag>
+              <el-tag v-if="draftDetail.data.questions?.length" type="info" effect="plain">
+                {{ draftDetail.data.questions.length }} 道自测题
+              </el-tag>
+            </div>
+
+            <section class="question-heading preview-heading">
+              <span class="question-sequence">课前导学</span>
+              <h3>{{ draftDetail.data.title || draftDetail.data.topic || '预习材料' }}</h3>
+            </section>
+
+            <div
+              v-if="draftDetail.data.knowledgePoint || draftDetail.data.topic"
+              class="knowledge-focus"
+            >
+              <span>核心知识点</span>
+              <strong>{{ draftDetail.data.knowledgePoint || draftDetail.data.topic }}</strong>
+            </div>
+
+            <section v-if="draftDetail.data.guideText" class="detail-section guide-section">
+              <div class="detail-section-title">
+                <span>预习导读</span>
+                <small>课前快速了解重点内容</small>
+              </div>
+              <div class="detail-guide" v-html="renderMarkdown(draftDetail.data.guideText)"></div>
+            </section>
+
+            <section v-if="draftDetail.data.discussionQuestion" class="discussion-callout">
+              <span class="discussion-label">课堂讨论</span>
+              <p>{{ draftDetail.data.discussionQuestion }}</p>
+            </section>
+
+            <section v-if="draftDetail.data.questions?.length" class="detail-section">
+              <div class="detail-section-title">
+                <span>配套自测</span>
+                <small>共 {{ draftDetail.data.questions.length }} 题</small>
+              </div>
+              <div class="self-test-list">
+                <article
+                  v-for="(question, index) in draftDetail.data.questions"
+                  :key="`${question.question || question.title}-${index}`"
+                  class="self-test-card"
+                >
+                  <div class="self-test-number">{{ index + 1 }}</div>
+                  <div class="self-test-content">
+                    <h4>{{ question.question || question.title }}</h4>
+                    <div v-if="question.options?.length" class="self-test-options">
+                      <span
+                        v-for="option in question.options"
+                        :key="option.key"
+                        :class="{ correct: isCorrectOption(question, option.key) }"
+                      >
+                        {{ option.key }}. {{ option.text }}
+                      </span>
+                    </div>
+                    <div v-if="question.correctKey" class="self-test-answer">
+                      参考答案：{{ question.correctKey }}
+                    </div>
+                    <p v-if="question.explanation" class="self-test-explanation">
+                      {{ question.explanation }}
+                    </p>
+                  </div>
+                </article>
+              </div>
+            </section>
+          </template>
+        </main>
+
+        <footer class="detail-drawer-footer">
+          <template v-if="draftDetail.type === 'quiz'">
+            <el-button :disabled="currentQuizIndex <= 0" @click="navigateQuiz(-1)">
+              <el-icon><ArrowLeft /></el-icon>上一题
+            </el-button>
+            <span>第 {{ quizDisplayPosition }} / {{ materials.questions.length }} 题</span>
+            <el-button
+              :disabled="currentQuizIndex < 0 || currentQuizIndex >= materials.questions.length - 1"
+              @click="navigateQuiz(1)"
+            >
+              下一题<el-icon><ArrowRight /></el-icon>
+            </el-button>
+          </template>
+          <template v-else>
+            <span>预习材料阅读预览</span>
+            <el-button type="primary" @click="showDraftDetail = false">完成查看</el-button>
+          </template>
+        </footer>
       </div>
-    </el-dialog>
+    </el-drawer>
 
     <!-- AI 生成教学材料 -->
     <el-dialog
@@ -792,7 +1140,7 @@
                 </p>
                 <div style="margin-top: 4px; display: flex; align-items: center; gap: 8px">
                   <el-button size="small" :loading="gen.savingQuiz === i" @click="saveQuiz(i)"
-                    >💾 保存到草稿库和题库</el-button
+                    >💾 保存到题库</el-button
                   >
                   <span v-if="q.published" style="color: #67c23a; font-size: 12px">✅ 已保存</span>
                 </div>
@@ -823,7 +1171,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, nextTick, onMounted, onBeforeUnmount, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   FolderOpened,
@@ -833,12 +1181,15 @@ import {
   UploadFilled,
   Edit,
   Delete,
-  Tickets,
   Loading,
   Share,
   Link,
   Setting,
   Star,
+  Clock,
+  Close,
+  CircleCheckFilled,
+  ArrowLeft,
   ArrowRight,
   MagicStick,
 } from '@element-plus/icons-vue'
@@ -868,6 +1219,9 @@ interface TreeNode {
   children?: TreeNode[]
   content?: string
   kbId?: number
+  createdAt?: string
+  updatedAt?: string
+  loadState?: 'idle' | 'loading' | 'ready' | 'processing' | 'error'
 }
 interface SharedKb {
   id: number
@@ -898,17 +1252,24 @@ interface GeneratedQuestion {
   knowledgePoint?: string
   options?: GeneratedOption[]
   correctKey?: string
+  explanation?: string
   timeLimit?: number
   published?: boolean
+  status?: string
+  archived?: boolean
+  createdAt?: string
 }
 interface GeneratedPreview {
   id?: number
   topic?: string
   title?: string
+  knowledgePoint?: string
   guideText?: string
   discussionQuestion?: string
   questions?: GeneratedQuestion[]
   published?: boolean
+  status?: string
+  createdAt?: string
 }
 interface GenResult {
   preview: GeneratedPreview | null
@@ -923,9 +1284,9 @@ interface SavedPreview extends GeneratedPreview {
 interface SavedQuestion extends GeneratedQuestion {
   id: number
 }
-interface TeachingDrafts {
+interface TeachingMaterials {
   previews: SavedPreview[]
-  quizzes: SavedQuestion[]
+  questions: SavedQuestion[]
 }
 type DraftDetail =
   | { type: 'preview'; data: GeneratedPreview }
@@ -936,6 +1297,8 @@ const treeRef = ref<InstanceType<typeof ElTree>>()
 const searchQuery = ref('')
 const myTreeData = ref<TreeNode[]>([])
 const selectedNode = ref<TreeNode | null>(null)
+const activeSpaceKbId = ref<number | null>(null)
+const previewTab = ref('content')
 const loading = ref(true)
 const expandedKbs = ref(new Set<number>())
 const kbTreeCache = ref(new Map<number, TreeNode[]>())
@@ -943,6 +1306,100 @@ const kbLoading = ref(new Map<number, boolean>())
 const myKbs = ref<SharedKb[]>([])
 const joinedKbs = ref<SharedKb[]>([])
 const treeProps = { children: 'children', label: 'label' }
+
+const currentRoots = computed(() =>
+  activeSpaceKbId.value == null
+    ? myTreeData.value
+    : (kbTreeCache.value.get(activeSpaceKbId.value) ?? []),
+)
+const selectedSpaceName = computed(() => {
+  if (activeSpaceKbId.value == null) return '个人空间'
+  return (
+    [...myKbs.value, ...joinedKbs.value].find((kb) => kb.id === activeSpaceKbId.value)?.name ??
+    '团队知识库'
+  )
+})
+const selectedPath = computed(() =>
+  selectedNode.value ? findNodePath(currentRoots.value, selectedNode.value.id) : [],
+)
+const currentPath = computed(() =>
+  selectedNode.value?.type === 'file' ? selectedPath.value.slice(0, -1) : selectedPath.value,
+)
+const currentFolder = computed<TreeNode | null>(() => {
+  if (selectedNode.value?.type === 'folder') return selectedNode.value
+  const path = selectedPath.value
+  return path.length > 1 ? (path[path.length - 2] ?? null) : null
+})
+const currentItems = computed(() => {
+  const items = currentFolder.value?.children ?? currentRoots.value
+  return [...items].sort((a, b) => {
+    if (a.type !== b.type) return a.type === 'folder' ? -1 : 1
+    return a.label.localeCompare(b.label, 'zh-CN')
+  })
+})
+const visibleCurrentItems = computed(() => {
+  const query = searchQuery.value.trim().toLowerCase()
+  return query
+    ? currentItems.value.filter((item) => item.label.toLowerCase().includes(query))
+    : currentItems.value
+})
+const currentDirectoryTitle = computed(() => currentFolder.value?.label ?? selectedSpaceName.value)
+const personalDocumentCount = computed(() => countTreeItems(myTreeData.value, 'file'))
+const personalFolderCount = computed(() => countTreeItems(myTreeData.value, 'folder'))
+
+function findNodePath(nodes: TreeNode[], id: number, parents: TreeNode[] = []): TreeNode[] {
+  for (const node of nodes) {
+    const path = [...parents, node]
+    if (node.id === id) return path
+    const childPath = findNodePath(node.children ?? [], id, path)
+    if (childPath.length) return childPath
+  }
+  return []
+}
+
+function restoreSelection(nodeId: number | undefined, kbId: number | null) {
+  if (nodeId == null) return
+  const roots = kbId == null ? myTreeData.value : (kbTreeCache.value.get(kbId) ?? [])
+  const path = findNodePath(roots, nodeId)
+  if (path.length) selectedNode.value = path[path.length - 1] ?? null
+}
+
+function countTreeItems(nodes: TreeNode[], type: 'folder' | 'file'): number {
+  return nodes.reduce(
+    (total, node) =>
+      total + (node.type === type ? 1 : 0) + countTreeItems(node.children ?? [], type),
+    0,
+  )
+}
+
+function fileType(name: string) {
+  const extension = name.split('.').pop()?.toUpperCase()
+  return extension && extension !== name.toUpperCase() ? `${extension} 文档` : '文档'
+}
+
+function resourceStatus(node: TreeNode) {
+  if (node.type === 'folder') return '目录'
+  if (node.loadState === 'ready') return '可预览'
+  if (node.loadState === 'loading') return '读取中'
+  if (node.loadState === 'processing') return '处理中'
+  if (node.loadState === 'error') return '加载失败'
+  return '已收录'
+}
+
+function resourceStatusType(node: TreeNode): 'success' | 'warning' | 'danger' | 'info' {
+  const status = resourceStatus(node)
+  if (status === '可预览') return 'success'
+  if (status === '读取中' || status === '处理中') return 'warning'
+  if (status === '加载失败') return 'danger'
+  return 'info'
+}
+
+function formatUpdatedAt(value?: string) {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '—'
+  return date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })
+}
 /* ===== Shared KB API ===== */
 async function fetchMyKbs() {
   const res = await request.get('/shared-kb/my')
@@ -968,6 +1425,8 @@ function buildTree(flat: FlatNode[]): TreeNode[] {
       docId: n.docId ?? undefined,
       children: [],
       kbId: n.kbId,
+      createdAt: n.createdAt,
+      updatedAt: n.updatedAt,
     })
   const roots: TreeNode[] = []
   for (const n of flat) {
@@ -1006,6 +1465,13 @@ async function toggleKbExpand(kbId: number) {
       }
     }
   }
+}
+
+async function selectKnowledgeBase(kbId: number) {
+  activeSpaceKbId.value = kbId
+  selectedNode.value = null
+  previewTab.value = 'content'
+  if (!expandedKbs.value.has(kbId)) await toggleKbExpand(kbId)
 }
 
 /* ===== Init ===== */
@@ -1062,6 +1528,9 @@ function handleContextMenu(event: MouseEvent, data: TreeNode) {
   event.preventDefault()
   Object.assign(contextMenu, { visible: true, x: event.clientX, y: event.clientY, node: data })
 }
+function openNodeMenu(event: MouseEvent, data: TreeNode) {
+  handleContextMenu(event, data)
+}
 function hideContextMenu() {
   contextMenu.visible = false
   contextMenu.node = null
@@ -1083,14 +1552,28 @@ function contextUploadFile() {
 }
 function contextAddFolder() {
   addDialog.parentNode = contextMenu.node
+  addDialog.kbId = contextMenu.node?.kbId ?? activeSpaceKbId.value
   hideContextMenu()
   addDialog.name = ''
   addDialog.visible = true
 }
-function contextRename() {
+async function contextRename() {
   const n = contextMenu.node
   hideContextMenu()
-  if (n) startRename(n)
+  if (!n) return
+  try {
+    const { value } = await ElMessageBox.prompt('请输入新的名称', '重命名', {
+      inputValue: n.label,
+      inputValidator: (input) => Boolean(input?.trim()) || '名称不能为空',
+    })
+    const name = value.trim()
+    if (name === n.label) return
+    await request.put(`/documents/directory/${n.id}/rename`, { label: name })
+    n.label = name
+    ElMessage.success('已重命名')
+  } catch (error: unknown) {
+    if (error !== 'cancel') ElMessage.error(getApiErrorMessage(error, '重命名失败'))
+  }
 }
 async function contextDelete() {
   const n = contextMenu.node
@@ -1104,6 +1587,10 @@ async function contextDelete() {
     )
     await request.delete(`/documents/directory/${n.id}`)
     if (selectedNode.value?.id === n.id) selectedNode.value = null
+    if (n.kbId != null) {
+      kbTreeCache.value.delete(n.kbId)
+      await refreshKbTree(n.kbId)
+    }
     await fetchTree()
     ElMessage.success('已删除')
   } catch (error: unknown) {
@@ -1117,9 +1604,16 @@ const addDialog = reactive({
   name: '',
   loading: false,
   parentNode: null as TreeNode | null,
+  kbId: null as number | null,
 })
-function handleAddRootFolder() {
-  addDialog.parentNode = null
+function handleCreateCommand(command: string) {
+  if (command === 'folder') handleAddToCurrent()
+  if (command === 'knowledge-base') showCreateKbDialog.value = true
+  if (command === 'join') showJoinDialog.value = true
+}
+function handleAddToCurrent() {
+  addDialog.parentNode = currentFolder.value
+  addDialog.kbId = activeSpaceKbId.value
   addDialog.name = ''
   addDialog.visible = true
 }
@@ -1128,7 +1622,8 @@ async function confirmAddFolder() {
   if (!name) return
   addDialog.loading = true
   try {
-    const kbId = addDialog.parentNode?.kbId ?? null
+    const kbId = addDialog.parentNode?.kbId ?? addDialog.kbId
+    const parentId = addDialog.parentNode?.id
     const body: { label: string; kbId: number | null; parentId?: number } = { label: name, kbId }
     if (addDialog.parentNode) body.parentId = addDialog.parentNode.id
     await request.post(`/documents/directory/folder`, body)
@@ -1137,6 +1632,7 @@ async function confirmAddFolder() {
       await refreshKbTree(kbId)
     }
     await fetchTree()
+    restoreSelection(parentId, kbId)
     addDialog.visible = false
   } catch (error: unknown) {
     ElMessage.error(getApiErrorMessage(error, '创建文件夹失败'))
@@ -1280,10 +1776,16 @@ const uploadLoading = ref(false)
 const uploadParentNode = ref<TreeNode | null>(null)
 const uploadFileList = ref<UploadUserFile[]>([])
 const uploadKbId = ref<number | null>(null)
-function handleUploadFile() {
-  uploadParentNode.value = null
+function handleUploadToCurrent() {
+  uploadParentNode.value = currentFolder.value
   uploadFileList.value = []
-  uploadKbId.value = null
+  uploadKbId.value = activeSpaceKbId.value
+  uploadVisible.value = true
+}
+function openUploadForFolder(folder: TreeNode) {
+  uploadParentNode.value = folder
+  uploadFileList.value = []
+  uploadKbId.value = folder.kbId ?? activeSpaceKbId.value
   uploadVisible.value = true
 }
 function handleUploadChange(_uploadFile: UploadFile, uploadFiles: UploadFiles) {
@@ -1292,6 +1794,8 @@ function handleUploadChange(_uploadFile: UploadFile, uploadFiles: UploadFiles) {
 async function submitUpload() {
   if (uploadFileList.value.length === 0) return
   uploadLoading.value = true
+  const targetFolderId = uploadParentNode.value?.id
+  const targetKbId = uploadKbId.value
   let ok = 0
   try {
     for (const f of uploadFileList.value) {
@@ -1310,6 +1814,7 @@ async function submitUpload() {
       kbTreeCache.value.delete(uploadKbId.value)
       await refreshKbTree(uploadKbId.value)
     }
+    restoreSelection(targetFolderId, targetKbId)
     uploadVisible.value = false
     ElMessage.success(`成功上传 ${ok} 个文件`)
   } catch (error: unknown) {
@@ -1350,12 +1855,19 @@ function filterNode(value: string, data: TreeNode) {
 
 /* ===== Click ===== */
 function handleNodeClick(data: TreeNode) {
+  if (findNodePath(myTreeData.value, data.id).length) activeSpaceKbId.value = null
+  else if (data.kbId != null) activeSpaceKbId.value = data.kbId
   selectedNode.value = data
-  drafts.value = { previews: [], quizzes: [] }
+  previewTab.value = 'content'
+  materials.value = { previews: [], questions: [] }
   if (data.type === 'file' && data.docId) {
     loadFileContent(data)
-    loadDrafts(data.docId)
+    loadMaterials(data.docId)
   }
+}
+function clearSelection() {
+  selectedNode.value = null
+  previewTab.value = 'content'
 }
 const contentCache = new Map<string, string>()
 async function loadFileContent(node: TreeNode) {
@@ -1363,15 +1875,23 @@ async function loadFileContent(node: TreeNode) {
   const cached = contentCache.get(node.docId)
   if (cached !== undefined) {
     node.content = cached
+    node.loadState = 'ready'
     return
   }
+  node.loadState = 'loading'
   try {
     const r = await request.get(`/documents/${node.docId}/content`)
-    node.content =
-      typeof r.data === 'string' ? r.data : `# ${node.label}\n\n文档正在处理中，请稍后查看。`
-    if (node.content && !node.content.startsWith('#')) contentCache.set(node.docId, node.content)
+    if (typeof r.data === 'string') {
+      node.content = r.data
+      node.loadState = 'ready'
+      contentCache.set(node.docId, r.data)
+    } else {
+      node.content = undefined
+      node.loadState = 'processing'
+    }
   } catch {
-    node.content = `# ${node.label}\n\n暂无法加载文档内容。`
+    node.content = undefined
+    node.loadState = 'error'
   }
 }
 
@@ -1515,18 +2035,21 @@ async function savePreview() {
 }
 
 async function saveQuiz(index: number) {
-  if (!gen.result || !gen.publishClassId) return
+  if (!gen.result) return
   const quiz = gen.result.quizzes[index]
   if (!quiz) return
   gen.savingQuiz = index
   try {
-    await request.post('/documents/generate-materials/save-quiz', {
+    await request.post('/questions', {
       ...quiz,
-      classId: gen.publishClassId,
-      docId: selectedNode.value?.docId,
+      sourceDocId: selectedNode.value?.docId,
+      aiGenerated: true,
+      score: 10,
+      uploadRequired: false,
     })
     quiz.published = true
-    ElMessage.success('试题已保存到草稿库和题库')
+    if (selectedNode.value?.docId) await loadMaterials(selectedNode.value.docId)
+    ElMessage.success('试题已保存到题库')
   } catch (error: unknown) {
     ElMessage.error(getApiErrorMessage(error, '保存失败'))
   } finally {
@@ -1550,22 +2073,44 @@ function resetGen() {
   }
 }
 
-/* ===== 教学草稿 ===== */
-const drafts = ref<TeachingDrafts>({ previews: [], quizzes: [] })
+/* ===== 教学材料 ===== */
+const materials = ref<TeachingMaterials>({ previews: [], questions: [] })
 
-async function loadDrafts(docId: string) {
+async function loadMaterials(docId: string) {
   try {
-    const r = await request.get(`/documents/drafts?docId=${docId}`)
-    drafts.value = r.data || { previews: [], quizzes: [] }
+    const r = await request.get(`/documents/${docId}/materials`)
+    materials.value = r.data || { previews: [], questions: [] }
   } catch {
-    drafts.value = { previews: [], quizzes: [] }
+    materials.value = { previews: [], questions: [] }
   }
 }
 
 const draftDetail = ref<DraftDetail | null>(null)
 const showDraftDetail = ref(false)
 
-async function viewDraft(type: 'preview' | 'quiz', item: GeneratedPreview | GeneratedQuestion) {
+const currentQuizIndex = computed(() => {
+  if (draftDetail.value?.type !== 'quiz') return -1
+  const currentId = draftDetail.value.data.id
+  if (currentId != null)
+    return materials.value.questions.findIndex((question) => question.id === currentId)
+  return materials.value.questions.findIndex((question) => question === draftDetail.value?.data)
+})
+
+const quizDisplayPosition = computed(() =>
+  currentQuizIndex.value >= 0 ? currentQuizIndex.value + 1 : 1,
+)
+
+const correctOptionText = computed(() => {
+  if (draftDetail.value?.type !== 'quiz') return ''
+  const question = draftDetail.value.data
+  const correctKey = question.correctKey?.trim().toUpperCase()
+  if (!correctKey) return ''
+  return (
+    question.options?.find((option) => option.key.trim().toUpperCase() === correctKey)?.text ?? ''
+  )
+})
+
+async function viewMaterial(type: 'preview' | 'quiz', item: GeneratedPreview | GeneratedQuestion) {
   if (type === 'preview') {
     try {
       const r = await request.get(`/preview/${item.id}`)
@@ -1574,18 +2119,69 @@ async function viewDraft(type: 'preview' | 'quiz', item: GeneratedPreview | Gene
       draftDetail.value = { type: 'preview', data: item as GeneratedPreview }
     }
   } else {
-    draftDetail.value = { type: 'quiz', data: item as GeneratedQuestion }
+    try {
+      const response = await request.get(`/questions/${item.id}`)
+      draftDetail.value = { type: 'quiz', data: response.data.data || response.data }
+    } catch {
+      draftDetail.value = { type: 'quiz', data: item as GeneratedQuestion }
+    }
   }
   showDraftDetail.value = true
 }
 
-async function deleteDraft(type: string, id: number) {
+function navigateQuiz(offset: -1 | 1) {
+  const targetIndex = currentQuizIndex.value + offset
+  const target = materials.value.questions[targetIndex]
+  if (!target) return
+  draftDetail.value = { type: 'quiz', data: target }
+}
+
+function isCorrectOption(question: GeneratedQuestion, optionKey: string) {
+  return question.correctKey?.trim().toUpperCase() === optionKey.trim().toUpperCase()
+}
+
+function draftStatusLabel(item: GeneratedQuestion | GeneratedPreview) {
+  if ('type' in item && item.type) return item.archived ? '已归档' : '已保存到题库'
+  const status = item.status?.toUpperCase()
+  const labels: Record<string, string> = {
+    ACTIVE: '课堂作答中',
+    CLOSED: '已发送',
+    PUBLISHED: '已发布',
+    COMPLETED: '已完成',
+  }
+  if (status) return labels[status] ?? status
+  return item.published ? '已保存' : '预习材料'
+}
+
+function draftStatusType(
+  item: GeneratedQuestion | GeneratedPreview,
+): 'primary' | 'success' | 'warning' | 'danger' | 'info' {
+  if ('type' in item && item.type) return item.archived ? 'info' : 'success'
+  const status = item.status?.toUpperCase()
+  if (status === 'ACTIVE') return 'warning'
+  if (status === 'PUBLISHED' || status === 'COMPLETED') return 'success'
+  if (status === 'CLOSED') return 'primary'
+  return 'info'
+}
+
+function formatTimeLimit(seconds?: number) {
+  if (!seconds || seconds <= 0) return '未设置'
+  if (seconds < 60) return `${seconds} 秒`
+  if (seconds % 60 === 0) return `${seconds / 60} 分钟`
+  return `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`
+}
+
+async function deleteMaterial(type: string, id: number) {
   try {
-    await request.delete(`/documents/drafts/${type}/${id}`)
-    if (type === 'preview')
-      drafts.value.previews = drafts.value.previews.filter((preview) => preview.id !== id)
-    else drafts.value.quizzes = drafts.value.quizzes.filter((quiz) => quiz.id !== id)
-    ElMessage.success('已删除')
+    if (type === 'preview') {
+      await request.delete(`/documents/materials/previews/${id}`)
+      materials.value.previews = materials.value.previews.filter((preview) => preview.id !== id)
+      ElMessage.success('预习材料已删除')
+    } else {
+      await request.delete(`/questions/${id}`)
+      materials.value.questions = materials.value.questions.filter((question) => question.id !== id)
+      ElMessage.success('题目已归档')
+    }
   } catch {
     ElMessage.error('删除失败')
   }
@@ -1613,11 +2209,12 @@ function countItems(node: TreeNode, type: 'folder' | 'file') {
 .kb-toolbar {
   display: flex;
   align-items: center;
-  padding: 10px 16px;
+  min-height: 72px;
+  padding: 10px 20px;
   border-bottom: 1px solid #ebeef5;
   gap: 12px;
   flex-shrink: 0;
-  background: #d9ecff;
+  background: #ffffff;
 }
 .toolbar-left {
   display: flex;
@@ -1625,15 +2222,33 @@ function countItems(node: TreeNode, type: 'folder' | 'file') {
   gap: 8px;
   color: #409eff;
   font-weight: 600;
+  width: 280px;
   font-size: 15px;
   flex-shrink: 0;
 }
-.toolbar-icon {
+.toolbar-brand-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: #ecf5ff;
   color: #409eff;
+}
+.toolbar-title {
+  color: #303133;
+  font-size: 16px;
+  line-height: 1.3;
+}
+.toolbar-subtitle {
+  margin-top: 3px;
+  color: #909399;
+  font-size: 12px;
+  font-weight: 400;
 }
 .toolbar-center {
   flex: 1;
-  max-width: 320px;
+  max-width: 460px;
 }
 :deep(.search-input .el-input__wrapper) {
   background: #ffffff;
@@ -1647,14 +2262,10 @@ function countItems(node: TreeNode, type: 'folder' | 'file') {
 :deep(.search-input .el-input__inner::placeholder) {
   color: #909399;
 }
-.toolbar-right .el-button {
-  background: #409eff;
-  border-color: #409eff;
-  color: #fff;
-}
-.toolbar-right .el-button:hover {
-  background: #337ecc;
-  border-color: #337ecc;
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .kb-body {
   display: flex;
@@ -1663,12 +2274,12 @@ function countItems(node: TreeNode, type: 'folder' | 'file') {
 }
 
 .kb-sidebar {
-  width: 280px;
-  min-width: 280px;
+  width: 250px;
+  min-width: 250px;
   border-right: 1px solid #ebeef5;
   overflow-y: auto;
-  padding: 8px 0;
-  background: #d9ecff;
+  padding: 10px 0 16px;
+  background: #f7f9fc;
 }
 .section-header {
   display: flex;
@@ -1681,6 +2292,30 @@ function countItems(node: TreeNode, type: 'folder' | 'file') {
   text-transform: uppercase;
   letter-spacing: 0.5px;
   user-select: none;
+}
+.section-count {
+  margin-left: auto;
+  color: #b1b3b8;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.team-header .el-button {
+  margin-left: auto;
+}
+.subsection-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px 4px;
+  color: #909399;
+  font-size: 12px;
+}
+.subsection-label.joined-label {
+  margin-top: 8px;
+  border-top: 1px dashed #dcdfe6;
+  padding-top: 12px;
 }
 .section-header.clickable {
   cursor: pointer;
@@ -1810,9 +2445,343 @@ function countItems(node: TreeNode, type: 'folder' | 'file') {
 
 .kb-content {
   flex: 1;
-  overflow-y: auto;
-  padding: 24px 32px;
+  display: grid;
+  grid-template-columns: minmax(410px, 0.95fr) minmax(420px, 1.25fr);
+  gap: 12px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 12px;
+  background: #f2f4f7;
+}
+.directory-pane,
+.preview-pane {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   background: #ffffff;
+  border: 1px solid #e4e7ed;
+  border-radius: 10px;
+}
+.directory-pane {
+  display: flex;
+  flex-direction: column;
+}
+.directory-header {
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid #ebeef5;
+}
+.kb-breadcrumb {
+  min-height: 18px;
+  margin-bottom: 13px;
+  font-size: 12px;
+}
+.breadcrumb-link {
+  color: #606266;
+  cursor: pointer;
+}
+.breadcrumb-link:hover {
+  color: #409eff;
+}
+.directory-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.directory-title-row h2 {
+  margin: 0;
+  color: #303133;
+  font-size: 18px;
+}
+.directory-title-row p {
+  margin: 4px 0 0;
+  color: #909399;
+  font-size: 12px;
+}
+.directory-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.directory-actions :deep(.el-button + .el-button) {
+  margin-left: 0;
+}
+.resource-table {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 8px 12px;
+}
+.resource-table-head,
+.resource-row {
+  display: grid;
+  grid-template-columns: minmax(190px, 1fr) 82px 76px 82px;
+  align-items: center;
+  gap: 8px;
+}
+.resource-table-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 10px 10px 8px;
+  color: #909399;
+  background: #ffffff;
+  border-bottom: 1px solid #ebeef5;
+  font-size: 11px;
+}
+.resource-row {
+  min-height: 62px;
+  padding: 7px 10px;
+  border-bottom: 1px solid #f0f2f5;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.resource-row:hover {
+  background: #f5f7fa;
+}
+.resource-row.selected {
+  background: #ecf5ff;
+}
+.resource-name {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 9px;
+}
+.resource-name > div:last-child {
+  min-width: 0;
+}
+.resource-name strong {
+  display: block;
+  overflow: hidden;
+  color: #303133;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.resource-name small {
+  display: block;
+  margin-top: 3px;
+  color: #a8abb2;
+  font-size: 11px;
+}
+.resource-icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border-radius: 8px;
+}
+.resource-icon.folder {
+  color: #d89b2b;
+  background: #fdf6ec;
+}
+.resource-icon.file {
+  color: #409eff;
+  background: #ecf5ff;
+}
+.resource-time {
+  color: #909399;
+  font-size: 12px;
+}
+.resource-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+.resource-actions :deep(.el-button + .el-button) {
+  margin-left: 5px;
+}
+.directory-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 260px;
+  color: #c0c4cc;
+}
+.directory-empty p {
+  margin: 10px 0 14px;
+  color: #909399;
+  font-size: 13px;
+}
+.preview-pane {
+  display: flex;
+  flex-direction: column;
+}
+.preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 15px 18px 11px;
+  border-bottom: 1px solid #ebeef5;
+}
+.preview-file-title {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 10px;
+}
+.preview-file-title > div:last-child {
+  min-width: 0;
+}
+.preview-file-title h3 {
+  overflow: hidden;
+  margin: 0;
+  color: #303133;
+  font-size: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.preview-file-title p {
+  margin: 3px 0 0;
+  color: #909399;
+  font-size: 11px;
+}
+.preview-tabs {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0 18px;
+}
+:deep(.preview-tabs > .el-tabs__header) {
+  margin-bottom: 0;
+}
+:deep(.preview-tabs > .el-tabs__content) {
+  flex: 1;
+  min-height: 0;
+}
+:deep(.preview-tabs .el-tab-pane) {
+  height: 100%;
+}
+.preview-scroll {
+  height: 100%;
+  overflow-y: auto;
+  padding: 14px 2px 20px;
+}
+.content-empty.compact {
+  min-height: 300px;
+}
+.material-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 12px;
+  background: #fdf6ec;
+  border-radius: 8px;
+}
+.material-panel-header p {
+  margin: 3px 0 0;
+  color: #909399;
+  font-size: 12px;
+}
+.file-info-panel > div {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 13px 4px;
+  border-bottom: 1px solid #f0f2f5;
+  font-size: 13px;
+}
+.file-info-panel span {
+  color: #909399;
+}
+.file-info-panel strong {
+  color: #303133;
+  text-align: right;
+}
+.overview-panel {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 36px;
+  text-align: center;
+}
+.overview-icon {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  margin-bottom: 14px;
+  color: #409eff;
+  background: #ecf5ff;
+  border-radius: 18px;
+}
+.overview-panel h3 {
+  margin: 0;
+  font-size: 18px;
+}
+.overview-panel > p {
+  max-width: 340px;
+  margin: 8px 0 20px;
+  color: #909399;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.overview-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  width: 100%;
+  max-width: 420px;
+  margin-bottom: 20px;
+  border: 1px solid #ebeef5;
+  border-radius: 9px;
+}
+.overview-stats > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 14px 8px;
+}
+.overview-stats > div + div {
+  border-left: 1px solid #ebeef5;
+}
+.overview-stats strong {
+  color: #409eff;
+  font-size: 21px;
+}
+.overview-stats span {
+  color: #909399;
+  font-size: 11px;
+}
+.overview-tips {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 420px;
+  gap: 7px;
+  padding: 14px;
+  background: #f7f9fc;
+  border-radius: 9px;
+  text-align: left;
+}
+.overview-tips strong {
+  margin-bottom: 2px;
+  font-size: 12px;
+}
+.overview-tips button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  color: #606266;
+  background: #ffffff;
+  border: 1px solid #e4e7ed;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.overview-tips button:hover {
+  color: #409eff;
+  border-color: #a0cfff;
 }
 .kb-breadcrumb {
   margin-bottom: 12px;
@@ -1969,6 +2938,13 @@ function countItems(node: TreeNode, type: 'folder' | 'file') {
 .upload-target-label {
   color: #909399;
   font-size: 13px;
+  white-space: nowrap;
+}
+.upload-folder-path {
+  overflow: hidden;
+  color: #409eff;
+  font-size: 12px;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 :deep(.kb-upload .el-upload-dragger) {
@@ -2149,5 +3125,454 @@ function countItems(node: TreeNode, type: 'folder' | 'file') {
 }
 .draft-actions {
   flex-shrink: 0;
+}
+:deep(.teaching-detail-drawer .el-drawer__body) {
+  padding: 0;
+  overflow: hidden;
+}
+.teaching-detail {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: #f7f9fc;
+}
+.detail-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 24px 30px 20px;
+  background: #fff;
+  border-bottom: 1px solid #e8edf3;
+}
+.detail-eyebrow {
+  display: block;
+  margin-bottom: 5px;
+  color: #8a96a8;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+.detail-drawer-header h2 {
+  margin: 0;
+  color: #182230;
+  font-size: 22px;
+  line-height: 1.35;
+}
+.detail-close {
+  width: 38px;
+  height: 38px;
+  color: #667085;
+  background: #f4f6f8;
+}
+.detail-drawer-content {
+  flex: 1;
+  min-height: 0;
+  padding: 24px 30px 34px;
+  overflow-y: auto;
+}
+.detail-source-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-bottom: 22px;
+  color: #8a96a8;
+  font-size: 13px;
+}
+.detail-source-row strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #526071;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.detail-created-at {
+  margin-left: auto;
+  white-space: nowrap;
+}
+.detail-tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+.question-heading {
+  margin-bottom: 18px;
+  padding: 26px 28px;
+  background: linear-gradient(145deg, #ffffff 0%, #f1f7ff 100%);
+  border: 1px solid #dfeaf8;
+  border-radius: 16px;
+  box-shadow: 0 10px 28px rgb(52 96 145 / 7%);
+}
+.question-sequence {
+  display: block;
+  margin-bottom: 11px;
+  color: #409eff;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+.question-heading h3 {
+  margin: 0;
+  color: #1d2939;
+  font-size: 20px;
+  font-weight: 650;
+  line-height: 1.65;
+}
+.preview-heading {
+  background: linear-gradient(145deg, #ffffff 0%, #fff8eb 100%);
+  border-color: #f5e2bb;
+}
+.preview-heading .question-sequence {
+  color: #d99018;
+}
+.knowledge-focus {
+  display: flex;
+  align-items: flex-start;
+  gap: 18px;
+  margin-bottom: 24px;
+  padding: 14px 18px;
+  background: #fff;
+  border: 1px solid #e6ebf1;
+  border-radius: 10px;
+}
+.knowledge-focus span {
+  flex-shrink: 0;
+  color: #8a96a8;
+  font-size: 13px;
+}
+.knowledge-focus strong {
+  color: #344054;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.detail-section {
+  margin-top: 24px;
+}
+.detail-section-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+.detail-section-title span {
+  color: #1d2939;
+  font-size: 15px;
+  font-weight: 650;
+}
+.detail-section-title small {
+  color: #98a2b3;
+  font-size: 12px;
+}
+.detail-option-list {
+  display: grid;
+  gap: 10px;
+}
+.detail-option {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 58px;
+  padding: 10px 14px;
+  color: #344054;
+  background: #fff;
+  border: 1px solid #e3e8ef;
+  border-radius: 11px;
+}
+.detail-option.correct {
+  color: #176b3a;
+  background: #effaf3;
+  border-color: #a9dfbc;
+  box-shadow: 0 5px 15px rgb(31 157 83 / 8%);
+}
+.detail-option-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  color: #667085;
+  font-weight: 700;
+  background: #f2f4f7;
+  border-radius: 50%;
+}
+.detail-option.correct .detail-option-key {
+  color: #fff;
+  background: #35a763;
+}
+.detail-option-text {
+  font-size: 14px;
+  line-height: 1.55;
+}
+.correct-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #268a4e;
+  font-size: 12px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.answer-panel {
+  display: flex;
+  gap: 14px;
+  margin-top: 24px;
+  padding: 18px;
+  background: #effaf3;
+  border: 1px solid #b8e4c7;
+  border-radius: 12px;
+}
+.answer-panel-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  color: #fff;
+  font-size: 20px;
+  background: #35a763;
+  border-radius: 10px;
+}
+.answer-panel > div:last-child {
+  min-width: 0;
+}
+.answer-panel span {
+  display: block;
+  margin-bottom: 4px;
+  color: #568066;
+  font-size: 12px;
+}
+.answer-panel strong {
+  display: block;
+  color: #176b3a;
+  font-size: 17px;
+  line-height: 1.5;
+}
+.answer-panel p {
+  margin: 5px 0 0;
+  color: #3b6f4d;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.detail-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+.detail-meta-card {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  align-items: center;
+  column-gap: 10px;
+  padding: 14px 16px;
+  background: #fff;
+  border: 1px solid #e6ebf1;
+  border-radius: 10px;
+}
+.detail-meta-card .el-icon {
+  grid-row: 1 / 3;
+  color: #409eff;
+  font-size: 20px;
+}
+.detail-meta-card span {
+  color: #98a2b3;
+  font-size: 11px;
+}
+.detail-meta-card strong {
+  color: #344054;
+  font-size: 14px;
+}
+.guide-section {
+  padding: 22px 24px;
+  background: #fff;
+  border: 1px solid #e6ebf1;
+  border-radius: 14px;
+}
+.detail-guide {
+  color: #344054;
+  font-size: 14px;
+  line-height: 1.85;
+}
+.detail-guide :deep(h1),
+.detail-guide :deep(h2),
+.detail-guide :deep(h3) {
+  margin: 18px 0 8px;
+  color: #1d2939;
+}
+.detail-guide :deep(h1:first-child),
+.detail-guide :deep(h2:first-child),
+.detail-guide :deep(h3:first-child) {
+  margin-top: 0;
+}
+.detail-guide :deep(p) {
+  margin: 8px 0;
+}
+.detail-guide :deep(ul),
+.detail-guide :deep(ol) {
+  padding-left: 22px;
+}
+.detail-guide :deep(code) {
+  padding: 2px 5px;
+  color: #175cd3;
+  background: #eef4ff;
+  border-radius: 4px;
+}
+.discussion-callout {
+  margin-top: 18px;
+  padding: 18px 20px;
+  background: #fff8eb;
+  border: 1px solid #f3d59b;
+  border-left: 4px solid #e8a12a;
+  border-radius: 10px;
+}
+.discussion-label {
+  color: #b66e00;
+  font-size: 12px;
+  font-weight: 700;
+}
+.discussion-callout p {
+  margin: 7px 0 0;
+  color: #684715;
+  font-size: 15px;
+  font-weight: 550;
+  line-height: 1.7;
+}
+.self-test-list {
+  display: grid;
+  gap: 12px;
+}
+.self-test-card {
+  display: flex;
+  gap: 14px;
+  padding: 18px;
+  background: #fff;
+  border: 1px solid #e6ebf1;
+  border-radius: 12px;
+}
+.self-test-number {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  color: #175cd3;
+  font-size: 13px;
+  font-weight: 700;
+  background: #eef4ff;
+  border-radius: 8px;
+}
+.self-test-content {
+  min-width: 0;
+  flex: 1;
+}
+.self-test-content h4 {
+  margin: 3px 0 11px;
+  color: #1d2939;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.self-test-options {
+  display: grid;
+  gap: 6px;
+}
+.self-test-options span {
+  padding: 7px 10px;
+  color: #667085;
+  font-size: 12px;
+  line-height: 1.45;
+  background: #f7f8fa;
+  border-radius: 6px;
+}
+.self-test-options span.correct {
+  color: #247645;
+  background: #eef9f2;
+}
+.self-test-answer {
+  margin-top: 10px;
+  color: #268a4e;
+  font-size: 12px;
+  font-weight: 650;
+}
+.self-test-explanation {
+  margin: 6px 0 0;
+  color: #667085;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.detail-drawer-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 70px;
+  padding: 12px 30px;
+  background: #fff;
+  border-top: 1px solid #e8edf3;
+  box-shadow: 0 -8px 24px rgb(16 24 40 / 4%);
+}
+.detail-drawer-footer > span {
+  color: #8a96a8;
+  font-size: 13px;
+}
+@media (max-width: 680px) {
+  .detail-drawer-header,
+  .detail-drawer-content,
+  .detail-drawer-footer {
+    padding-right: 18px;
+    padding-left: 18px;
+  }
+  .question-heading {
+    padding: 20px;
+  }
+  .question-heading h3 {
+    font-size: 17px;
+  }
+  .detail-source-row > span:not(.detail-created-at),
+  .detail-created-at,
+  .correct-mark {
+    display: none;
+  }
+  .detail-option {
+    grid-template-columns: 34px minmax(0, 1fr);
+  }
+  .detail-meta-grid {
+    grid-template-columns: 1fr;
+  }
+  .detail-drawer-footer {
+    gap: 8px;
+  }
+  .detail-drawer-footer > span {
+    font-size: 12px;
+  }
+}
+@media (max-width: 1180px) {
+  .kb-sidebar {
+    width: 220px;
+    min-width: 220px;
+  }
+  .toolbar-left {
+    width: 230px;
+  }
+  .toolbar-subtitle {
+    display: none;
+  }
+  .kb-content {
+    grid-template-columns: minmax(360px, 0.9fr) minmax(380px, 1.1fr);
+  }
+  .resource-table-head,
+  .resource-row {
+    grid-template-columns: minmax(170px, 1fr) 72px 64px;
+  }
+  .resource-table-head > :nth-child(3),
+  .resource-row > :nth-child(3) {
+    display: none;
+  }
 }
 </style>

@@ -3,27 +3,59 @@
     <div v-if="!joined" class="join-container">
       <div class="join-card">
         <h2>📚 加入课堂</h2>
-        <div v-if="preview" class="preview-info">
-          <p>
-            <strong>{{ preview.title }}</strong>
-          </p>
-          <p>班级: {{ preview.className }}</p>
-          <p>教师: {{ preview.teacherName }}</p>
+        <div v-if="identifying" class="identity-loading">
+          <span class="loading-dot">●</span>
+          正在识别身份并进入课堂...
         </div>
-        <el-form label-width="60px">
-          <el-form-item label="学号"><el-input v-model="form.studentId" /></el-form-item>
-          <el-form-item label="姓名"><el-input v-model="form.studentName" /></el-form-item>
-        </el-form>
-        <el-button type="primary" size="large" block :loading="joining" @click="handleJoin"
-          >加入课堂</el-button
-        >
+        <template v-else>
+          <div v-if="preview" class="preview-info">
+            <p>
+              <strong>{{ preview.title }}</strong>
+            </p>
+            <p>班级：{{ preview.className }}</p>
+            <p>教师：{{ preview.teacherName }}</p>
+          </div>
+          <p class="bind-tip">
+            {{
+              preview?.requiresStudentName
+                ? '首次绑定这台设备，以后扫码将自动进入'
+                : '输入一次学号，姓名将从班级花名册中自动匹配'
+            }}
+          </p>
+          <el-form label-position="top">
+            <el-form-item label="学号">
+              <el-input
+                v-model="form.studentId"
+                size="large"
+                autocomplete="username"
+                placeholder="请输入学号"
+                @keyup.enter="handleJoin"
+              />
+            </el-form-item>
+            <el-form-item v-if="preview?.requiresStudentName" label="姓名">
+              <el-input
+                v-model="form.studentName"
+                size="large"
+                autocomplete="name"
+                placeholder="班级尚无花名册，请输入姓名"
+                @keyup.enter="handleJoin"
+              />
+            </el-form-item>
+          </el-form>
+          <el-button type="primary" size="large" block :loading="joining" @click="handleJoin"
+            >确认身份并进入</el-button
+          >
+        </template>
       </div>
     </div>
 
     <div v-else class="interaction-container">
       <header class="student-header">
         <h3>{{ store.sessionInfo?.title }}</h3>
-        <span>👤 {{ store.sessionInfo?.studentName }}</span>
+        <div class="identity-actions">
+          <span>👤 {{ store.sessionInfo?.studentName }}</span>
+          <el-button text size="small" @click="handleSwitchIdentity">切换身份</el-button>
+        </div>
       </header>
       <main class="student-main">
         <div v-if="store.sessionEnded" class="session-ended-banner">
@@ -38,7 +70,7 @@
           <div class="question-card">
             <el-tag size="small">{{ typeLabel }}</el-tag>
             <h3>{{ store.currentInteraction.title }}</h3>
-            <div v-if="store.currentInteraction.timeLimit" class="countdown">
+            <div v-if="store.currentInteraction.deadlineEpochMs" class="countdown">
               ⏱ {{ remaining }}s<el-progress
                 :percentage="pct"
                 :status="remaining < 10 ? 'exception' : undefined"
@@ -221,11 +253,11 @@
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useLiveSessionStore } from '../stores/live-session'
-import { previewSession, type LiveSessionInfo } from '../api/live'
+import { previewSession, unbindStudentDevice, type LiveSessionInfo } from '../api/live'
 import request from '../api/request'
 import { getApiErrorMessage } from '../api/errors'
 import type { ApiResponse } from '../api/types'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { renderTextWithBreaks } from '@/utils/safeHtml'
 
 const route = useRoute()
@@ -234,6 +266,7 @@ const code = computed(() => String(route.params.sessionCode || ''))
 
 const joined = ref(false)
 const joining = ref(false)
+const identifying = ref(true)
 const preview = ref<LiveSessionInfo | null>(null)
 const form = ref({
   studentId: localStorage.getItem('live_student_id') || '',
@@ -241,20 +274,78 @@ const form = ref({
 })
 
 async function handleJoin() {
-  if (!form.value.studentId.trim() || !form.value.studentName.trim()) {
-    ElMessage.warning('请输入学号和姓名')
+  if (!form.value.studentId.trim()) {
+    ElMessage.warning('请输入学号')
+    return
+  }
+  if (preview.value?.requiresStudentName && !form.value.studentName.trim()) {
+    ElMessage.warning('班级尚无花名册，请输入姓名')
     return
   }
   joining.value = true
   try {
-    await store.joinSession(code.value, form.value.studentId.trim(), form.value.studentName.trim())
-    localStorage.setItem('live_student_id', form.value.studentId.trim())
-    localStorage.setItem('live_student_name', form.value.studentName.trim())
-    joined.value = true
+    const data = await store.joinSession(
+      code.value,
+      form.value.studentId.trim(),
+      form.value.studentName.trim() || undefined,
+    )
+    finishJoin(data)
   } catch (error: unknown) {
     ElMessage.error(getApiErrorMessage(error, '加入失败'))
   } finally {
     joining.value = false
+  }
+}
+
+function finishJoin(data: LiveSessionInfo) {
+  // 身份已升级为 HttpOnly 设备凭证，清理旧版保存在浏览器脚本存储中的个人信息。
+  localStorage.removeItem('live_student_id')
+  localStorage.removeItem('live_student_name')
+  form.value.studentId = data.studentId
+  form.value.studentName = data.studentName
+  joined.value = true
+}
+
+async function tryAutomaticJoin() {
+  try {
+    const data = await store.quickJoinSession(code.value)
+    finishJoin(data)
+    return
+  } catch {
+    // 旧版本只保存了输入框内容；成功加入一次后会升级为设备身份凭证。
+  }
+
+  const rememberedId = form.value.studentId.trim()
+  if (!rememberedId) return
+  try {
+    const data = await store.joinSession(
+      code.value,
+      rememberedId,
+      form.value.studentName.trim() || undefined,
+    )
+    finishJoin(data)
+  } catch {
+    // 当前班级不包含已记住的学生时，保留表单供本人修正或切换身份。
+  }
+}
+
+async function handleSwitchIdentity() {
+  try {
+    await ElMessageBox.confirm('切换后需要重新输入学号，确定继续吗？', '切换身份', {
+      confirmButtonText: '切换',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+    await unbindStudentDevice()
+    store.disconnect()
+    store.reset()
+    localStorage.removeItem('live_student_id')
+    localStorage.removeItem('live_student_name')
+    form.value = { studentId: '', studentName: '' }
+    joined.value = false
+    ElMessage.success('已清除本机身份，请重新绑定')
+  } catch {
+    // 用户取消切换时无需提示。
   }
 }
 
@@ -287,11 +378,12 @@ watch(
     done.value = false
     sel.value = ''
     textAns.value = ''
-    if (i?.timeLimit && i?.deadlineEpochMs && i.status === 'ACTIVE') {
-      const total = i.timeLimit
+    if (i?.deadlineEpochMs && i.status === 'ACTIVE') {
+      const initialRemaining = Math.max(1, Math.ceil((i.deadlineEpochMs - Date.now()) / 1000))
+      const total = Math.max(i.timeLimit ?? 0, initialRemaining)
       timer = setInterval(() => {
         remaining.value = Math.max(0, Math.round((i.deadlineEpochMs! - Date.now()) / 1000))
-        pct.value = Math.round((remaining.value / total) * 10000) / 100
+        pct.value = Math.min(100, Math.round((remaining.value / total) * 10000) / 100)
         if (remaining.value <= 0 && timer) clearInterval(timer)
       }, 250)
     }
@@ -384,7 +476,12 @@ onMounted(async () => {
     preview.value = response.data.data
   } catch {
     preview.value = null
+    ElMessage.error('课堂不存在或已结束')
   }
+  if (preview.value) {
+    await tryAutomaticJoin()
+  }
+  identifying.value = false
 })
 onUnmounted(() => {
   if (timer) clearInterval(timer)
@@ -425,6 +522,39 @@ onUnmounted(() => {
   margin-bottom: 16px;
   font-size: 14px;
 }
+.preview-info p {
+  margin: 4px 0;
+}
+.bind-tip {
+  margin: 0 0 18px;
+  color: #606266;
+  font-size: 13px;
+  line-height: 1.6;
+  text-align: center;
+}
+.identity-loading {
+  min-height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: #606266;
+  font-size: 14px;
+}
+.loading-dot {
+  color: #409eff;
+  animation: identity-pulse 1s ease-in-out infinite alternate;
+}
+@keyframes identity-pulse {
+  from {
+    opacity: 0.25;
+    transform: scale(0.8);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+}
 .interaction-container {
   flex: 1;
   display: flex;
@@ -436,6 +566,12 @@ onUnmounted(() => {
   align-items: center;
   padding: 12px 16px;
   background: #fff;
+}
+.identity-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
 }
 .student-main {
   flex: 1;

@@ -9,6 +9,7 @@ import java.util.List;
 @Data @Builder @NoArgsConstructor @AllArgsConstructor
 public class InteractionHistoryDTO {
     private Long interactionId;
+    private Long questionId;
     private String type;
     private String title;
     private String description;
@@ -17,6 +18,7 @@ public class InteractionHistoryDTO {
     private Integer timeLimit;
     private String status;
     private String knowledgePoint;
+    private String difficulty;
     private String createdAt;
     // 统计摘要（教师端用）
     private Integer totalStudents;

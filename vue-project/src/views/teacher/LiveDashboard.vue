@@ -26,78 +26,11 @@
     <div class="live-body">
       <aside class="live-sidebar">
         <div class="tool-panel">
-          <h3>🎯 发起互动</h3>
-          <el-button type="primary" @click="openChoiceDialog">📊 选择题</el-button>
-          <el-button type="success" @click="openOpenDialog">📝 简答题</el-button>
-          <el-button type="warning" @click="openExerciseDialog">✏️ 随堂练习</el-button>
+          <h3>🧭 课堂辅助</h3>
           <el-button type="info" @click="pickRandom" :disabled="!store.studentList.length"
             >🎲 随机点名</el-button
           >
           <el-divider />
-          <!-- 草稿库 -->
-          <div class="draft-panel">
-            <div
-              class="draft-header"
-              @click="showDrafts = !showDrafts"
-              style="
-                cursor: pointer;
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-              "
-            >
-              <h3>
-                📋 草稿库 <span v-if="drafts.length">({{ drafts.length }})</span>
-              </h3>
-              <span style="font-size: 12px; color: #909399">{{ showDrafts ? '▲' : '▼' }}</span>
-            </div>
-            <div v-if="showDrafts" class="draft-list">
-              <div
-                v-if="draftLoading"
-                style="text-align: center; padding: 8px; color: #909399; font-size: 13px"
-              >
-                加载中...
-              </div>
-              <div
-                v-else-if="!drafts.length"
-                style="text-align: center; padding: 8px; color: #909399; font-size: 13px"
-              >
-                暂无草稿
-              </div>
-              <div v-for="d in drafts" :key="d.interactionId" class="draft-item">
-                <div class="draft-top">
-                  <el-tag
-                    size="small"
-                    :type="
-                      d.type === 'CHOICE' ? 'primary' : d.type === 'OPEN' ? 'success' : 'warning'
-                    "
-                    >{{ typeLabel(d.type) }}</el-tag
-                  >
-                  <span class="draft-kp" v-if="d.knowledgePoint">{{ d.knowledgePoint }}</span>
-                </div>
-                <p class="draft-title">{{ d.title }}</p>
-                <div v-if="d.options?.length" class="draft-opts">
-                  <span v-for="o in d.options" :key="o.key">{{ o.key }}. {{ o.text }}</span>
-                </div>
-                <el-button
-                  size="small"
-                  type="primary"
-                  :loading="activatingId === d.interactionId"
-                  @click="pushDraft(d)"
-                  >🚀 推送到课堂</el-button
-                >
-              </div>
-              <el-button
-                v-if="drafts.length"
-                text
-                size="small"
-                @click="refreshDrafts"
-                style="width: 100%; margin-top: 4px"
-                >🔄 刷新</el-button
-              >
-            </div>
-            <el-divider />
-          </div>
           <h3>👥 在线学生 ({{ store.studentCount }})</h3>
           <div class="student-list">
             <div
@@ -152,108 +85,201 @@
       </aside>
 
       <main class="live-main">
-        <!-- 不懂汇总 -->
-        <div class="confusion-panel">
-          <h3>
-            🤔 学生标记"不懂" <span v-if="confusionTotal">({{ confusionTotal }}次)</span>
-          </h3>
-          <div v-if="confusionStats.length" class="confusion-bars">
-            <div v-for="s in confusionStats" :key="s.name" class="confusion-bar-row">
-              <span class="confusion-kp-name">{{ s.name }}</span>
-              <span class="confusion-bar-track">
-                <span
-                  class="confusion-bar-fill"
-                  :style="{ width: Math.min(s.count * 25, 100) + '%' }"
-                ></span>
-              </span>
-              <span class="confusion-count">{{ s.count }}人</span>
-            </div>
+        <div class="board-toolbar">
+          <div>
+            <h3>📋 课堂题目</h3>
+            <p>统一题库与本节课发送记录集中展示，题目可以重复使用</p>
           </div>
-          <div v-else class="confusion-empty">暂无学生标记不懂</div>
+          <div class="board-toolbar-actions">
+            <el-radio-group v-model="boardFilter" size="small">
+              <el-radio-button value="ALL">全部 {{ store.questionBoard.length }}</el-radio-button>
+              <el-radio-button value="UNSENT">未发送 {{ boardCount('UNSENT') }}</el-radio-button>
+              <el-radio-button value="ACTIVE">作答中 {{ boardCount('ACTIVE') }}</el-radio-button>
+              <el-radio-button value="CLOSED">已结束 {{ boardCount('CLOSED') }}</el-radio-button>
+            </el-radio-group>
+            <el-button size="small" :loading="boardLoading" @click="refreshBoard">刷新</el-button>
+          </div>
         </div>
-        <h3>📋 互动记录</h3>
-        <div class="history-list" v-if="store.interactionHistory.length">
-          <div
-            v-for="h in store.interactionHistory"
-            :key="h.interactionId"
-            class="history-card"
-            :class="{ active: h.status === 'ACTIVE' }"
+
+        <div v-if="filteredQuestionBoard.length" class="question-board">
+          <article
+            v-for="item in filteredQuestionBoard"
+            :key="item.questionId"
+            class="question-card"
+            :class="`status-${item.status.toLowerCase()}`"
           >
-            <div class="card-header" @click="toggleDetail(h.interactionId)">
-              <el-tag
-                :type="h.type === 'CHOICE' ? 'primary' : h.type === 'OPEN' ? 'success' : 'warning'"
-                size="small"
-                >{{ typeLabel(h.type) }}</el-tag
+            <div class="question-card-header">
+              <div class="question-meta">
+                <el-tag :type="typeTag(item.type)" size="small">{{ typeLabel(item.type) }}</el-tag>
+                <el-tag v-if="item.knowledgePoint" size="small" effect="plain" type="info">
+                  {{ item.knowledgePoint }}
+                </el-tag>
+                <el-tag v-if="item.status === 'UNSENT'" size="small" type="info">未发送</el-tag>
+                <el-tag
+                  v-else-if="item.status === 'ACTIVE'"
+                  size="small"
+                  type="danger"
+                  effect="dark"
+                >
+                  作答中
+                </el-tag>
+                <el-tag v-else size="small" type="success">
+                  已发送 · 已结束<span v-if="item.sendCount > 1"> · {{ item.sendCount }}次</span>
+                </el-tag>
+              </div>
+              <div
+                v-if="item.status === 'ACTIVE'"
+                class="countdown"
+                :class="{ urgent: remainingSeconds(item) <= 30 }"
               >
-              <span class="card-title">{{ h.title }}</span>
-              <el-tag v-if="h.status === 'ACTIVE'" type="danger" size="small" effect="dark"
-                >进行中</el-tag
+                剩余 {{ formatRemaining(item) }}
+              </div>
+              <div v-else-if="item.timeLimit" class="planned-time">
+                计划 {{ formatDuration(item.timeLimit) }}
+              </div>
+            </div>
+
+            <h4 class="question-title">{{ item.title }}</h4>
+            <p v-if="item.description" class="question-description">{{ item.description }}</p>
+            <div v-if="item.options?.length" class="question-options">
+              <div
+                v-for="option in item.options"
+                :key="option.key"
+                class="question-option"
+                :class="{ correct: option.key === item.correctKey }"
               >
-              <el-tag v-else type="info" size="small">已结束</el-tag>
-              <span class="expand-hint">{{
-                expandedId === h.interactionId ? '▲ 收起' : '▼ 详情'
-              }}</span>
+                <b>{{ option.key }}</b
+                ><span>{{ option.text }}</span>
+              </div>
             </div>
-            <div class="card-stats">
-              <span>已答: {{ h.respondedCount }} / {{ h.totalStudents }}</span>
-              <span v-if="h.correctRate !== null">正确率: {{ h.correctRate }}%</span>
-              <span v-if="h.timeLimit">限时: {{ h.timeLimit }}s</span>
+            <div v-if="item.correctKey && item.type !== 'CHOICE'" class="reference-answer">
+              参考答案：{{ item.correctKey }}
             </div>
-            <!-- 展开详情 -->
-            <div v-if="expandedId === h.interactionId" class="card-detail">
-              <div v-if="detailLoading && detailId === h.interactionId" class="detail-loading">
+
+            <template v-if="item.status !== 'UNSENT'">
+              <div class="response-summary">
+                <div class="response-total">
+                  <strong>{{ item.respondedCount }}</strong> / {{ item.totalStudents }} 人已作答
+                </div>
+                <el-progress
+                  class="response-progress"
+                  :percentage="responsePercent(item)"
+                  :stroke-width="10"
+                  :show-text="false"
+                />
+                <span v-if="item.correctRate !== null" class="correct-rate">
+                  正确率 {{ item.correctRate }}%
+                </span>
+              </div>
+              <div v-if="item.type === 'CHOICE' && item.distribution" class="answer-distribution">
+                <div
+                  v-for="(value, key) in item.distribution"
+                  :key="key"
+                  class="answer-distribution-item"
+                >
+                  <span class="distribution-key">{{ key }}</span>
+                  <span class="distribution-track">
+                    <span class="distribution-fill" :style="{ width: `${value.percent}%` }"></span>
+                  </span>
+                  <span class="distribution-value">{{ value.count }}人 · {{ value.percent }}%</span>
+                </div>
+              </div>
+            </template>
+
+            <div class="question-actions">
+              <template v-if="item.status === 'UNSENT'">
+                <span v-if="hasActiveQuestion" class="active-tip">当前题结束后可发送</span>
+                <el-button
+                  type="primary"
+                  :disabled="hasActiveQuestion"
+                  :loading="activatingId === item.questionId"
+                  @click="sendQuestion(item.questionId)"
+                >
+                  发送到课堂
+                </el-button>
+              </template>
+              <template v-else-if="item.status === 'ACTIVE'">
+                <span class="extend-label">快捷延时</span>
+                <el-button size="small" @click="extendQuestion(item.interactionId, 30)"
+                  >+30秒</el-button
+                >
+                <el-button size="small" @click="extendQuestion(item.interactionId, 60)"
+                  >+1分钟</el-button
+                >
+                <el-button size="small" @click="extendQuestion(item.interactionId, 300)"
+                  >+5分钟</el-button
+                >
+                <el-button
+                  size="small"
+                  type="danger"
+                  plain
+                  @click="finishQuestion(item.interactionId)"
+                >
+                  提前结束
+                </el-button>
+                <el-button size="small" text @click="toggleDetail(item.interactionId)"
+                  >作答明细</el-button
+                >
+              </template>
+              <el-button v-else size="small" text @click="toggleDetail(item.interactionId)">
+                {{ expandedId === item.interactionId ? '收起明细' : '查看作答明细' }}
+              </el-button>
+            </div>
+
+            <div v-if="expandedId === item.interactionId" class="card-detail">
+              <div v-if="detailLoading && detailId === item.interactionId" class="detail-loading">
                 加载中...
               </div>
               <template v-else-if="detail">
-                <div class="detail-question">
-                  <p v-if="detail.description">{{ detail.description }}</p>
-                  <div v-if="detail.options" class="detail-options">
-                    <span
-                      v-for="o in detail.options"
-                      :key="o.key"
-                      class="detail-opt"
-                      :class="{ correct: o.key === detail.correctKey }"
-                      >{{ o.key }}. {{ o.text }}</span
-                    >
-                  </div>
-                  <p v-if="detail.correctKey" class="detail-key">
-                    正确答案: {{ detail.correctKey }}
-                  </p>
-                </div>
-                <!-- 纯文本分布 -->
-                <div
-                  v-if="detail.distribution && Object.keys(detail.distribution).length"
-                  class="dist-bars"
-                >
-                  <div v-for="(v, k) in detail.distribution" :key="k" class="dist-bar-row">
-                    <span class="dist-key">{{ k }}</span>
-                    <span class="dist-bar-wrap"
-                      ><span
-                        class="dist-bar"
-                        :style="{ width: Math.max(v.percent, 2) + '%' }"
-                      ></span
-                    ></span>
-                    <span class="dist-num">{{ v.count }} ({{ v.percent }}%)</span>
-                  </div>
-                </div>
                 <div class="detail-responses">
                   <h4>作答明细 ({{ detail.responses.length }})</h4>
-                  <div v-for="r in detail.responses" :key="r.studentId" class="resp-row">
-                    <span>{{ r.studentName }}({{ r.studentId }})</span>
-                    <span :class="r.isCorrect ? 'resp-correct' : 'resp-wrong'">{{
-                      r.answer || '-'
-                    }}</span>
+                  <div
+                    v-for="response in detail.responses"
+                    :key="response.studentId"
+                    class="resp-row"
+                  >
+                    <span>{{ response.studentName }}({{ response.studentId }})</span>
+                    <span
+                      :class="
+                        response.isCorrect === null
+                          ? ''
+                          : response.isCorrect
+                            ? 'resp-correct'
+                            : 'resp-wrong'
+                      "
+                    >
+                      {{ response.answer || '-' }}
+                    </span>
                   </div>
                   <div v-if="detail.unrespondedStudents.length" class="unresp">
-                    <span class="unresp-label">未作答:</span>
-                    {{ detail.unrespondedStudents.join(', ') }}
+                    <span class="unresp-label">未作答：</span
+                    >{{ detail.unrespondedStudents.join(', ') }}
                   </div>
                 </div>
               </template>
             </div>
-          </div>
+          </article>
         </div>
-        <el-empty v-else description="等待发起互动..." :image-size="60" />
+        <el-empty v-else description="当前筛选下暂无题目" :image-size="60" />
+
+        <div class="confusion-panel compact">
+          <h3>
+            🤔 学生标记“不懂” <span v-if="confusionTotal">({{ confusionTotal }}次)</span>
+          </h3>
+          <div v-if="confusionStats.length" class="confusion-bars">
+            <div v-for="stat in confusionStats" :key="stat.name" class="confusion-bar-row">
+              <span class="confusion-kp-name">{{ stat.name }}</span>
+              <span class="confusion-bar-track">
+                <span
+                  class="confusion-bar-fill"
+                  :style="{ width: Math.min(stat.count * 25, 100) + '%' }"
+                ></span>
+              </span>
+              <span class="confusion-count">{{ stat.count }}人</span>
+            </div>
+          </div>
+          <div v-else class="confusion-empty">暂无学生标记不懂</div>
+        </div>
         <div v-if="store.reactions.length" class="reaction-bar">
           <span
             v-for="(r, i) in store.reactions"
@@ -288,77 +314,6 @@
       </aside>
     </div>
 
-    <el-dialog v-model="choice.visible" title="发起选择题" width="500px">
-      <el-form label-width="80px">
-        <el-form-item label="题目"
-          ><el-input v-model="choice.title"
-            ><template #append
-              ><el-button @click="aiGenerate('CHOICE')" :loading="aiLoading"
-                >🤖 AI生成</el-button
-              ></template
-            ></el-input
-          ></el-form-item
-        >
-        <el-form-item label="选项">
-          <div v-for="(o, i) in choice.options" :key="i" class="option-row">
-            <span class="option-key">{{ o.key }}.</span><el-input v-model="o.text" /><el-button
-              text
-              type="danger"
-              @click="choice.options.splice(i, 1)"
-              >×</el-button
-            >
-          </div>
-          <el-button size="small" @click="addChoiceOption">+ 添加选项</el-button>
-        </el-form-item>
-        <el-form-item label="正确答案"
-          ><el-select v-model="choice.correctKey"
-            ><el-option
-              v-for="o in choice.options"
-              :key="o.key"
-              :label="o.key"
-              :value="o.key" /></el-select
-        ></el-form-item>
-        <el-form-item label="限时(秒)"
-          ><el-input-number v-model="choice.timeLimit" :min="0" :max="300"
-        /></el-form-item>
-        <el-form-item label="知识点"><el-input v-model="choice.knowledgePoint" /></el-form-item>
-      </el-form>
-      <template #footer
-        ><el-button @click="choice.visible = false">取消</el-button
-        ><el-button type="primary" @click="submitChoice">发起</el-button></template
-      >
-    </el-dialog>
-
-    <el-dialog v-model="open.visible" title="发起简答题" width="500px">
-      <el-form label-width="80px"
-        ><el-form-item label="题目"
-          ><el-input v-model="open.title" type="textarea" :rows="3"
-            ><template #append
-              ><el-button @click="aiGenerate('OPEN')" :loading="aiLoading">🤖</el-button></template
-            ></el-input
-          ></el-form-item
-        ><el-form-item label="限时"
-          ><el-input-number v-model="open.timeLimit" :min="0" :max="600" /></el-form-item
-      ></el-form>
-      <template #footer
-        ><el-button @click="open.visible = false">取消</el-button
-        ><el-button type="primary" @click="submitOpen">发起</el-button></template
-      >
-    </el-dialog>
-
-    <el-dialog v-model="ex.visible" title="随堂练习" width="500px">
-      <el-form label-width="80px"
-        ><el-form-item label="题目"
-          ><el-input v-model="ex.title" type="textarea" :rows="4" /></el-form-item
-        ><el-form-item label="限时"
-          ><el-input-number v-model="ex.timeLimit" :min="0" :max="600" /></el-form-item
-      ></el-form>
-      <template #footer
-        ><el-button @click="ex.visible = false">取消</el-button
-        ><el-button type="primary" @click="submitEx">发起</el-button></template
-      >
-    </el-dialog>
-
     <el-dialog v-model="ans.visible" title="回答提问" width="400px">
       <p>{{ ans.q?.question }}</p>
       <el-input v-model="ans.text" type="textarea" :rows="3" />
@@ -368,8 +323,13 @@
       >
     </el-dialog>
 
-    <el-dialog v-model="showQR" title="扫码加入" width="300px" align-center>
-      <div class="qr-container"><canvas ref="qrCanvas"></canvas></div>
+    <el-dialog v-model="showQR" title="扫码直接加入课堂" width="340px" align-center>
+      <div class="qr-container">
+        <canvas ref="qrCanvas"></canvas>
+        <p>学生首次确认身份后，以后扫码即可自动进入</p>
+        <div class="qr-code-fallback">无法扫码时输入：{{ store.sessionInfo?.sessionCode }}</div>
+        <el-button text type="primary" @click="copyLink">复制课堂链接</el-button>
+      </div>
     </el-dialog>
 
     <!-- 随机点名 -->
@@ -478,14 +438,8 @@ import { ref, reactive, onMounted, onUnmounted, watch, nextTick, computed } from
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useLiveSessionStore } from '../../stores/live-session'
-import type { InteractionDetail, InteractionType, QAQuestion } from '../../api/live'
-import {
-  getInteractionDetail,
-  generateQuestion,
-  getReport,
-  getClassDrafts,
-  type DraftItem,
-} from '../../api/live'
+import type { InteractionDetail, QAQuestion, QuestionBoardItem } from '../../api/live'
+import { getInteractionDetail, getReport } from '../../api/live'
 import request from '../../api/request'
 import type { ApiResponse } from '../../api/types'
 import QRCode from 'qrcode'
@@ -502,6 +456,86 @@ const TYPE_LABELS: Record<string, string> = {
 }
 function typeLabel(type: string) {
   return TYPE_LABELS[type] ?? type
+}
+
+type BoardFilter = 'ALL' | QuestionBoardItem['status']
+const boardFilter = ref<BoardFilter>('ALL')
+const boardLoading = ref(false)
+const activatingId = ref<number | null>(null)
+const nowEpoch = ref(Date.now())
+let countdownTimer: ReturnType<typeof setInterval> | null = null
+
+const hasActiveQuestion = computed(() =>
+  store.questionBoard.some((item) => item.status === 'ACTIVE'),
+)
+const filteredQuestionBoard = computed(() => {
+  return boardFilter.value === 'ALL'
+    ? store.questionBoard
+    : store.questionBoard.filter((item) => item.status === boardFilter.value)
+})
+
+function boardCount(status: QuestionBoardItem['status']) {
+  return store.questionBoard.filter((item) => item.status === status).length
+}
+function typeTag(type: string): 'primary' | 'success' | 'warning' {
+  if (type === 'OPEN') return 'success'
+  if (type === 'EXERCISE') return 'warning'
+  return 'primary'
+}
+function responsePercent(item: QuestionBoardItem) {
+  if (!item.totalStudents) return 0
+  return Math.min(100, Math.round((item.respondedCount * 100) / item.totalStudents))
+}
+function remainingSeconds(item: QuestionBoardItem) {
+  if (!item.deadlineEpochMs) return Number.MAX_SAFE_INTEGER
+  return Math.max(0, Math.ceil((item.deadlineEpochMs - nowEpoch.value) / 1000))
+}
+function formatRemaining(item: QuestionBoardItem) {
+  if (!item.deadlineEpochMs) return '不限时'
+  return formatDuration(remainingSeconds(item))
+}
+function formatDuration(seconds: number) {
+  if (seconds < 60) return `${seconds}秒`
+  const minutes = Math.floor(seconds / 60)
+  const rest = seconds % 60
+  return rest ? `${minutes}分${rest}秒` : `${minutes}分钟`
+}
+async function refreshBoard() {
+  boardLoading.value = true
+  try {
+    await store.refreshQuestionBoard()
+  } catch {
+    ElMessage.error('题目看板刷新失败')
+  } finally {
+    boardLoading.value = false
+  }
+}
+async function sendQuestion(questionId: number) {
+  activatingId.value = questionId
+  try {
+    await store.sendQuestion(questionId)
+    ElMessage.success('题目已发送，学生端开始作答')
+  } catch {
+    ElMessage.error('发送失败，请确认当前没有其他题目正在作答')
+    await refreshBoard()
+  } finally {
+    activatingId.value = null
+  }
+}
+async function extendQuestion(interactionId: number | null, seconds: number) {
+  if (!interactionId) return
+  try {
+    await store.extendInteraction(interactionId, seconds)
+    ElMessage.success(`已延时${formatDuration(seconds)}`)
+  } catch {
+    ElMessage.error('延时失败，题目可能已经结束')
+    await refreshBoard()
+  }
+}
+function finishQuestion(interactionId: number | null) {
+  if (!interactionId) return
+  store.closeInteraction(interactionId)
+  ElMessage.success('已结束作答')
 }
 
 // === 不懂标记统计 ===
@@ -526,7 +560,8 @@ const detail = ref<InteractionDetail | null>(null)
 const detailLoading = ref(false)
 const detailId = ref<number | null>(null)
 
-async function toggleDetail(interactionId: number) {
+async function toggleDetail(interactionId: number | null) {
+  if (!interactionId) return
   if (expandedId.value === interactionId) {
     expandedId.value = null
     detail.value = null
@@ -558,142 +593,11 @@ watch(
   },
 )
 
-// === 草稿库 ===
-const showDrafts = ref(false)
-const drafts = ref<DraftItem[]>([])
-const draftLoading = ref(false)
-const activatingId = ref<number | null>(null)
-
-async function refreshDrafts() {
-  if (!classId.value) return
-  draftLoading.value = true
-  try {
-    const r = await getClassDrafts(classId.value)
-    drafts.value = r.data.data || []
-  } catch {
-    drafts.value = []
-  } finally {
-    draftLoading.value = false
-  }
-}
-function pushDraft(d: DraftItem) {
-  activatingId.value = null
-  // 打开对应的出题弹窗并预填草稿内容
-  if (d.type === 'CHOICE') {
-    choice.title = d.title
-    choice.knowledgePoint = d.knowledgePoint || ''
-    if (d.options?.length) {
-      choice.options = d.options.map((option) => ({ key: option.key, text: option.text }))
-    } else {
-      choice.options = [
-        { key: 'A', text: '' },
-        { key: 'B', text: '' },
-        { key: 'C', text: '' },
-        { key: 'D', text: '' },
-      ]
-    }
-    choice.correctKey = d.correctKey || 'A'
-    choice.timeLimit = d.timeLimit || 30
-    choice.visible = true
-  } else if (d.type === 'OPEN') {
-    open.title = d.title
-    open.timeLimit = d.timeLimit || 120
-    open.visible = true
-  } else if (d.type === 'EXERCISE') {
-    ex.title = d.title
-    ex.timeLimit = d.timeLimit || 300
-    ex.visible = true
-  }
-}
-// 开课时自动加载草稿
-watch(
-  () => store.sessionId,
-  async (sid) => {
-    if (sid) await refreshDrafts()
-  },
-)
-
-const choice = reactive({
-  visible: false,
-  title: '',
-  options: [
-    { key: 'A', text: '' },
-    { key: 'B', text: '' },
-    { key: 'C', text: '' },
-    { key: 'D', text: '' },
-  ],
-  correctKey: 'A',
-  timeLimit: 30,
-  knowledgePoint: '',
-})
-const open = reactive({ visible: false, title: '', timeLimit: 120 })
-const ex = reactive({ visible: false, title: '', timeLimit: 300 })
 const ans = reactive({ visible: false, q: null as QAQuestion | null, text: '' })
-
-function openChoiceDialog() {
-  choice.title = ''
-  choice.options = [
-    { key: 'A', text: '' },
-    { key: 'B', text: '' },
-    { key: 'C', text: '' },
-    { key: 'D', text: '' },
-  ]
-  choice.visible = true
-}
-function addChoiceOption() {
-  choice.options.push({
-    key: String.fromCharCode(65 + choice.options.length),
-    text: '',
-  })
-}
-function openOpenDialog() {
-  open.title = ''
-  open.visible = true
-}
-function openExerciseDialog() {
-  ex.title = ''
-  ex.visible = true
-}
 function openAnswerDialog(q: QAQuestion) {
   ans.q = q
   ans.text = ''
   ans.visible = true
-}
-
-function submitChoice() {
-  const valid = choice.options.filter((o) => o.text.trim())
-  if (valid.length < 2) {
-    ElMessage.warning('至少2个选项')
-    return
-  }
-  store.createInteraction({
-    type: 'CHOICE',
-    title: choice.title,
-    options: valid.map((o) => ({ key: o.key, text: o.text })),
-    correctKey: choice.correctKey,
-    timeLimit: choice.timeLimit > 0 ? choice.timeLimit : undefined,
-    knowledgePoint: choice.knowledgePoint || undefined,
-  })
-  choice.visible = false
-  ElMessage.success('已发起')
-}
-function submitOpen() {
-  store.createInteraction({
-    type: 'OPEN',
-    title: open.title,
-    timeLimit: open.timeLimit > 0 ? open.timeLimit : undefined,
-  })
-  open.visible = false
-  ElMessage.success('已发起')
-}
-function submitEx() {
-  store.createInteraction({
-    type: 'EXERCISE',
-    title: ex.title,
-    timeLimit: ex.timeLimit > 0 ? ex.timeLimit : undefined,
-  })
-  ex.visible = false
-  ElMessage.success('已发起')
 }
 function submitAns() {
   if (ans.q) {
@@ -706,16 +610,19 @@ const showQR = ref(false)
 const qrCanvas = ref<HTMLCanvasElement | null>(null)
 const liveUrl = computed(() => `${window.location.origin}/live/${store.sessionInfo?.sessionCode}`)
 watch(showQR, async (v) => {
-  if (v && qrCanvas.value) {
-    await nextTick()
-    await QRCode.toCanvas(qrCanvas.value, liveUrl.value, { width: 200 })
-  }
+  if (!v) return
+  await nextTick()
+  if (!qrCanvas.value) return
+  await QRCode.toCanvas(qrCanvas.value, liveUrl.value, { width: 220 })
 })
 
 function copyCode() {
   navigator.clipboard
     .writeText(store.sessionInfo?.sessionCode || '')
     .then(() => ElMessage.success('已复制'))
+}
+function copyLink() {
+  navigator.clipboard.writeText(liveUrl.value).then(() => ElMessage.success('课堂链接已复制'))
 }
 function goBack() {
   router.push({ name: 'classManage', params: { id: classId.value } })
@@ -774,31 +681,6 @@ async function handleEndSession() {
   showSummary.value = true
 }
 
-// === AI 生成 ===
-const aiLoading = ref(false)
-async function aiGenerate(type: InteractionType) {
-  const topic = prompt('请输入知识点/主题：')
-  if (!topic) return
-  aiLoading.value = true
-  try {
-    const r = await generateQuestion(topic, type)
-    const d = r.data.data
-    if (type === 'CHOICE') {
-      choice.title = d.title
-      if (d.options)
-        choice.options = d.options.map((option) => ({ key: option.key, text: option.text }))
-      if (d.correctKey) choice.correctKey = d.correctKey
-    } else {
-      open.title = d.title
-    }
-    ElMessage.success('AI 已生成题目')
-  } catch {
-    ElMessage.error('AI 生成失败')
-  } finally {
-    aiLoading.value = false
-  }
-}
-
 // === 随机点名 ===
 const picker = reactive({ visible: false, picking: false, current: '', result: '' })
 let pickerTimer: ReturnType<typeof setInterval> | null = null
@@ -855,6 +737,9 @@ function viewProfile(studentId: string, studentName: string) {
 }
 
 onMounted(async () => {
+  countdownTimer = setInterval(() => {
+    nowEpoch.value = Date.now()
+  }, 1000)
   try {
     const r = await store.checkActiveSession(classId.value)
     if (r.hasActive && r.sessionId && r.sessionCode && r.title) {
@@ -883,8 +768,10 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  if (countdownTimer) clearInterval(countdownTimer)
   if (confusionTimer) clearInterval(confusionTimer)
   if (pickerTimer) clearInterval(pickerTimer)
+  store.disconnect()
 })
 </script>
 
@@ -951,6 +838,194 @@ onUnmounted(() => {
   border-radius: 8px;
   padding: 20px;
   overflow-y: auto;
+}
+.board-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.board-toolbar h3 {
+  margin: 0 0 4px;
+  font-size: 18px;
+}
+.board-toolbar p {
+  margin: 0;
+  color: #909399;
+  font-size: 13px;
+}
+.board-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.question-board {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.question-card {
+  padding: 16px 18px;
+  border: 1px solid #dcdfe6;
+  border-radius: 10px;
+  background: #fff;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s,
+    background 0.2s;
+}
+.question-card.status-active {
+  border-color: #409eff;
+  background: #ecf5ff;
+  box-shadow: 0 3px 12px rgba(64, 158, 255, 0.14);
+}
+.question-card.status-closed {
+  border-color: #b3e19d;
+  background: #f0f9eb;
+}
+.question-card-header,
+.question-meta,
+.question-actions,
+.response-summary {
+  display: flex;
+  align-items: center;
+}
+.question-card-header {
+  justify-content: space-between;
+  gap: 12px;
+}
+.question-meta {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.countdown {
+  color: #409eff;
+  font-size: 16px;
+  font-weight: 700;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.countdown.urgent {
+  color: #f56c6c;
+}
+.planned-time {
+  color: #909399;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.question-title {
+  margin: 12px 0 8px;
+  color: #303133;
+  font-size: 16px;
+  line-height: 1.55;
+}
+.question-description,
+.reference-answer {
+  margin: 8px 0;
+  color: #606266;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.reference-answer {
+  padding: 8px 10px;
+  color: #529b2e;
+  background: rgba(103, 194, 58, 0.1);
+  border-radius: 6px;
+}
+.question-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 10px 0;
+}
+.question-option {
+  display: flex;
+  gap: 8px;
+  padding: 8px 10px;
+  color: #606266;
+  background: rgba(255, 255, 255, 0.76);
+  border: 1px solid #e4e7ed;
+  border-radius: 6px;
+  font-size: 13px;
+}
+.question-option.correct {
+  color: #529b2e;
+  border-color: #95d475;
+}
+.response-summary {
+  gap: 12px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed rgba(144, 147, 153, 0.35);
+  font-size: 13px;
+}
+.response-total {
+  min-width: 128px;
+}
+.response-total strong {
+  color: #409eff;
+  font-size: 19px;
+}
+.response-progress {
+  flex: 1;
+}
+.correct-rate {
+  min-width: 88px;
+  color: #529b2e;
+  font-weight: 600;
+  text-align: right;
+}
+.answer-distribution {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px 16px;
+  margin-top: 10px;
+}
+.answer-distribution-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+}
+.distribution-key {
+  width: 20px;
+  font-weight: 700;
+}
+.distribution-track {
+  flex: 1;
+  height: 8px;
+  overflow: hidden;
+  background: rgba(144, 147, 153, 0.18);
+  border-radius: 4px;
+}
+.distribution-fill {
+  display: block;
+  height: 100%;
+  min-width: 1px;
+  background: #409eff;
+  border-radius: 4px;
+  transition: width 0.25s;
+}
+.distribution-value {
+  min-width: 86px;
+  color: #909399;
+  text-align: right;
+}
+.question-actions {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 14px;
+}
+.question-actions :deep(.el-button + .el-button) {
+  margin-left: 0;
+}
+.active-tip,
+.extend-label {
+  margin-right: auto;
+  color: #909399;
+  font-size: 12px;
 }
 .history-list {
   display: flex;
@@ -1140,6 +1215,19 @@ onUnmounted(() => {
 .qr-container {
   text-align: center;
 }
+.qr-container p {
+  margin: 10px 0 8px;
+  color: #606266;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.qr-code-fallback {
+  margin-bottom: 4px;
+  color: #303133;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 1px;
+}
 .student-badge {
   font-size: 14px;
   color: #666;
@@ -1189,55 +1277,6 @@ onUnmounted(() => {
   max-height: 180px;
   overflow-y: auto;
   font-size: 13px;
-}
-/* 草稿库 */
-.draft-panel h3 {
-  font-size: 14px;
-  margin: 0;
-  color: #606266;
-}
-.draft-list {
-  max-height: 260px;
-  overflow-y: auto;
-  margin-top: 8px;
-  padding-right: 2px;
-}
-.draft-item {
-  padding: 10px;
-  margin-bottom: 8px;
-  background: #fafafa;
-  border: 1px solid #ebeef5;
-  border-radius: 8px;
-}
-.draft-item:last-child {
-  margin-bottom: 0;
-}
-.draft-top {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 4px;
-}
-.draft-kp {
-  font-size: 11px;
-  color: #909399;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.draft-title {
-  font-size: 13px;
-  color: #303133;
-  margin: 0 0 4px;
-  line-height: 1.4;
-}
-.draft-opts {
-  font-size: 11px;
-  color: #909399;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 6px;
 }
 .hand-item {
   display: flex;
@@ -1348,6 +1387,10 @@ onUnmounted(() => {
   background: #fff7f0;
   border: 1px solid #f5dab1;
   border-radius: 8px;
+}
+.confusion-panel.compact {
+  margin-top: 20px;
+  margin-bottom: 0;
 }
 .confusion-panel h3 {
   margin: 0 0 10px;

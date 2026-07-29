@@ -15,7 +15,7 @@ import java.util.Set;
  *   edumind.llm.backend=built-in     # built-in | openclaw
  *   edumind.llm.base-url=...
  *   edumind.llm.api-key=...
- *   edumind.llm.model=kimi-k2-0701-preview
+ *   edumind.llm.model=deepseek-v4-flash
  *   edumind.llm.max-steps=10
  * </pre>
  */
@@ -36,20 +36,20 @@ public class LlmProperties {
     private String backend = "built-in";
 
     /** LLM API 地址（OpenAI 兼容） */
-    private String baseUrl = "https://api.moonshot.cn/v1";
+    private String baseUrl = "https://api.deepseek.com";
 
     /** LLM API Key */
     private String apiKey;
 
     /** 默认模型名 */
-    private String model = "kimi-k2-0701-preview";
+    private String model = "deepseek-v4-flash";
 
     private String textModel;
 
-    private String visionModel;
+    private String visionModel = "kimi-k2.5";
 
     /** Vision model API address, defaults to the text model baseUrl when empty. */
-    private String visionBaseUrl;
+    private String visionBaseUrl = "https://api.moonshot.cn/v1";
 
     /** Vision model API key, defaults to the text model apiKey when empty. */
     private String visionApiKey;

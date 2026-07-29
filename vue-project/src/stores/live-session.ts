@@ -3,12 +3,13 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import * as liveApi from '../api/live'
 import type {
-  CreateInteractionRequest,
   InteractionHistoryItem,
   InteractionPush,
+  InteractionTiming,
   LiveSessionInfo,
   LiveStats,
   OnlineStudents,
+  QuestionBoardItem,
   QAMessage,
   QAQuestion,
   ReactionMsg,
@@ -37,6 +38,7 @@ export const useLiveSessionStore = defineStore('liveSession', () => {
   const currentInteraction = ref<InteractionPush | null>(null)
   const lastStats = ref<LiveStats | null>(null)
   const interactionHistory = ref<InteractionHistoryItem[]>([])
+  const questionBoard = ref<QuestionBoardItem[]>([])
   const topQuestions = ref<QAQuestion[]>([])
   const connectionStatus = ref<'disconnected' | 'connecting' | 'connected'>('disconnected')
   const studentCount = ref(0)
@@ -91,18 +93,28 @@ export const useLiveSessionStore = defineStore('liveSession', () => {
     }
   }
 
-  async function joinSession(code: string, studentId: string, studentName: string) {
-    const response = await liveApi.joinSession({
-      code: code.toUpperCase(),
-      studentId,
-      studentName,
-    })
-    const data = response.data.data
+  function useStudentSession(data: LiveSessionInfo) {
+    disconnect()
+    reset()
     sessionInfo.value = data
     role.value = 'student'
     if (data.currentInteraction) currentInteraction.value = data.currentInteraction
     connect(data.token)
     return data
+  }
+
+  async function joinSession(code: string, studentId: string, studentName?: string) {
+    const response = await liveApi.joinSession({
+      code: code.toUpperCase(),
+      studentId,
+      studentName,
+    })
+    return useStudentSession(response.data.data)
+  }
+
+  async function quickJoinSession(code: string) {
+    const response = await liveApi.quickJoinSession(code)
+    return useStudentSession(response.data.data)
   }
 
   function submitResponse(answer: string) {
@@ -123,12 +135,22 @@ export const useLiveSessionStore = defineStore('liveSession', () => {
     send(`/app/session/${sessionId.value}/qa/ask`, { question })
   }
 
-  function createInteraction(dto: CreateInteractionRequest) {
-    send(`/app/session/${sessionId.value}/interaction/create`, dto)
-  }
-
   function closeInteraction(interactionId: number) {
     send(`/app/session/${sessionId.value}/interaction/${interactionId}/close`, {})
+  }
+
+  async function sendQuestion(questionId: number) {
+    const id = sessionId.value
+    if (!id) return
+    const response = await liveApi.sendQuestion(id, questionId)
+    mergeInteractionPush(response.data.data)
+  }
+
+  async function extendInteraction(interactionId: number, seconds: number) {
+    const id = sessionId.value
+    if (!id) return
+    const response = await liveApi.extendInteraction(id, interactionId, seconds)
+    mergeInteractionTiming(response.data.data)
   }
 
   function answerQuestion(qaId: number, answerText: string) {
@@ -172,12 +194,28 @@ export const useLiveSessionStore = defineStore('liveSession', () => {
       (item) => item.interactionId === stats.interactionId,
     )
     const existing = interactionHistory.value[index]
-    if (!existing) return
-    interactionHistory.value[index] = {
-      ...existing,
-      respondedCount: stats.respondedCount,
-      correctRate: stats.correctRate,
-      status: stats.status,
+    if (existing) {
+      interactionHistory.value[index] = {
+        ...existing,
+        respondedCount: stats.respondedCount,
+        correctRate: stats.correctRate,
+        status: stats.status,
+      }
+    }
+
+    const boardIndex = questionBoard.value.findIndex(
+      (item) => item.interactionId === stats.interactionId,
+    )
+    const boardItem = questionBoard.value[boardIndex]
+    if (boardItem) {
+      questionBoard.value[boardIndex] = {
+        ...boardItem,
+        respondedCount: stats.respondedCount,
+        totalStudents: stats.totalStudents,
+        correctRate: stats.correctRate,
+        distribution: stats.distribution,
+        status: stats.status as QuestionBoardItem['status'],
+      }
     }
   }
 
@@ -187,6 +225,7 @@ export const useLiveSessionStore = defineStore('liveSession', () => {
     )
     const item: InteractionHistoryItem = {
       interactionId: push.interactionId,
+      questionId: push.questionId,
       type: push.type,
       title: push.title,
       description: push.description,
@@ -206,6 +245,42 @@ export const useLiveSessionStore = defineStore('liveSession', () => {
       interactionHistory.value[index] = { ...existing, ...item }
     } else {
       interactionHistory.value.unshift(item)
+    }
+
+    const boardIndex = questionBoard.value.findIndex(
+      (boardItem) =>
+        boardItem.questionId === push.questionId || boardItem.interactionId === push.interactionId,
+    )
+    const existingBoardItem = questionBoard.value[boardIndex]
+    if (existingBoardItem) {
+      questionBoard.value[boardIndex] = {
+        ...existingBoardItem,
+        interactionId: push.interactionId,
+        status: push.status,
+        sendCount:
+          existingBoardItem.interactionId === push.interactionId
+            ? existingBoardItem.sendCount
+            : existingBoardItem.sendCount + 1,
+        deadlineEpochMs: push.deadlineEpochMs,
+        activatedAt: existingBoardItem.activatedAt ?? push.serverTime,
+        correctKey: push.correctKey ?? existingBoardItem.correctKey,
+      }
+    }
+  }
+
+  function mergeInteractionTiming(timing: InteractionTiming) {
+    const boardIndex = questionBoard.value.findIndex(
+      (item) => item.interactionId === timing.interactionId,
+    )
+    const boardItem = questionBoard.value[boardIndex]
+    if (boardItem) {
+      questionBoard.value[boardIndex] = {
+        ...boardItem,
+        deadlineEpochMs: timing.deadlineEpochMs,
+      }
+    }
+    if (currentInteraction.value?.interactionId === timing.interactionId) {
+      currentInteraction.value.deadlineEpochMs = timing.deadlineEpochMs
     }
   }
 
@@ -257,6 +332,9 @@ export const useLiveSessionStore = defineStore('liveSession', () => {
       client.subscribe(`/topic/session/${id}/interaction`, (message) => {
         mergeInteractionPush(parseMessage<InteractionPush>(message.body))
       })
+      client.subscribe(`/topic/session/${id}/interaction-timing`, (message) => {
+        mergeInteractionTiming(parseMessage<InteractionTiming>(message.body))
+      })
       client.subscribe(`/topic/session/${id}/qa`, (message) => {
         topQuestions.value = parseMessage<QAMessage>(message.body).topQuestions ?? []
       })
@@ -279,6 +357,9 @@ export const useLiveSessionStore = defineStore('liveSession', () => {
         currentInteraction.value = push
         mergeInteractionPush(push)
       })
+      client.subscribe(`/topic/session/${id}/interaction-timing`, (message) => {
+        mergeInteractionTiming(parseMessage<InteractionTiming>(message.body))
+      })
       client.subscribe(`/topic/session/${id}/hand-queue`, (message) => {
         const queue = parseMessage<HandQueue>(message.body)
         handQueue.value = queue
@@ -291,19 +372,31 @@ export const useLiveSessionStore = defineStore('liveSession', () => {
       client.subscribe(`/topic/session/${id}/teacher-status`, (message) => {
         const status = parseMessage<TeacherStatus>(message.body)
         teacherOnline.value = status.online
-        if (status.sessionEnded) sessionEnded.value = true
+        if (status.sessionEnded) {
+          sessionEnded.value = true
+          disconnect()
+        }
       })
       void loadStudentHistory(id).catch(() => undefined)
     }
   }
 
   async function loadTeacherSessionState(id: number) {
-    const [historyResponse, presenceResponse] = await Promise.all([
+    const [historyResponse, boardResponse, presenceResponse] = await Promise.all([
       liveApi.getInteractionHistory(id),
+      liveApi.getQuestionBoard(id),
       liveApi.getOnlineStudents(id),
     ])
     interactionHistory.value = historyResponse.data.data
+    questionBoard.value = boardResponse.data.data
     updatePresence(presenceResponse.data.data)
+  }
+
+  async function refreshQuestionBoard() {
+    const id = sessionId.value
+    if (!id) return
+    const response = await liveApi.getQuestionBoard(id)
+    questionBoard.value = response.data.data
   }
 
   async function loadStudentHistory(id: number) {
@@ -338,6 +431,7 @@ export const useLiveSessionStore = defineStore('liveSession', () => {
     currentInteraction.value = null
     lastStats.value = null
     interactionHistory.value = []
+    questionBoard.value = []
     topQuestions.value = []
     studentCount.value = 0
     studentList.value = []
@@ -357,6 +451,7 @@ export const useLiveSessionStore = defineStore('liveSession', () => {
     currentInteraction,
     lastStats,
     interactionHistory,
+    questionBoard,
     topQuestions,
     connectionStatus,
     studentCount,
@@ -376,10 +471,12 @@ export const useLiveSessionStore = defineStore('liveSession', () => {
     checkActiveSession,
     endLiveSession,
     joinSession,
+    quickJoinSession,
     submitResponse,
     askQuestion,
-    createInteraction,
     closeInteraction,
+    sendQuestion,
+    extendInteraction,
     answerQuestion,
     sendReaction,
     raiseHand,
@@ -387,6 +484,7 @@ export const useLiveSessionStore = defineStore('liveSession', () => {
     callStudent,
     dismissHand,
     fetchStudentProfile,
+    refreshQuestionBoard,
     connect,
     disconnect,
     reset,

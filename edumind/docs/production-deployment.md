@@ -30,7 +30,7 @@ openssl rand -base64 32
 
 不要复用数据库、MinIO、Grafana、MCP 或 OneBot 的密码。`DOMAIN` 必须是不带协议和路径的域名，例如 `edu.example.com`。
 
-`LLM_BASE_URL` 和 `LLM_API_KEY` 指向项目直接使用的 OpenAI 兼容模型服务。若视觉模型使用另一个供应商，再单独填写 `LLM_VISION_BASE_URL` 和 `LLM_VISION_API_KEY`；留空时会复用文本模型端点和密钥。MCP `/mcp` 是可选的外部集成接口，不是 EduMind 自身运行的前置依赖。
+默认模型路由为：文本与 Agent 调用通过 `LLM_BASE_URL`、`LLM_API_KEY` 使用 `deepseek-v4-flash`；图片和视觉 PDF 通过 `LLM_VISION_BASE_URL`、`LLM_VISION_API_KEY` 使用 `kimi-k2.5`。两套供应商 Key 都必须填写且不能复用。MCP `/mcp` 是可选的外部集成接口，不是 EduMind 自身运行的前置依赖。
 
 如果部署 NapCat：
 

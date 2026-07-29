@@ -67,6 +67,13 @@ public interface ClassStudentMapper extends BaseMapper<ClassStudent> {
     Integer countByClassId(@Param("classId") Long classId);
 
     /**
+     * 是否存在由教师导入、作业收集或邀请码加入形成的正式花名册。
+     * 仅在实时课堂中自助登记的 live 记录不锁定名单。
+     */
+    @Select("SELECT COUNT(*) FROM class_student WHERE class_id = #{classId} AND source <> 'live'")
+    Integer countManagedByClassId(@Param("classId") Long classId);
+
+    /**
      * 检查指定学号是否属于指定班级
      */
     @Select("SELECT COUNT(*) > 0 FROM class_student WHERE class_id = #{classId} AND student_id = #{studentId}")

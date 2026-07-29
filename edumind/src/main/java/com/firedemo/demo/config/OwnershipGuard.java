@@ -43,7 +43,6 @@ public class OwnershipGuard {
     private final PreviewTaskMapper previewTaskMapper;
     private final SharedKbMemberMapper sharedKbMemberMapper;
     private final TeachingCalendarMapper teachingCalendarMapper;
-    private final InteractionMapper interactionMapper;
 
     // ───────────────────── 课堂会话 ─────────────────────
 
@@ -232,15 +231,6 @@ public class OwnershipGuard {
         PreviewTask task = previewTaskMapper.selectById(taskId);
         if (task == null) return false;
         return denyIfNotOwner(userId, task.getTeacherId(), "预习任务", taskId);
-    }
-
-    public boolean isInteractionDraftOwner(Long interactionId) {
-        Long userId = getCurrentUserId();
-        if (userId == null || interactionId == null) return false;
-        Interaction interaction = interactionMapper.selectById(interactionId);
-        return interaction != null
-                && "DRAFT".equals(interaction.getStatus())
-                && isClassOwner(interaction.getClassId());
     }
 
     public boolean isTeachingCalendarOwner(Long planId) {

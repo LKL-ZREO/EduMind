@@ -7,6 +7,7 @@ import java.util.List;
 @Data @Builder @NoArgsConstructor @AllArgsConstructor
 public class InteractionPushDTO {
     private Long interactionId;
+    private Long questionId;
     private String type;
     private String status;
     private String title;

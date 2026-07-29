@@ -15,8 +15,15 @@ export interface Task {
 
 export interface DraftQuestion {
   id?: number
+  type?: 'CHOICE' | 'OPEN' | 'EXERCISE' | 'HOMEWORK'
   title: string
   requirement: string
+  options?: Array<{ key: string; text: string }> | null
+  correctKey?: string | null
+  explanation?: string | null
+  knowledgePoint?: string | null
+  difficulty?: 'easy' | 'medium' | 'hard' | null
+  timeLimit?: number | null
   score: number
   uploadRequired: boolean
 }
@@ -108,11 +115,6 @@ export async function saveDraft(data: SaveDraftPayload, draftId?: number | null)
 
 export async function deleteDraft(draftId: number) {
   const res = await request.delete(`/tasks/drafts/${draftId}`)
-  return res.data
-}
-
-export async function searchQuestions(keyword = '') {
-  const res = await request.get('/tasks/questions', { params: { keyword } })
   return res.data
 }
 

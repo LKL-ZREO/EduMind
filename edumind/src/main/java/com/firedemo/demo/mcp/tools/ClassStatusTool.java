@@ -2,7 +2,7 @@ package com.firedemo.demo.mcp.tools;
 
 import com.firedemo.demo.Entity.ClassInfo;
 import com.firedemo.demo.agent.context.AgentExecutionContext;
-import com.firedemo.demo.mapper.HomeworkEvaluationMapper;
+import com.firedemo.demo.mapper.LegacyHomeworkEvaluationStatsMapper;
 import com.firedemo.demo.mapper.SubmissionErrorMapper;
 import com.firedemo.demo.mapper.SubmissionMapper;
 import com.firedemo.demo.mcp.ToolAccessPolicy;
@@ -11,6 +11,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -25,7 +26,7 @@ public class ClassStatusTool implements ToolDefinition {
 
     private final ToolAccessPolicy toolAccessPolicy;
     private final SubmissionMapper submissionMapper;
-    private final HomeworkEvaluationMapper evaluationMapper;
+    private final LegacyHomeworkEvaluationStatsMapper legacyEvaluationStatsMapper;
     private final SubmissionErrorMapper submissionErrorMapper;
 
     @Override
@@ -62,8 +63,12 @@ public class ClassStatusTool implements ToolDefinition {
             Long classId = classInfo.getId();
 
             Integer studentCount = submissionMapper.countDistinctStudentsByClassId(classId);
-            Integer totalHomework = evaluationMapper.countByClassId(classId);
-            List<Integer> scores = evaluationMapper.selectScoresByClassId(classId);
+            Integer legacyHomework = legacyEvaluationStatsMapper.countByClassId(classId);
+            Integer currentHomework = submissionMapper.countByClassId(classId);
+            int totalHomework = (legacyHomework != null ? legacyHomework : 0)
+                    + (currentHomework != null ? currentHomework : 0);
+            List<Integer> scores = new ArrayList<>(legacyEvaluationStatsMapper.selectScoresByClassId(classId));
+            scores.addAll(submissionMapper.selectScoresByClassId(classId));
             double avgScore = scores.isEmpty() ? 0
                     : scores.stream().mapToInt(Integer::intValue).average().orElse(0);
 
@@ -81,7 +86,7 @@ public class ClassStatusTool implements ToolDefinition {
                     薄弱知识点（按错误数排序）：%s
                     """, className,
                     studentCount != null ? studentCount : 0,
-                    totalHomework != null ? totalHomework : 0,
+                    totalHomework,
                     avgScore, weakStr);
 
         } catch (Exception e) {

@@ -18,20 +18,17 @@ public interface InteractionMapper extends BaseMapper<Interaction> {
             "WHERE id = #{id} AND session_id = #{sessionId} AND status = 'ACTIVE'")
     int closeInteraction(@Param("id") Long id, @Param("sessionId") Long sessionId);
 
-    @Select("SELECT * FROM interaction WHERE class_id = #{classId} AND status = 'DRAFT' ORDER BY created_at DESC")
-    List<Interaction> findDraftsByClassId(@Param("classId") Long classId);
+    @Update("UPDATE interaction SET deadline_at = #{deadlineAt} " +
+            "WHERE id = #{id} AND session_id = #{sessionId} AND status = 'ACTIVE'")
+    int updateDeadline(@Param("id") Long id,
+                       @Param("sessionId") Long sessionId,
+                       @Param("deadlineAt") java.time.LocalDateTime deadlineAt);
 
-    @Update("UPDATE interaction SET status = 'ACTIVE', session_id = #{sessionId} WHERE id = #{id}")
-    int activateDraft(@Param("id") Long id, @Param("sessionId") Long sessionId);
+    @Select("SELECT * FROM interaction WHERE status = 'ACTIVE' AND deadline_at IS NOT NULL")
+    List<Interaction> findActiveWithDeadline();
 
-    @Delete("DELETE FROM interaction WHERE id = #{id} AND status = 'DRAFT'")
-    int deleteDraft(@Param("id") Long id);
-
-    @Select("SELECT * FROM interaction WHERE source_doc_id = #{docId} AND status = 'DRAFT' ORDER BY created_at DESC")
-    List<Interaction> findDraftsByDocId(@Param("docId") String docId);
-
-    @Insert("INSERT INTO interaction (session_id, class_id, source_doc_id, type, title, description, options, correct_key, time_limit, status, sort_order, ai_generated, knowledge_point, created_at) " +
-            "VALUES (#{sessionId}, #{classId}, #{sourceDocId}, #{type}, #{title}, #{description}, CAST(#{options} AS jsonb), #{correctKey}, #{timeLimit}, #{status}, #{sortOrder}, #{aiGenerated}, #{knowledgePoint}, NOW())")
+    @Insert("INSERT INTO interaction (question_id, session_id, class_id, source_doc_id, type, title, description, options, correct_key, explanation, time_limit, status, sort_order, ai_generated, knowledge_point, difficulty, created_at, activated_at, deadline_at) " +
+            "VALUES (#{questionId}, #{sessionId}, #{classId}, #{sourceDocId}, #{type}, #{title}, #{description}, CAST(#{options} AS jsonb), #{correctKey}, #{explanation}, #{timeLimit}, #{status}, #{sortOrder}, #{aiGenerated}, #{knowledgePoint}, #{difficulty}, NOW(), #{activatedAt}, #{deadlineAt})")
     @Options(useGeneratedKeys = true, keyProperty = "id")
     int insertWithJsonb(Interaction interaction);
 }

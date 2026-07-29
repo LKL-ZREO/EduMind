@@ -19,6 +19,7 @@ public class ClassroomSession {
     private String status;
     private LocalDateTime startedAt;
     private LocalDateTime endedAt;
+    private LocalDateTime teacherOfflineAt;
     @TableField(fill = FieldFill.INSERT) private LocalDateTime createdAt;
     @TableField(fill = FieldFill.INSERT_UPDATE) private LocalDateTime updatedAt;
 }

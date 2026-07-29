@@ -1,17 +1,18 @@
 package com.firedemo.demo.Controller;
 
+import com.firedemo.demo.DTO.DocumentMaterialsDTO;
 import com.firedemo.demo.DTO.GenerateMaterialsRequest;
 import com.firedemo.demo.DTO.GenerateMaterialsResponse;
 import com.firedemo.demo.Entity.DirectoryNode;
 import com.firedemo.demo.Entity.Document;
 import com.firedemo.demo.Service.DocumentService;
 import com.firedemo.demo.Service.FileStorageService;
+import com.firedemo.demo.Service.QuestionService;
 import com.firedemo.demo.common.exception.BusinessException;
 import com.firedemo.demo.common.exception.ErrorCode;
 import com.firedemo.demo.config.OwnershipGuard;
 import com.firedemo.demo.live.service.TeachingMaterialGenerator;
 import com.firedemo.demo.mapper.DirectoryNodeMapper;
-import com.firedemo.demo.mapper.InteractionMapper;
 import com.firedemo.demo.mapper.PreviewTaskMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -21,10 +22,8 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-
-import java.util.HashMap;
 import java.util.List;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -43,8 +42,7 @@ public class DocumentController {
     private final DirectoryNodeMapper directoryNodeMapper;
     private final TeachingMaterialGenerator materialGenerator;
     private final PreviewTaskMapper previewTaskMapper;
-    private final InteractionMapper interactionMapper;
-    private final ObjectMapper objectMapper;
+    private final QuestionService questionService;
     private final OwnershipGuard ownershipGuard;
 
     /**
@@ -268,98 +266,36 @@ public class DocumentController {
         return ResponseEntity.ok(Map.of("savedId", saved.getSavedId()));
     }
 
-    /** 保存已审核的课堂试题 */
-    /** 获取某文档生成的教学材料草稿 */
-    @GetMapping("/drafts")
-    public ResponseEntity<Map<String, Object>> listDrafts(@RequestParam String docId) {
+    /** 获取某文档关联的预习材料与统一题目。 */
+    @GetMapping("/{docId}/materials")
+    public ResponseEntity<DocumentMaterialsDTO> listMaterials(@PathVariable String docId) {
         Long userId = getCurrentUserId();
         if (userId == null) return ResponseEntity.status(401).build();
         requireAccess(ownershipGuard.canReadDocument(userId, docId));
 
-        List<Map<String, Object>> previews = previewTaskMapper.findBySourceDocId(docId).stream()
-                .map(p -> Map.<String, Object>of(
-                        "id", p.getId(), "type", "preview", "title", p.getTitle(),
-                        "topic", p.getKnowledgePoint() != null ? p.getKnowledgePoint() : "",
-                        "status", p.getStatus(), "createdAt", p.getCreatedAt() != null ? p.getCreatedAt().toString() : ""))
+        List<DocumentMaterialsDTO.PreviewSummary> previews = previewTaskMapper.findBySourceDocId(docId).stream()
+                .map(preview -> DocumentMaterialsDTO.PreviewSummary.builder()
+                        .id(preview.getId())
+                        .title(preview.getTitle())
+                        .topic(preview.getKnowledgePoint())
+                        .status(preview.getStatus())
+                        .createdAt(preview.getCreatedAt())
+                        .build())
                 .toList();
-
-        List<Map<String, Object>> quizzes = interactionMapper.findDraftsByDocId(docId).stream()
-                .map(i -> {
-                    Map<String, Object> m = new HashMap<>();
-                    m.put("id", i.getId());
-                    m.put("type", "quiz");
-                    m.put("quizType", i.getType());
-                    m.put("title", i.getTitle());
-                    m.put("knowledgePoint", i.getKnowledgePoint() != null ? i.getKnowledgePoint() : "");
-                    m.put("correctKey", i.getCorrectKey() != null ? i.getCorrectKey() : "");
-                    m.put("timeLimit", i.getTimeLimit() != null ? i.getTimeLimit() : 0);
-                    m.put("status", i.getStatus());
-                    m.put("createdAt", i.getCreatedAt() != null ? i.getCreatedAt().toString() : "");
-                    // 解析 options JSON 字符串为对象列表
-                    if (i.getOptions() != null && !i.getOptions().isEmpty()) {
-                        try {
-                            m.put("options", objectMapper.readValue(i.getOptions(), List.class));
-                        } catch (Exception e) {
-                            m.put("options", List.of());
-                        }
-                    } else {
-                        m.put("options", List.of());
-                    }
-                    return m;
-                })
-                .toList();
-
-        return ResponseEntity.ok(Map.of("previews", previews, "quizzes", quizzes));
+        return ResponseEntity.ok(DocumentMaterialsDTO.builder()
+                .previews(previews)
+                .questions(questionService.search(userId, null, docId, null))
+                .build());
     }
 
-    /** 删除草稿 */
-    @DeleteMapping("/drafts/{type}/{id}")
-    public ResponseEntity<Map<String, String>> deleteDraft(@PathVariable String type, @PathVariable Long id) {
+    /** 删除预习材料；统一题目通过 /api/questions/{id} 归档。 */
+    @DeleteMapping("/materials/previews/{id}")
+    public ResponseEntity<Map<String, String>> deletePreviewMaterial(@PathVariable Long id) {
         Long userId = getCurrentUserId();
         if (userId == null) return ResponseEntity.status(401).build();
-        if ("preview".equals(type)) {
-            requireAccess(ownershipGuard.isPreviewTaskOwner(id));
-            previewTaskMapper.deleteById(id);
-        } else if ("quiz".equals(type)) {
-            requireAccess(ownershipGuard.isInteractionDraftOwner(id));
-            interactionMapper.deleteDraft(id);
-        } else {
-            return ResponseEntity.badRequest().body(Map.of("error", "不支持的草稿类型"));
-        }
+        requireAccess(ownershipGuard.isPreviewTaskOwner(id));
+        previewTaskMapper.deleteById(id);
         return ResponseEntity.ok(Map.of("message", "已删除"));
-    }
-
-    @PostMapping("/generate-materials/save-quiz")
-    public ResponseEntity<Map<String, Object>> saveQuiz(
-            @RequestBody Map<String, Object> body) {
-        Long userId = getCurrentUserId();
-        if (userId == null) return ResponseEntity.status(401).build();
-
-        Long classId = body.get("classId") instanceof Number n ? n.longValue() : null;
-        if (classId == null) return ResponseEntity.badRequest().body(Map.of("error", "请选择班级"));
-        requireAccess(ownershipGuard.isClassOwner(classId));
-
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> optionsRaw = (List<Map<String, Object>>) body.get("options");
-        List<GenerateMaterialsResponse.OptionItem> options = null;
-        if (optionsRaw != null) {
-            options = optionsRaw.stream().map(m -> GenerateMaterialsResponse.OptionItem.builder()
-                    .key((String) m.get("key")).text((String) m.get("text")).build()).toList();
-        }
-
-        GenerateMaterialsResponse.QuizItem item = GenerateMaterialsResponse.QuizItem.builder()
-                .type((String) body.get("type"))
-                .title((String) body.get("title"))
-                .options(options)
-                .correctKey((String) body.get("correctKey"))
-                .knowledgePoint((String) body.get("knowledgePoint"))
-                .difficulty((String) body.get("difficulty"))
-                .timeLimit(body.get("timeLimit") instanceof Number n ? n.intValue() : null)
-                .build();
-        String docId = (String) body.get("docId");
-        if (docId != null) requireAccess(ownershipGuard.canReadDocument(userId, docId));
-        GenerateMaterialsResponse.QuizItem saved = materialGenerator.saveQuiz(item, classId, docId, userId);
-        return ResponseEntity.ok(Map.of("savedId", saved.getSavedId()));
     }
 
     // ========== 内部工具 ==========

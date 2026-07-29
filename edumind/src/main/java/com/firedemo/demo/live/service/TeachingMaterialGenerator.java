@@ -6,9 +6,7 @@ import com.firedemo.demo.DTO.GenerateMaterialsResponse;
 import com.firedemo.demo.DTO.QuizGenerationResult;
 import com.firedemo.demo.Entity.ClassInfo;
 import com.firedemo.demo.Entity.Document;
-import com.firedemo.demo.Entity.Interaction;
 import com.firedemo.demo.Entity.PreviewTask;
-import com.firedemo.demo.Entity.QuestionBankItem;
 import com.firedemo.demo.Service.FileStorageService;
 import com.firedemo.demo.Service.OpenClawService;
 import com.firedemo.demo.common.exception.BusinessException;
@@ -18,15 +16,12 @@ import com.firedemo.demo.infrastructure.ai.StructuredOutputInvoker;
 import com.firedemo.demo.infrastructure.ai.StructuredOutputValidationException;
 import com.firedemo.demo.mapper.ClassInfoMapper;
 import com.firedemo.demo.mapper.DocumentMapper;
-import com.firedemo.demo.mapper.InteractionMapper;
 import com.firedemo.demo.mapper.PreviewTaskMapper;
-import com.firedemo.demo.mapper.QuestionBankItemMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -46,11 +41,9 @@ public class TeachingMaterialGenerator {
     private final ObjectMapper objectMapper;
     private final StructuredOutputInvoker structuredOutputInvoker;
     private final PreviewTaskMapper previewTaskMapper;
-    private final InteractionMapper interactionMapper;
     private final DocumentMapper documentMapper;
     private final LiveNotificationService liveNotificationService;
     private final ClassInfoMapper classInfoMapper;
-    private final QuestionBankItemMapper questionBankItemMapper;
 
     private static final ExecutorService AI_EXECUTOR =
             Executors.newFixedThreadPool(4, r -> {
@@ -191,84 +184,6 @@ public class TeachingMaterialGenerator {
         }
 
         return item;
-    }
-
-    public GenerateMaterialsResponse.QuizItem saveQuiz(
-            GenerateMaterialsResponse.QuizItem item,
-            Long classId,
-            String docId,
-            Long teacherId
-    ) {
-        String optionsJson = item.getOptions() != null ? toJson(item.getOptions()) : null;
-        Interaction interaction = Interaction.builder()
-                .type(item.getType())
-                .title(item.getTitle())
-                .options(optionsJson)
-                .correctKey(item.getCorrectKey())
-                .knowledgePoint(item.getKnowledgePoint())
-                .timeLimit(item.getTimeLimit())
-                .status("DRAFT")
-                .sortOrder(0)
-                .aiGenerated(true)
-                .sessionId(null)
-                .classId(classId)
-                .sourceDocId(docId)
-                .build();
-
-        interactionMapper.insertWithJsonb(interaction);
-        item.setSavedId(interaction.getId());
-        item.setPublished(true);
-        saveQuizToQuestionBank(item, teacherId);
-        return item;
-    }
-
-    private void saveQuizToQuestionBank(GenerateMaterialsResponse.QuizItem item, Long teacherId) {
-        if (teacherId == null) return;
-
-        LocalDateTime now = LocalDateTime.now();
-        QuestionBankItem bankItem = new QuestionBankItem();
-        bankItem.setTeacherId(teacherId);
-        bankItem.setTitle(firstNonBlank(item.getTitle(), "AI生成题目"));
-        bankItem.setRequirement(buildQuestionRequirement(item));
-        bankItem.setScore(10);
-        bankItem.setUploadRequired(false);
-        bankItem.setCreatedAt(now);
-        bankItem.setUpdatedAt(now);
-        questionBankItemMapper.insert(bankItem);
-    }
-
-    private String buildQuestionRequirement(GenerateMaterialsResponse.QuizItem item) {
-        StringBuilder text = new StringBuilder();
-        appendLine(text, "类型", item.getType());
-        appendLine(text, "知识点", item.getKnowledgePoint());
-
-        if (item.getOptions() != null && !item.getOptions().isEmpty()) {
-            text.append("选项:\n");
-            for (GenerateMaterialsResponse.OptionItem option : item.getOptions()) {
-                if (option == null) continue;
-                String key = firstNonBlank(option.getKey(), "");
-                String value = firstNonBlank(option.getText(), "");
-                text.append(key);
-                if (!key.isBlank()) text.append(". ");
-                text.append(value).append('\n');
-            }
-        }
-
-        appendLine(text, "答案", item.getCorrectKey());
-        appendLine(text, "难度", item.getDifficulty());
-        if (item.getTimeLimit() != null) {
-            appendLine(text, "限时", item.getTimeLimit() + "s");
-        }
-        return text.toString().trim();
-    }
-
-    private void appendLine(StringBuilder text, String label, String value) {
-        if (value == null || value.isBlank()) return;
-        text.append(label).append(": ").append(value).append('\n');
-    }
-
-    private String firstNonBlank(String value, String fallback) {
-        return value == null || value.isBlank() ? fallback : value;
     }
 
     private void validatePreview(GenerateMaterialsResponse.PreviewItem preview) {

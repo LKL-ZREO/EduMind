@@ -10,12 +10,12 @@ import {
   getTasksByClass,
   publishDraft,
   saveDraft,
-  searchQuestions,
   deleteDraft,
   type DraftQuestion,
   type HomeworkDraft,
   type Task,
 } from '@/api/tasks'
+import { searchQuestions, type TeachingQuestion } from '@/api/questions'
 
 type Mode = 'draft' | 'published'
 
@@ -40,7 +40,7 @@ const saving = ref(false)
 const publishing = ref(false)
 const tasks = ref<Task[]>([])
 const drafts = ref<HomeworkDraft[]>([])
-const bankQuestions = ref<DraftQuestion[]>([])
+const bankQuestions = ref<TeachingQuestion[]>([])
 const mode = ref<Mode>('draft')
 const activePublishedKey = ref('')
 const draftSearch = ref('')
@@ -178,7 +178,7 @@ async function loadDrafts() {
 
 async function loadQuestionBank() {
   try {
-    const res = await searchQuestions(questionSearch.value)
+    const res = await searchQuestions({ keyword: questionSearch.value })
     if (res?.code === 200) bankQuestions.value = res.data || []
   } catch (error) {
     console.error('load question bank failed', error)
@@ -188,6 +188,7 @@ async function loadQuestionBank() {
 
 function createBlankQuestion(): DraftQuestion {
   return {
+    type: 'HOMEWORK',
     title: '',
     requirement: '',
     score: 20,
@@ -243,16 +244,23 @@ function addQuestion() {
   draftForm.questions.push(createBlankQuestion())
 }
 
-function addFromBank(question: DraftQuestion) {
+function addFromBank(question: TeachingQuestion) {
   draftForm.questions.push(cloneQuestion(question))
   ElMessage.success('已加入当前草稿')
 }
 
-function cloneQuestion(question: DraftQuestion): DraftQuestion {
+function cloneQuestion(question: DraftQuestion | TeachingQuestion): DraftQuestion {
   return {
     id: question.id,
+    type: question.type,
     title: question.title,
-    requirement: question.requirement,
+    requirement: question.requirement || '',
+    options: question.options,
+    correctKey: question.correctKey,
+    explanation: question.explanation,
+    knowledgePoint: question.knowledgePoint,
+    difficulty: question.difficulty,
+    timeLimit: question.timeLimit,
     score: question.score,
     uploadRequired: question.uploadRequired,
   }
@@ -264,6 +272,17 @@ function removeQuestion(index: number) {
     return
   }
   draftForm.questions.splice(index, 1)
+}
+
+function questionTypeLabel(type?: string) {
+  return (
+    {
+      CHOICE: '选择题',
+      OPEN: '简答题',
+      EXERCISE: '随堂练习',
+      HOMEWORK: '作业题',
+    }[type || 'HOMEWORK'] || '作业题'
+  )
 }
 
 async function saveCurrentDraft() {
@@ -579,7 +598,7 @@ function escapeHtml(value: string) {
             class="question-block"
           >
             <div class="question-title-row">
-              <span>第 {{ index + 1 }} 题</span>
+              <span>第 {{ index + 1 }} 题 · {{ questionTypeLabel(question.type) }}</span>
               <button class="text-button danger" @click="removeQuestion(index)">移除</button>
             </div>
             <div class="form-grid compact">
@@ -598,6 +617,11 @@ function escapeHtml(value: string) {
                 v-model="question.requirement"
                 placeholder="写题干、评分标准、提交说明..."
               />
+            </div>
+            <div v-if="question.options?.length" class="question-preview-options">
+              <span v-for="option in question.options" :key="option.key">
+                <b>{{ option.key }}</b> {{ option.text }}
+              </span>
             </div>
             <label class="switch-line">
               <input v-model="question.uploadRequired" type="checkbox" />
@@ -633,7 +657,7 @@ function escapeHtml(value: string) {
             >
               <strong>{{ question.title }}</strong>
               <small
-                >{{ question.score }} 分 ·
+                >{{ questionTypeLabel(question.type) }} · {{ question.score }} 分 ·
                 {{ question.uploadRequired ? '附件提交' : '在线作答' }}</small
               >
             </button>
@@ -959,6 +983,26 @@ input {
 
 .rich-block :deep(.rich-editor-content .rich-editor-body) {
   min-height: 140px;
+}
+
+.question-preview-options {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.question-preview-options span {
+  padding: 0.55rem 0.7rem;
+  color: var(--muted);
+  font-size: 0.84rem;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+
+.question-preview-options b {
+  display: inline-block;
+  min-width: 1.5rem;
+  color: var(--primary);
 }
 
 .meta-grid {

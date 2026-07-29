@@ -6,6 +6,7 @@ import com.firedemo.demo.common.exception.BusinessException;
 import com.firedemo.demo.common.exception.ErrorCode;
 import com.firedemo.demo.live.security.LiveSessionTokenService;
 import com.firedemo.demo.mapper.*;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
@@ -25,7 +26,7 @@ public class LiveSessionService {
     private final ClassroomSessionMapper sessionMapper;
     private final ClassInfoMapper classInfoMapper;
     private final ClassStudentMapper classStudentMapper;
-    private final InteractionMapper interactionMapper;
+    private final InteractionService interactionService;
     private final UserMapper userMapper;
     private final LiveSessionTokenService liveSessionTokenService;
     private final LiveNotificationService liveNotificationService;
@@ -51,7 +52,8 @@ public class LiveSessionService {
         ClassroomSession session = ClassroomSession.builder()
                 .classId(dto.getClassId()).teacherId(teacherId).sessionCode(code)
                 .title(dto.getTitle() != null ? dto.getTitle() : classInfo.getName() + " 课堂")
-                .courseId(dto.getCourseId()).status("ACTIVE").startedAt(LocalDateTime.now()).build();
+                .courseId(dto.getCourseId()).status("ACTIVE").startedAt(LocalDateTime.now())
+                .teacherOfflineAt(LocalDateTime.now()).build();
         sessionMapper.insert(session);
         log.info("课堂已创建: sessionId={}, code={}", session.getId(), code);
         // OneBot QQ 群开课通知
@@ -61,20 +63,35 @@ public class LiveSessionService {
 
     @Transactional
     public LiveSessionInfoDTO joinSession(LiveJoinDTO dto) {
-        ClassroomSession session = sessionMapper.findByCode(dto.getCode());
+        String code = dto.getCode() != null ? dto.getCode().trim().toUpperCase() : "";
+        String studentId = dto.getStudentId() != null ? dto.getStudentId().trim() : "";
+        ClassroomSession session = sessionMapper.findByCode(code);
         if (session == null)
             throw new BusinessException(ErrorCode.DATA_NOT_FOUND.getCode(), "课堂不存在或已结束");
 
-        // 验证学号是否在班级花名册中（如果花名册非空，则必须在名单内）
-        int totalInClass = Optional.ofNullable(classStudentMapper.countByClassId(session.getClassId())).orElse(0);
-        if (totalInClass > 0 && !classStudentMapper.existsByClassIdAndStudentId(session.getClassId(), dto.getStudentId())) {
+        // 有花名册时，只接收学号，姓名始终使用花名册中的标准值。
+        int managedRosterCount = Optional.ofNullable(
+                classStudentMapper.countManagedByClassId(session.getClassId())).orElse(0);
+        ClassStudent rosterStudent = classStudentMapper.selectOne(
+                new LambdaQueryWrapper<ClassStudent>()
+                        .eq(ClassStudent::getClassId, session.getClassId())
+                        .eq(ClassStudent::getStudentId, studentId));
+
+        String studentName;
+        if (rosterStudent != null) {
+            studentName = rosterStudent.getStudentName();
+        } else if (managedRosterCount > 0) {
             throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "学号不在班级名单中，请联系老师添加");
+        } else {
+            studentName = dto.getStudentName() != null ? dto.getStudentName().trim() : "";
+            if (studentName.isBlank()) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "班级尚未建立花名册，首次加入请输入姓名");
+            }
+            classStudentMapper.insertIgnore(session.getClassId(), studentId, studentName, "live");
         }
 
-        classStudentMapper.insertIgnore(session.getClassId(), dto.getStudentId(), dto.getStudentName(), "manual");
-
         String token = liveSessionTokenService.issue(
-                dto.getStudentId(), dto.getStudentName(), session.getId());
+                studentId, studentName, session.getId());
         ClassInfo classInfo = classInfoMapper.selectById(session.getClassId());
         String teacherName = "";
         if (classInfo != null && classInfo.getTeacherId() != null) {
@@ -87,7 +104,8 @@ public class LiveSessionService {
                 .title(session.getTitle())
                 .className(classInfo != null ? classInfo.getName() : "")
                 .teacherName(teacherName).token(token)
-                .studentId(dto.getStudentId()).studentName(dto.getStudentName()).build();
+                .studentId(studentId).studentName(studentName)
+                .requiresStudentName(false).build();
     }
 
     @Transactional
@@ -96,11 +114,28 @@ public class LiveSessionService {
         if (session == null) throw new BusinessException(ErrorCode.DATA_NOT_FOUND.getCode(), "课堂不存在");
         if (!session.getTeacherId().equals(teacherId))
             throw new BusinessException(ErrorCode.FORBIDDEN.getCode(), "无权结束此课堂");
-        sessionMapper.endSession(sessionId);
+        if (sessionMapper.endSession(sessionId) == 0) return;
+        finishSession(session, "MANUAL");
+    }
+
+    /** 教师所有连接持续离线超过宽限期时，由清理任务调用。 */
+    @Transactional
+    public boolean autoEndSession(Long sessionId) {
+        ClassroomSession session = sessionMapper.selectById(sessionId);
+        if (session == null || !"ACTIVE".equals(session.getStatus())) return false;
+        if (sessionMapper.endSession(sessionId) == 0) return false;
+        finishSession(session, "TEACHER_OFFLINE_TIMEOUT");
+        log.info("教师离线超时，课堂已自动结束: sessionId={}", sessionId);
+        return true;
+    }
+
+    private void finishSession(ClassroomSession session, String reason) {
+        Long sessionId = session.getId();
+        interactionService.closeActiveInteraction(sessionId);
 
         // 通过 WebSocket 通知所有学生：课堂已结束
         messagingTemplate.convertAndSend("/topic/session/" + sessionId + "/teacher-status",
-                (Object) Map.of("online", false, "sessionEnded", true));
+                (Object) Map.of("online", false, "sessionEnded", true, "reason", reason));
 
         // 清理举手队列 + 在线状态
         handRaiseService.clear(sessionId);
@@ -124,7 +159,10 @@ public class LiveSessionService {
                 .sessionId(session.getId()).sessionCode(session.getSessionCode())
                 .title(session.getTitle())
                 .className(classInfo != null ? classInfo.getName() : "")
-                .teacherName(teacherName).build();
+                .teacherName(teacherName)
+                .requiresStudentName(Optional.ofNullable(
+                        classStudentMapper.countManagedByClassId(session.getClassId())).orElse(0) == 0)
+                .build();
     }
 
     public ClassroomSession findActiveByClassId(Long classId) {

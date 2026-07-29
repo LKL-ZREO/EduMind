@@ -39,9 +39,9 @@ Docker Compose 默认启动 PostgreSQL、Redis、MinIO、应用、Nginx、备份
 
 以下服务需要**另行启动**：
 
-| 服务 | 说明 | 安装指南 |
-|------|------|---------|
-| **OneBot / NapCat** | QQ 机器人客户端，通过 WebSocket 与应用双向通信 | 见下方 |
+| 服务                | 说明                                           | 安装指南 |
+| ------------------- | ---------------------------------------------- | -------- |
+| **OneBot / NapCat** | QQ 机器人客户端，通过 WebSocket 与应用双向通信 | 见下方   |
 
 > **LLM 调用**：应用使用内置 LangChain4j Agent，直接连接 `.env` 中配置的 OpenAI 兼容模型端点，不依赖 OpenClaw。
 
@@ -133,42 +133,43 @@ npm run dev
 
 ## 📦 环境变量
 
-| 变量 | 说明 | 默认值 |
-|------|------|--------|
-| `DB_PASS` | 数据库密码 | **必填** |
-| `DB_USER` | 数据库用户 | `postgres` |
-| `REDIS_PORT` | Redis 端口 | `6379` |
-| `LIVE_SESSION_TOKEN_SECRET` | 学生课堂范围令牌签名密钥（至少 32 字节） | **必填** |
-| `ENCRYPT_AES_KEY` | PII 数据加密密钥（至少 32 字节） | **必填** |
-| `MCP_API_KEY` | MCP 服务间认证密钥（至少 32 字节） | **必填** |
-| `LLM_BASE_URL` | OpenAI 兼容模型端点 | `https://api.moonshot.cn/v1` |
-| `LLM_API_KEY` | 模型供应商 API Key | **必填** |
-| `LLM_VISION_BASE_URL` | 可选的视觉模型端点；留空复用文本端点 | 可选 |
-| `LLM_VISION_API_KEY` | 可选的视觉模型 API Key；留空复用文本 Key | 可选 |
-| `LLM_MODEL` | LLM 模型名 | `kimi-k2.5` |
-| `ONEBOT_WS_ENABLED` | 是否连接 NapCat | `false` |
-| `ONEBOT_WS_URL` | OneBot WebSocket 地址 | Compose：`ws://host.docker.internal:3001`；本地直跑：`ws://127.0.0.1:3001` |
-| `ONEBOT_WS_TOKEN` | OneBot WebSocket Access Token | 启用 OneBot 时必填 |
-| `STORAGE_TYPE` | 文件存储类型 | `local`（`s3` 用 MinIO） |
-| `S3_ACCESS_KEY` | MinIO/S3 Access Key | **必填** |
-| `S3_SECRET_KEY` | MinIO/S3 Secret Key | **必填** |
-| `S3_BUCKET` | S3 存储桶 | `homework-files` |
-| `RERANKER_MODEL_DIR` | 宿主机上的 bge-reranker-base 目录 | `./models/bge-reranker-base` |
-| `GRAFANA_PASSWORD` | Grafana 管理员密码 | **必填** |
+| 变量                           | 说明                                     | 默认值                                                                     |
+| ------------------------------ | ---------------------------------------- | -------------------------------------------------------------------------- |
+| `DB_PASS`                      | 数据库密码                               | **必填**                                                                   |
+| `DB_USER`                      | 数据库用户                               | `postgres`                                                                 |
+| `REDIS_PORT`                   | Redis 端口                               | `6379`                                                                     |
+| `LIVE_SESSION_TOKEN_SECRET`    | 学生课堂范围令牌签名密钥（至少 32 字节） | **必填**                                                                   |
+| `ENCRYPT_AES_KEY`              | PII 数据加密密钥（至少 32 字节）         | **必填**                                                                   |
+| `MCP_API_KEY`                  | MCP 服务间认证密钥（至少 32 字节）       | **必填**                                                                   |
+| `LLM_BASE_URL`                 | DeepSeek 文本模型端点                    | `https://api.deepseek.com`                                                 |
+| `LLM_API_KEY`                  | DeepSeek API Key                         | **必填**                                                                   |
+| `LLM_TEXT_MODEL` / `LLM_MODEL` | 文本模型名                               | `deepseek-v4-flash`                                                        |
+| `LLM_VISION_BASE_URL`          | Moonshot 视觉模型端点                    | `https://api.moonshot.cn/v1`                                               |
+| `LLM_VISION_API_KEY`           | Moonshot API Key                         | **必填**                                                                   |
+| `LLM_VISION_MODEL`             | 视觉模型名                               | `kimi-k2.5`                                                                |
+| `ONEBOT_WS_ENABLED`            | 是否连接 NapCat                          | `false`                                                                    |
+| `ONEBOT_WS_URL`                | OneBot WebSocket 地址                    | Compose：`ws://host.docker.internal:3001`；本地直跑：`ws://127.0.0.1:3001` |
+| `ONEBOT_WS_TOKEN`              | OneBot WebSocket Access Token            | 启用 OneBot 时必填                                                         |
+| `STORAGE_TYPE`                 | 文件存储类型                             | `local`（`s3` 用 MinIO）                                                   |
+| `S3_ACCESS_KEY`                | MinIO/S3 Access Key                      | **必填**                                                                   |
+| `S3_SECRET_KEY`                | MinIO/S3 Secret Key                      | **必填**                                                                   |
+| `S3_BUCKET`                    | S3 存储桶                                | `homework-files`                                                           |
+| `RERANKER_MODEL_DIR`           | 宿主机上的 bge-reranker-base 目录        | `./models/bge-reranker-base`                                               |
+| `GRAFANA_PASSWORD`             | Grafana 管理员密码                       | **必填**                                                                   |
 
 ---
 
 ## 🔧 技术栈
 
-| 层 | 技术 |
-|----|------|
-| 后端 | Spring Boot 4 + Java 21 + 虚拟线程 |
-| AI 框架 | DJL + ONNX Runtime（本地 Embedding / Reranker） |
-| 数据库 | PostgreSQL 16 + pgvector 向量检索 |
-| 缓存 | Redis 7（Stream / 分布式锁 / 缓存） |
-| 文件存储 | MinIO（S3 兼容）/ 本地磁盘 |
-| 前端 | Vue 3 + TypeScript + Vite |
-| 部署 | Docker Compose + Nginx 反向代理 |
+| 层       | 技术                                            |
+| -------- | ----------------------------------------------- |
+| 后端     | Spring Boot 4 + Java 21 + 虚拟线程              |
+| AI 框架  | DJL + ONNX Runtime（本地 Embedding / Reranker） |
+| 数据库   | PostgreSQL 16 + pgvector 向量检索               |
+| 缓存     | Redis 7（Stream / 分布式锁 / 缓存）             |
+| 文件存储 | MinIO（S3 兼容）/ 本地磁盘                      |
+| 前端     | Vue 3 + TypeScript + Vite                       |
+| 部署     | Docker Compose + Nginx 反向代理                 |
 
 ## 📂 项目结构
 

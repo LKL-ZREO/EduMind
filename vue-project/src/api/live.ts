@@ -16,6 +16,7 @@ export interface OptionItem {
 
 export interface InteractionPush {
   interactionId: number
+  questionId: number
   type: InteractionType
   status: InteractionStatus
   title: string
@@ -36,6 +37,7 @@ export interface LiveSessionInfo {
   token: string
   studentId: string
   studentName: string
+  requiresStudentName?: boolean
   hasActive: boolean
   currentInteraction: InteractionPush | null
   startedAt?: string
@@ -91,6 +93,7 @@ export interface OnlineStudents {
 
 export interface InteractionHistoryItem {
   interactionId: number
+  questionId: number
   type: string
   title: string
   description: string | null
@@ -116,6 +119,7 @@ export interface ResponseItem {
 
 export interface InteractionDetail {
   interactionId: number
+  questionId: number
   type: string
   title: string
   description: string | null
@@ -123,28 +127,14 @@ export interface InteractionDetail {
   correctKey: string | null
   timeLimit: number | null
   status: string
+  difficulty: string | null
+  explanation: string | null
   totalStudents: number
   respondedCount: number
   correctRate: number | null
   distribution: Record<string, { count: number; percent: number }>
   unrespondedStudents: string[]
   responses: ResponseItem[]
-}
-
-export interface CreateInteractionRequest {
-  type: InteractionType
-  title: string
-  options?: OptionItem[]
-  correctKey?: string
-  timeLimit?: number
-  knowledgePoint?: string
-}
-
-export interface GeneratedQuestion {
-  type: InteractionType
-  title: string
-  options: OptionItem[] | null
-  correctKey: string | null
 }
 
 export interface ReactionMsg {
@@ -166,16 +156,33 @@ export interface StudentProfile {
   participationRate: number
 }
 
-export interface DraftItem {
-  interactionId: number
+export interface QuestionBoardItem {
+  questionId: number
+  interactionId: number | null
   type: InteractionType
   title: string
-  knowledgePoint: string
+  description: string | null
   options: OptionItem[] | null
   correctKey: string | null
+  knowledgePoint: string | null
+  difficulty: 'easy' | 'medium' | 'hard' | null
+  status: 'UNSENT' | 'ACTIVE' | 'CLOSED'
+  sortOrder: number
   timeLimit: number | null
-  status: string
+  sendCount: number
   createdAt: string
+  activatedAt: string | null
+  deadlineEpochMs: number | null
+  totalStudents: number
+  respondedCount: number
+  correctRate: number | null
+  distribution: Record<string, { count: number; percent: number }>
+}
+
+export interface InteractionTiming {
+  interactionId: number
+  deadlineEpochMs: number
+  addedSeconds: number
 }
 
 export function createSession(data: { classId: number; title?: string; courseId?: number }) {
@@ -190,8 +197,18 @@ export function getActiveSession(classId: number) {
   return request.get<ApiResponse<ActiveLiveSession>>('/live/active', { params: { classId } })
 }
 
-export function joinSession(data: { code: string; studentId: string; studentName: string }) {
+export function joinSession(data: { code: string; studentId: string; studentName?: string }) {
   return request.post<ApiResponse<LiveSessionInfo>>('/live/join', data)
+}
+
+export function quickJoinSession(code: string) {
+  return request.post<ApiResponse<LiveSessionInfo>>('/live/quick-join', {
+    code: code.toUpperCase(),
+  })
+}
+
+export function unbindStudentDevice() {
+  return request.post<ApiResponse<null>>('/live/device/unbind')
 }
 
 export function previewSession(code: string) {
@@ -210,6 +227,24 @@ export function getOnlineStudents(sessionId: number) {
 
 export function getInteractionStats(sessionId: number) {
   return request.get<ApiResponse<LiveStats>>(`/live/session/${sessionId}/interaction-stats`)
+}
+
+export function getQuestionBoard(sessionId: number) {
+  return request.get<ApiResponse<QuestionBoardItem[]>>(`/live/session/${sessionId}/question-board`)
+}
+
+export function sendQuestion(sessionId: number, questionId: number, timeLimit?: number) {
+  return request.post<ApiResponse<InteractionPush>>(
+    `/live/session/${sessionId}/question/${questionId}/send`,
+    timeLimit ? { timeLimit } : {},
+  )
+}
+
+export function extendInteraction(sessionId: number, interactionId: number, seconds: number) {
+  return request.post<ApiResponse<InteractionTiming>>(
+    `/live/session/${sessionId}/interaction/${interactionId}/extend`,
+    { seconds },
+  )
 }
 
 export function getInteractionHistory(
@@ -232,10 +267,6 @@ export function getInteractionDetail(sessionId: number, interactionId: number) {
   )
 }
 
-export function generateQuestion(topic: string, type: InteractionType) {
-  return request.post<ApiResponse<GeneratedQuestion>>('/live/generate-question', { topic, type })
-}
-
 export function getReport(
   sessionId: number,
   title: string,
@@ -253,8 +284,4 @@ export function getStudentProfile(studentId: string, classId: number) {
   return request.get<ApiResponse<StudentProfile>>(`/live/student/${studentId}/profile`, {
     params: { classId },
   })
-}
-
-export function getClassDrafts(classId: number) {
-  return request.get<ApiResponse<DraftItem[]>>(`/live/class/${classId}/drafts`)
 }

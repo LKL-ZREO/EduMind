@@ -2,6 +2,7 @@ package com.firedemo.demo.live.security;
 
 import com.firedemo.demo.config.OwnershipGuard;
 import com.firedemo.demo.live.service.StudentPresenceService;
+import com.firedemo.demo.mapper.ClassroomSessionMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.context.event.EventListener;
@@ -49,6 +50,7 @@ public class WebSocketAuthInterceptor implements ChannelInterceptor {
     private final StudentPresenceService presenceService;
     private final SimpMessagingTemplate messagingTemplate;
     private final OwnershipGuard ownershipGuard;
+    private final ClassroomSessionMapper sessionMapper;
     // WebSocket sessionId → (liveSessionId, studentId, studentName) — 学生连接追踪
     private final Map<String, SessionInfo> sessionMap = new ConcurrentHashMap<>();
     // liveSessionId → 该课堂教师 WebSocket 连接集合（一个教师可能多 tab 打开）
@@ -57,11 +59,13 @@ public class WebSocketAuthInterceptor implements ChannelInterceptor {
     public WebSocketAuthInterceptor(LiveSessionTokenService liveSessionTokenService,
                                      StudentPresenceService presenceService,
                                      @Lazy SimpMessagingTemplate messagingTemplate,
-                                     OwnershipGuard ownershipGuard) {
+                                     OwnershipGuard ownershipGuard,
+                                     ClassroomSessionMapper sessionMapper) {
         this.liveSessionTokenService = liveSessionTokenService;
         this.presenceService = presenceService;
         this.messagingTemplate = messagingTemplate;
         this.ownershipGuard = ownershipGuard;
+        this.sessionMapper = sessionMapper;
     }
 
     @Override
@@ -136,6 +140,7 @@ public class WebSocketAuthInterceptor implements ChannelInterceptor {
             attributes.put("liveSessionId", sid);
             teacherSessions.computeIfAbsent(sid, key -> ConcurrentHashMap.newKeySet())
                     .add(accessor.getSessionId());
+            sessionMapper.markTeacherOnline(sid);
             messagingTemplate.convertAndSend("/topic/session/" + sid + "/teacher-status",
                     (Object) Map.of("online", true));
             log.info("教师连接课堂: sessionId={}, user={}", sid, username);
@@ -166,6 +171,7 @@ public class WebSocketAuthInterceptor implements ChannelInterceptor {
             if (conns.remove(wsSessionId)) {
                 if (conns.isEmpty()) {
                     teacherSessions.remove(entry.getKey());
+                    sessionMapper.markTeacherOffline(entry.getKey());
                     messagingTemplate.convertAndSend(
                             "/topic/session/" + entry.getKey() + "/teacher-status",
                             (Object) Map.of("online", false));

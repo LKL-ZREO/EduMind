@@ -10,7 +10,7 @@ import com.firedemo.demo.Entity.Submission;
 import com.firedemo.demo.Service.FileStorageService;
 import com.firedemo.demo.Service.OpenClawService;
 import com.firedemo.demo.Service.TaskReminderService;
-import com.firedemo.demo.Service.HomeworkResultService;import com.firedemo.demo.Service.HomeworkTaskService;
+import com.firedemo.demo.Service.HomeworkTaskService;
 import com.firedemo.demo.Service.ClassService;import com.firedemo.demo.Service.SubmissionService;
 import com.firedemo.demo.common.annotation.RateLimit;
 import com.firedemo.demo.common.exception.ErrorCode;
@@ -47,7 +47,6 @@ public class HomeworkController {
     private final FileStorageService fileStorageService;
     private final GradingStreamProducer gradingStreamProducer;
     private final SubmissionService submissionService;
-    private final HomeworkResultService homeworkResultService;
     private final HomeworkTaskService taskService;
     private final ClassService classService;
     private final RedissonClient redisson;

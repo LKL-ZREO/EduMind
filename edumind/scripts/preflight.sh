@@ -59,12 +59,13 @@ require_value DB_PASS 16
 require_value LIVE_SESSION_TOKEN_SECRET 32
 require_value ENCRYPT_AES_KEY 32
 require_value LLM_API_KEY 8
+require_value LLM_VISION_API_KEY 8
 require_value MCP_API_KEY 32
 require_value S3_ACCESS_KEY 3
 require_value S3_SECRET_KEY 16
 require_value GRAFANA_PASSWORD 12
 
-case "${LLM_BASE_URL:-https://api.moonshot.cn/v1}" in
+case "${LLM_BASE_URL:-https://api.deepseek.com}" in
     http://*|https://*) ;;
     *) fail "LLM_BASE_URL must start with http:// or https://" ;;
 esac

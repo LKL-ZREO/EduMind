@@ -123,7 +123,9 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST,
                                 "/api/homework/submit",
                                 "/api/homework/bind-qq",
-                                "/api/live/join").permitAll()
+                                "/api/live/join",
+                                "/api/live/quick-join",
+                                "/api/live/device/unbind").permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/error").permitAll()
                         .anyRequest().authenticated())

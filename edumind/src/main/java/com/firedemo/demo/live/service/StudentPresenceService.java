@@ -5,6 +5,7 @@ import com.firedemo.demo.Entity.LiveAttendanceLog;
 import com.firedemo.demo.mapper.ClassStudentMapper;
 import com.firedemo.demo.mapper.ClassroomSessionMapper;
 import com.firedemo.demo.mapper.LiveAttendanceLogMapper;
+import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
@@ -24,7 +25,7 @@ public class StudentPresenceService {
     private final Map<Long, Set<StudentInfo>> onlineStudents = new ConcurrentHashMap<>();
 
     /** 断线宽限期执行器 */
-    private static final ScheduledExecutorService graceScheduler =
+    private final ScheduledExecutorService graceScheduler =
             Executors.newScheduledThreadPool(2, Thread.ofPlatform().name("presence-grace-", 0).factory());
 
     /** sessionId → (studentId → 待执行的离场任务) */
@@ -68,10 +69,13 @@ public class StudentPresenceService {
 
     /** 学生 WebSocket 断线，启动 30 秒宽限期再移除 */
     public void studentDisconnected(Long sessionId, String studentId, String studentName) {
+        if (!isActiveSession(sessionId)) return;
         ScheduledFuture<?> future = graceScheduler.schedule(() -> {
             pendingLeaves.getOrDefault(sessionId, Map.of()).remove(studentId);
-            studentLeft(sessionId, studentId, studentName);
-            log.debug("宽限期到，学生离场: sessionId={}, student={}", sessionId, studentName);
+            if (isActiveSession(sessionId)) {
+                studentLeft(sessionId, studentId, studentName);
+                log.debug("宽限期到，学生离场: sessionId={}, student={}", sessionId, studentName);
+            }
         }, GRACE_SECONDS, TimeUnit.SECONDS);
         pendingLeaves.computeIfAbsent(sessionId, k -> new ConcurrentHashMap<>())
                 .put(studentId, future);
@@ -108,7 +112,20 @@ public class StudentPresenceService {
             pending.values().forEach(f -> f.cancel(false));
         }
         onlineStudents.remove(sessionId);
+        sessionClassCache.remove(sessionId);
         log.debug("Presence 已清理: sessionId={}", sessionId);
+    }
+
+    private boolean isActiveSession(Long sessionId) {
+        var session = sessionMapper.selectById(sessionId);
+        return session != null && "ACTIVE".equals(session.getStatus());
+    }
+
+    @PreDestroy
+    public void shutdown() {
+        pendingLeaves.values().forEach(tasks -> tasks.values().forEach(task -> task.cancel(false)));
+        pendingLeaves.clear();
+        graceScheduler.shutdownNow();
     }
 
     public List<Map<String, String>> getOnlineStudents(Long sessionId) {

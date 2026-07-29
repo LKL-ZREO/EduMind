@@ -2,6 +2,7 @@ package com.firedemo.demo.live.security;
 
 import com.firedemo.demo.config.OwnershipGuard;
 import com.firedemo.demo.live.service.StudentPresenceService;
+import com.firedemo.demo.mapper.ClassroomSessionMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.messaging.Message;
@@ -12,6 +13,8 @@ import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
 import org.springframework.messaging.support.MessageBuilder;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.web.socket.CloseStatus;
+import org.springframework.web.socket.messaging.SessionDisconnectEvent;
 
 import java.util.HashMap;
 import java.util.List;
@@ -29,6 +32,7 @@ class WebSocketAuthInterceptorTest {
     private StudentPresenceService presenceService;
     private SimpMessagingTemplate messagingTemplate;
     private OwnershipGuard ownershipGuard;
+    private ClassroomSessionMapper sessionMapper;
     private WebSocketAuthInterceptor interceptor;
 
     @BeforeEach
@@ -37,8 +41,9 @@ class WebSocketAuthInterceptorTest {
         presenceService = mock(StudentPresenceService.class);
         messagingTemplate = mock(SimpMessagingTemplate.class);
         ownershipGuard = mock(OwnershipGuard.class);
+        sessionMapper = mock(ClassroomSessionMapper.class);
         interceptor = new WebSocketAuthInterceptor(
-                tokenService, presenceService, messagingTemplate, ownershipGuard);
+                tokenService, presenceService, messagingTemplate, ownershipGuard, sessionMapper);
     }
 
     @Test
@@ -62,6 +67,29 @@ class WebSocketAuthInterceptorTest {
                 .containsEntry("role", "TEACHER");
         verify(messagingTemplate).convertAndSend(
                 "/topic/session/99/teacher-status", (Object) java.util.Map.of("online", true));
+        verify(sessionMapper).markTeacherOnline(99L);
+    }
+
+    @Test
+    void marksTeacherOfflineWhenLastClassroomSocketDisconnects() {
+        StompHeaderAccessor accessor = connectAccessor();
+        var teacher = UsernamePasswordAuthenticationToken.authenticated(
+                "teacher",
+                null,
+                List.of(new SimpleGrantedAuthority("ROLE_TEACHER")));
+        teacher.setDetails(10L);
+        accessor.setUser(teacher);
+        accessor.setNativeHeader("X-Session-Id", "99");
+        when(ownershipGuard.isSessionOwner(10L, 99L)).thenReturn(true);
+        Message<byte[]> connectMessage = message(accessor);
+        interceptor.preSend(connectMessage, mock(MessageChannel.class));
+
+        interceptor.onDisconnect(new SessionDisconnectEvent(
+                this, connectMessage, "ws-1", CloseStatus.NORMAL));
+
+        verify(sessionMapper).markTeacherOffline(99L);
+        verify(messagingTemplate).convertAndSend(
+                "/topic/session/99/teacher-status", (Object) java.util.Map.of("online", false));
     }
 
     @Test

@@ -5,12 +5,15 @@ import com.firedemo.demo.Entity.ClassroomSession;
 import com.firedemo.demo.Entity.Interaction;
 import com.firedemo.demo.Entity.LiveConfusionEvent;
 import com.firedemo.demo.Service.OpenClawService;
+import com.firedemo.demo.common.exception.BusinessException;
+import com.firedemo.demo.common.exception.ErrorCode;
 import com.firedemo.demo.common.result.Result;
 import com.firedemo.demo.live.service.InteractionService;
 import com.firedemo.demo.live.service.LiveSessionService;
 import com.firedemo.demo.live.service.ReportService;
 import com.firedemo.demo.live.service.StudentPresenceService;
 import com.firedemo.demo.live.security.ClassroomStudentPrincipal;
+import com.firedemo.demo.live.security.StudentDeviceTokenService;
 import com.firedemo.demo.mapper.InteractionMapper;
 import com.firedemo.demo.mapper.LiveConfusionEventMapper;
 import com.firedemo.demo.rag.RagResult;
@@ -21,6 +24,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.http.HttpHeaders;
+import jakarta.servlet.http.HttpServletResponse;
 
 import java.util.List;
 import java.util.Map;
@@ -39,6 +44,7 @@ public class LiveSessionController {
     private final LiveConfusionEventMapper confusionEventMapper;
     private final InteractionMapper interactionMapper;
     private final OpenClawService openClawService;
+    private final StudentDeviceTokenService studentDeviceTokenService;
 
     @PostMapping("/create")
     @PreAuthorize("@sec.isClassOwner(#dto.classId)")
@@ -72,15 +78,56 @@ public class LiveSessionController {
     }
 
     @PostMapping("/join")
-    public Result<LiveSessionInfoDTO> joinSession(@RequestBody LiveJoinDTO dto) {
+    public Result<LiveSessionInfoDTO> joinSession(@RequestBody LiveJoinDTO dto,
+                                                  HttpServletResponse response) {
         if (dto.getCode() == null || dto.getCode().isBlank()) return Result.error(400, "请输入课堂码");
         if (dto.getStudentId() == null || dto.getStudentId().isBlank()) return Result.error(400, "请输入学号");
-        return Result.success(sessionService.joinSession(dto));
+        LiveSessionInfoDTO info = completeStudentJoin(dto);
+        bindStudentDevice(response, info.getStudentId());
+        return Result.success(info);
+    }
+
+    /** 已绑定过身份的个人设备只需提交课堂码即可进入。 */
+    @PostMapping("/quick-join")
+    public Result<LiveSessionInfoDTO> quickJoin(
+            @RequestBody LiveQuickJoinDTO dto,
+            @CookieValue(name = StudentDeviceTokenService.COOKIE_NAME, required = false) String deviceToken,
+            HttpServletResponse response) {
+        if (dto.getCode() == null || dto.getCode().isBlank()) return Result.error(400, "请输入课堂码");
+        String studentId = studentDeviceTokenService.parse(deviceToken)
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.UNAUTHORIZED.getCode(),
+                        "这台设备尚未绑定学生身份"));
+        LiveJoinDTO join = new LiveJoinDTO();
+        join.setCode(dto.getCode());
+        join.setStudentId(studentId);
+        LiveSessionInfoDTO info = completeStudentJoin(join);
+        bindStudentDevice(response, info.getStudentId());
+        return Result.success(info);
+    }
+
+    /** 清除当前设备身份，供借用设备或切换学生使用。 */
+    @PostMapping("/device/unbind")
+    public Result<Void> unbindStudentDevice(HttpServletResponse response) {
+        response.addHeader(HttpHeaders.SET_COOKIE,
+                studentDeviceTokenService.clearingCookie().toString());
+        return Result.success();
     }
 
     @GetMapping("/session/{code}")
     public Result<LiveSessionInfoDTO> previewSession(@PathVariable String code) {
         return Result.success(sessionService.previewByCode(code.toUpperCase()));
+    }
+
+    private LiveSessionInfoDTO completeStudentJoin(LiveJoinDTO dto) {
+        LiveSessionInfoDTO info = sessionService.joinSession(dto);
+        info.setCurrentInteraction(interactionService.getActiveInteraction(info.getSessionId()));
+        return info;
+    }
+
+    private void bindStudentDevice(HttpServletResponse response, String studentId) {
+        response.addHeader(HttpHeaders.SET_COOKIE,
+                studentDeviceTokenService.bindingCookie(studentId).toString());
     }
 
     @GetMapping("/session/{sessionId}/current-interaction")
@@ -94,6 +141,44 @@ public class LiveSessionController {
     @PreAuthorize("@sec.isSessionOwner(#sessionId)")
     public Result<LiveStatsDTO> getInteractionStats(@PathVariable Long sessionId) {
         return Result.success(interactionService.getActiveInteractionStats(sessionId));
+    }
+
+    /** 统一题库与本节课发送记录组成的控制看板。 */
+    @GetMapping("/session/{sessionId}/question-board")
+    @PreAuthorize("@sec.isSessionOwner(#sessionId)")
+    public Result<List<QuestionBoardItemDTO>> getQuestionBoard(@PathVariable Long sessionId) {
+        return Result.success(interactionService.getQuestionBoard(sessionId));
+    }
+
+    /** 从统一题库发送题目，本次课堂会创建独立的 Interaction 快照。 */
+    @PostMapping("/session/{sessionId}/question/{questionId}/send")
+    @PreAuthorize("@sec.isSessionOwner(#sessionId)")
+    public Result<InteractionPushDTO> sendQuestion(
+            @PathVariable Long sessionId,
+            @PathVariable Long questionId,
+            @RequestBody(required = false) Map<String, Object> body) {
+        Long requestedTimeLimit = body != null ? toLong(body.get("timeLimit")) : null;
+        if (requestedTimeLimit != null && requestedTimeLimit > Integer.MAX_VALUE) {
+            return Result.error(400, "作答时间无效");
+        }
+        return Result.success(interactionService.sendQuestion(
+                sessionId,
+                questionId,
+                requestedTimeLimit != null ? requestedTimeLimit.intValue() : null));
+    }
+
+    /** 给当前作答中的题目追加时间。 */
+    @PostMapping("/session/{sessionId}/interaction/{interactionId}/extend")
+    @PreAuthorize("@sec.isSessionOwner(#sessionId)")
+    public Result<InteractionTimingDTO> extendInteraction(
+            @PathVariable Long sessionId,
+            @PathVariable Long interactionId,
+            @RequestBody Map<String, Object> body) {
+        Long seconds = toLong(body.get("seconds"));
+        if (seconds == null || seconds > Integer.MAX_VALUE) {
+            return Result.error(400, "延时时长无效");
+        }
+        return Result.success(interactionService.extendInteraction(sessionId, interactionId, seconds.intValue()));
     }
 
     /** AI 生成题目 */
@@ -137,15 +222,6 @@ public class LiveSessionController {
             @RequestParam(defaultValue = "0") int qa) {
         String html = reportService.generateHtml(sessionId, title, duration, online, absent, qa);
         return Result.success(Map.of("html", html));
-    }
-
-    // ======================== 草稿库 ========================
-
-    /** 获取班级草稿试题列表（教师端推题时选择） */
-    @GetMapping("/class/{classId}/drafts")
-    @PreAuthorize("@sec.isClassOwner(#classId)")
-    public Result<List<InteractionHistoryDTO>> listDrafts(@PathVariable Long classId) {
-        return Result.success(interactionService.getDraftsByClassId(classId));
     }
 
     /** 学生个人画像 */

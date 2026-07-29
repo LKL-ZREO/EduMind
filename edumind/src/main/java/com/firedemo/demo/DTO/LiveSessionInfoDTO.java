@@ -13,4 +13,6 @@ public class LiveSessionInfoDTO {
     private String token;
     private String studentId;
     private String studentName;
+    private Boolean requiresStudentName;
+    private InteractionPushDTO currentInteraction;
 }

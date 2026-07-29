@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.firedemo.demo.DTO.*;
 import com.firedemo.demo.Entity.*;
 import com.firedemo.demo.Service.OpenClawService;
+import com.firedemo.demo.Service.QuestionService;
 import com.firedemo.demo.common.exception.BusinessException;
 import com.firedemo.demo.common.exception.ErrorCode;
 import com.firedemo.demo.infrastructure.ai.StructuredOutputInvoker;
@@ -14,10 +15,14 @@ import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.stream.Collectors;
@@ -36,9 +41,10 @@ public class InteractionService {
     private final OpenClawService openClawService;
     private final StructuredOutputInvoker structuredOutputInvoker;
     private final LiveNotificationService liveNotificationService;
+    private final QuestionService questionService;
 
     /** 自动关闭互动的定时任务执行器（2 个调度线程足够，实际关闭逻辑在调用线程执行） */
-    private static final ScheduledExecutorService autoCloseScheduler =
+    private final ScheduledExecutorService autoCloseScheduler =
             Executors.newScheduledThreadPool(2, Thread.ofPlatform().name("interaction-auto-close-", 0).factory());
 
     /** 待执行的自动关闭任务，用于手动关闭时取消 */
@@ -54,32 +60,67 @@ public class InteractionService {
 
     @Transactional
     public Interaction createAndActivate(Long sessionId, Long teacherId, InteractionCreateDTO dto) {
-        String optionsJson = null;
-        if (dto.getOptions() != null && !dto.getOptions().isEmpty()) {
-            try { optionsJson = objectMapper.writeValueAsString(dto.getOptions()); }
-            catch (JsonProcessingException e) { throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "选项格式错误"); }
+        ClassroomSession session = lockActiveSession(sessionId);
+        if (teacherId != null && !teacherId.equals(session.getTeacherId())) {
+            throw new BusinessException(ErrorCode.FORBIDDEN.getCode(), "无权操作该课堂");
         }
+        ensureNoActiveInteraction(sessionId);
+        QuestionBankItem question = questionService.createFromInteraction(session.getTeacherId(), dto);
+        return createActiveInteraction(session, question, dto.getTimeLimit());
+    }
 
+    /** 从统一题库发送题目，并创建一条独立的课堂发送快照。 */
+    @Transactional
+    public InteractionPushDTO sendQuestion(Long sessionId, Long questionId, Integer timeLimitOverride) {
+        ClassroomSession session = lockActiveSession(sessionId);
+        ensureNoActiveInteraction(sessionId);
+        QuestionBankItem question = questionService.requireOwnedEntity(session.getTeacherId(), questionId);
+        if (!Set.of("CHOICE", "OPEN", "EXERCISE").contains(question.getType())) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "该题型不适合实时课堂");
+        }
+        if (timeLimitOverride != null && (timeLimitOverride < 1 || timeLimitOverride > 1800)) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "作答时间应在1到1800秒之间");
+        }
+        Interaction interaction = createActiveInteraction(session, question, timeLimitOverride);
+        return buildPushDTO(interaction);
+    }
+
+    private Interaction createActiveInteraction(ClassroomSession session,
+                                                QuestionBankItem question,
+                                                Integer timeLimitOverride) {
+        Integer timeLimit = timeLimitOverride != null
+                ? timeLimitOverride : question.getDefaultTimeLimit();
+        LocalDateTime activatedAt = LocalDateTime.now();
+        LocalDateTime deadlineAt = calculateDeadline(activatedAt, timeLimit);
         Interaction interaction = Interaction.builder()
-                .sessionId(sessionId).type(dto.getType()).title(dto.getTitle())
-                .description(dto.getDescription()).options(optionsJson)
-                .correctKey(dto.getCorrectKey()).timeLimit(dto.getTimeLimit())
-                .status("ACTIVE").sortOrder(0).aiGenerated(false)
-                .knowledgePoint(dto.getKnowledgePoint()).build();
+                .questionId(question.getId())
+                .sessionId(session.getId())
+                .classId(session.getClassId())
+                .sourceDocId(question.getSourceDocId())
+                .type(question.getType())
+                .title(question.getTitle())
+                .description(question.getRequirement())
+                .options(question.getOptions())
+                .correctKey(question.getCorrectKey())
+                .explanation(question.getExplanation())
+                .timeLimit(timeLimit)
+                .status("ACTIVE")
+                .sortOrder(0)
+                .aiGenerated(question.getAiGenerated())
+                .knowledgePoint(question.getKnowledgePoint())
+                .difficulty(question.getDifficulty())
+                .activatedAt(activatedAt)
+                .deadlineAt(deadlineAt)
+                .build();
         interactionMapper.insertWithJsonb(interaction);
 
         InteractionPushDTO push = buildPushDTO(interaction);
-        messagingTemplate.convertAndSend("/topic/session/" + sessionId + "/interaction", push);
-
-        // 创建互动后立即推送初始统计（0回答），老师端不用等学生作答
-        ClassroomSession session = sessionMapper.selectById(sessionId);
-        if (session != null) pushStatsToTeacher(interaction, session.getClassId(), session.getTeacherId());
-
-        if (dto.getTimeLimit() != null && dto.getTimeLimit() > 0) {
-            scheduleAutoClose(interaction.getId(), sessionId, dto.getTimeLimit());
-        }
-
-        log.info("互动已激活: interactionId={}, type={}, sessionId={}", interaction.getId(), dto.getType(), sessionId);
+        messagingTemplate.convertAndSend(
+                "/topic/session/" + session.getId() + "/interaction", push);
+        pushStatsToTeacher(interaction, session.getClassId(), session.getTeacherId());
+        scheduleAutoCloseAt(interaction);
+        log.info("题目已发送: questionId={}, interactionId={}, sessionId={}",
+                question.getId(), interaction.getId(), session.getId());
         return interaction;
     }
 
@@ -89,6 +130,10 @@ public class InteractionService {
             throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "互动已关闭或不存在");
         if (!sessionId.equals(interaction.getSessionId()))
             throw new BusinessException(ErrorCode.FORBIDDEN.getCode(), "互动不属于当前课堂");
+        if (interaction.getDeadlineAt() != null && !interaction.getDeadlineAt().isAfter(LocalDateTime.now())) {
+            closeInteraction(interaction.getId(), sessionId);
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "作答时间已结束");
+        }
 
         Boolean isCorrect = null;
         if ("CHOICE".equals(interaction.getType()) && interaction.getCorrectKey() != null)
@@ -121,8 +166,10 @@ public class InteractionService {
 
         if (interactionMapper.closeInteraction(interactionId, sessionId) == 0) return;
 
+        interaction.setStatus("CLOSED");
+        interaction.setClosedAt(LocalDateTime.now());
+        interaction.setDeadlineAt(null);
         InteractionPushDTO push = buildPushDTO(interaction);
-        push.setStatus("CLOSED");
         messagingTemplate.convertAndSend("/topic/session/" + sessionId + "/interaction", push);
 
         ClassroomSession session = sessionMapper.selectById(sessionId);
@@ -132,6 +179,12 @@ public class InteractionService {
             liveNotificationService.notifyUnanswered(interaction, session);
         }
         log.info("互动已关闭: interactionId={}", interactionId);
+    }
+
+    /** 结束课堂时同步结束仍在作答中的题目，并取消其自动关闭任务。 */
+    public void closeActiveInteraction(Long sessionId) {
+        Interaction active = interactionMapper.findActiveBySessionId(sessionId);
+        if (active != null) closeInteraction(active.getId(), sessionId);
     }
 
     public void pushStatsToTeacher(Interaction interaction, Long classId, Long teacherId) {
@@ -155,7 +208,7 @@ public class InteractionService {
                 .percent(respondedCount > 0 ? Math.round(count * 1000.0 / respondedCount) / 10.0 : 0).build()));
 
         Double correctRate = null;
-        if (interaction.getCorrectKey() != null) {
+        if ("CHOICE".equals(interaction.getType()) && interaction.getCorrectKey() != null) {
             long correctCount = responses.stream().filter(r -> Boolean.TRUE.equals(r.getIsCorrect())).count();
             correctRate = respondedCount > 0 ? Math.round(correctCount * 1000.0 / respondedCount) / 10.0 : 0.0;
         }
@@ -180,13 +233,13 @@ public class InteractionService {
             } catch (JsonProcessingException ignored) {}
         }
         return InteractionPushDTO.builder()
-                .interactionId(interaction.getId()).type(interaction.getType())
+                .interactionId(interaction.getId()).questionId(interaction.getQuestionId())
+                .type(interaction.getType())
                 .status("ACTIVE".equals(interaction.getStatus()) ? "ACTIVE" : "CLOSED")
                 .title(interaction.getTitle()).description(interaction.getDescription())
-                .correctKey(interaction.getCorrectKey())
+                .correctKey("CLOSED".equals(interaction.getStatus()) ? interaction.getCorrectKey() : null)
                 .options(options).timeLimit(interaction.getTimeLimit())
-                .deadlineEpochMs(interaction.getTimeLimit() != null && interaction.getTimeLimit() > 0
-                        ? System.currentTimeMillis() + interaction.getTimeLimit() * 1000L : null)
+                .deadlineEpochMs(toEpochMillis(interaction.getDeadlineAt()))
                 .serverTime(LocalDateTime.now().toString()).build();
     }
 
@@ -208,6 +261,9 @@ public class InteractionService {
     public InteractionDetailDTO getInteractionDetail(Long sessionId, Long interactionId) {
         Interaction interaction = interactionMapper.selectById(interactionId);
         if (interaction == null) return null;
+        if (!sessionId.equals(interaction.getSessionId())) {
+            throw new BusinessException(ErrorCode.FORBIDDEN.getCode(), "互动不属于当前课堂");
+        }
         ClassroomSession session = sessionMapper.selectById(sessionId);
         Long classId = session != null ? session.getClassId() : null;
         int totalStudents = classId != null ? Optional.ofNullable(classStudentMapper.countByClassId(classId)).orElse(0) : 0;
@@ -224,7 +280,7 @@ public class InteractionService {
                 .percent(respondedCount > 0 ? Math.round(count * 1000.0 / respondedCount) / 10.0 : 0).build()));
 
         Double correctRate = null;
-        if (interaction.getCorrectKey() != null && respondedCount > 0) {
+        if ("CHOICE".equals(interaction.getType()) && interaction.getCorrectKey() != null && respondedCount > 0) {
             long correctCount = responses.stream().filter(r -> Boolean.TRUE.equals(r.getIsCorrect())).count();
             correctRate = Math.round(correctCount * 1000.0 / respondedCount) / 10.0;
         }
@@ -248,9 +304,11 @@ public class InteractionService {
         }
 
         return InteractionDetailDTO.builder()
-                .interactionId(interaction.getId()).type(interaction.getType()).title(interaction.getTitle())
+                .interactionId(interaction.getId()).questionId(interaction.getQuestionId())
+                .type(interaction.getType()).title(interaction.getTitle())
                 .description(interaction.getDescription()).options(options).correctKey(interaction.getCorrectKey())
                 .timeLimit(interaction.getTimeLimit()).status(interaction.getStatus())
+                .difficulty(interaction.getDifficulty()).explanation(interaction.getExplanation())
                 .totalStudents(totalStudents).respondedCount(respondedCount)
                 .distribution(distribution).correctRate(correctRate).unrespondedStudents(unresponded)
                 .responses(responseItems).build();
@@ -275,7 +333,7 @@ public class InteractionService {
             int respondedCount = responses.size();
 
             Double correctRate = null;
-            if (i.getCorrectKey() != null && respondedCount > 0) {
+            if ("CHOICE".equals(i.getType()) && i.getCorrectKey() != null && respondedCount > 0) {
                 long correctCount = responses.stream().filter(r -> Boolean.TRUE.equals(r.getIsCorrect())).count();
                 correctRate = Math.round(correctCount * 1000.0 / respondedCount) / 10.0;
             }
@@ -300,12 +358,16 @@ public class InteractionService {
             }
 
             return InteractionHistoryDTO.builder()
-                    .interactionId(i.getId()).type(i.getType()).title(i.getTitle())
-                    .description(i.getDescription()).options(options).correctKey(i.getCorrectKey())
-                    .timeLimit(i.getTimeLimit()).status(i.getStatus())
+                    .interactionId(i.getId()).questionId(i.getQuestionId())
+                    .type(i.getType()).title(i.getTitle())
+                    .description(i.getDescription()).options(options)
+                    .correctKey(studentId == null || "CLOSED".equals(i.getStatus()) ? i.getCorrectKey() : null)
+                    .timeLimit(i.getTimeLimit()).status(i.getStatus()).difficulty(i.getDifficulty())
                     .createdAt(i.getCreatedAt() != null ? i.getCreatedAt().toString() : null)
                     .totalStudents(totalStudents).respondedCount(respondedCount).correctRate(correctRate)
-                    .myAnswer(myAnswer).myCorrect(myCorrect).build();
+                    .myAnswer(myAnswer)
+                    .myCorrect(studentId == null || "CLOSED".equals(i.getStatus()) ? myCorrect : null)
+                    .build();
         }).toList();
     }
 
@@ -346,61 +408,92 @@ public class InteractionService {
         }
     }
 
-    /**
-     * 教师从草稿库一键激活试题推送到课堂。
-     */
+    /** 延长当前题目的作答截止时间。延时消息单独推送，避免学生端把它当成一道新题。 */
     @Transactional
-    public InteractionPushDTO activateDraft(Long sessionId, Long interactionId) {
-        Interaction draft = interactionMapper.selectById(interactionId);
-        if (draft == null || !"DRAFT".equals(draft.getStatus()))
-            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "草稿不存在或已使用");
-
-        ClassroomSession session = sessionMapper.selectById(sessionId);
-        if (session == null)
-            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "课堂不存在");
-
-        if (draft.getClassId() != null && !draft.getClassId().equals(session.getClassId()))
-            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "草稿不属于该班级");
-
-        interactionMapper.activateDraft(interactionId, sessionId);
-        draft.setSessionId(sessionId);
-        draft.setStatus("ACTIVE");
-
-        // 推送到学生端
-        InteractionPushDTO push = buildPushDTO(draft);
-        messagingTemplate.convertAndSend("/topic/session/" + sessionId + "/interaction", push);
-
-        // 推送初始统计
-        pushStatsToTeacher(draft, session.getClassId(), session.getTeacherId());
-
-        // 自动关闭计时
-        if (draft.getTimeLimit() != null && draft.getTimeLimit() > 0) {
-            scheduleAutoClose(interactionId, sessionId, draft.getTimeLimit());
+    public InteractionTimingDTO extendInteraction(Long sessionId, Long interactionId, int seconds) {
+        if (seconds != 30 && seconds != 60 && seconds != 300) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "仅支持延时30秒、1分钟或5分钟");
         }
 
-        log.info("草稿已激活: interactionId={}, sessionId={}", interactionId, sessionId);
-        return push;
+        lockActiveSession(sessionId);
+        Interaction interaction = interactionMapper.selectById(interactionId);
+        if (interaction == null || !sessionId.equals(interaction.getSessionId())
+                || !"ACTIVE".equals(interaction.getStatus())) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "题目已结束或不属于当前课堂");
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime base = interaction.getDeadlineAt() != null && interaction.getDeadlineAt().isAfter(now)
+                ? interaction.getDeadlineAt() : now;
+        LocalDateTime deadlineAt = base.plusSeconds(seconds);
+        if (interactionMapper.updateDeadline(interactionId, sessionId, deadlineAt) == 0) {
+            throw new BusinessException(ErrorCode.DATA_ALREADY_EXISTS.getCode(), "题目状态已变化，请刷新后重试");
+        }
+
+        interaction.setDeadlineAt(deadlineAt);
+        scheduleAutoCloseAt(interaction);
+        InteractionTimingDTO timing = InteractionTimingDTO.builder()
+                .interactionId(interactionId)
+                .deadlineEpochMs(toEpochMillis(deadlineAt))
+                .addedSeconds(seconds)
+                .build();
+        messagingTemplate.convertAndSend("/topic/session/" + sessionId + "/interaction-timing", timing);
+        return timing;
     }
 
-    /**
-     * 获取班级所有草稿试题（供教师课堂推题时选择）。
-     */
-    public List<InteractionHistoryDTO> getDraftsByClassId(Long classId) {
-        return interactionMapper.findDraftsByClassId(classId).stream().map(i -> {
-            List<InteractionCreateDTO.OptionDTO> options = null;
-            if (i.getOptions() != null && !i.getOptions().isEmpty()) {
-                try {
-                    options = objectMapper.readValue(i.getOptions(),
-                            objectMapper.getTypeFactory().constructCollectionType(List.class, InteractionCreateDTO.OptionDTO.class));
-                } catch (JsonProcessingException ignored) {}
-            }
-            return InteractionHistoryDTO.builder()
-                    .interactionId(i.getId()).type(i.getType()).title(i.getTitle())
-                    .description(i.getDescription()).options(options)
-                    .correctKey(i.getCorrectKey()).timeLimit(i.getTimeLimit())
-                    .status(i.getStatus()).knowledgePoint(i.getKnowledgePoint())
-                    .createdAt(i.getCreatedAt() != null ? i.getCreatedAt().toString() : null).build();
-        }).toList();
+    /** 统一题库与本节课发送记录组成的教师题目看板。 */
+    public List<QuestionBoardItemDTO> getQuestionBoard(Long sessionId) {
+        ClassroomSession session = sessionMapper.selectById(sessionId);
+        if (session == null) {
+            throw new BusinessException(ErrorCode.DATA_NOT_FOUND.getCode(), "课堂不存在");
+        }
+
+        int totalStudents = Optional.ofNullable(classStudentMapper.countByClassId(session.getClassId())).orElse(0);
+        Map<Long, List<InteractionResponse>> responsesByInteraction = responseMapper.findBySessionId(sessionId).stream()
+                .collect(Collectors.groupingBy(InteractionResponse::getInteractionId));
+
+        List<Interaction> sentInteractions = interactionMapper.findBySessionId(sessionId);
+        Map<Long, List<Interaction>> interactionsByQuestion = sentInteractions.stream()
+                .filter(interaction -> interaction.getQuestionId() != null)
+                .collect(Collectors.groupingBy(
+                        Interaction::getQuestionId,
+                        LinkedHashMap::new,
+                        Collectors.toList()));
+
+        List<QuestionBankItem> questions = questionService
+                .searchEntities(session.getTeacherId(), null, null, null).stream()
+                .filter(question -> Set.of("CHOICE", "OPEN", "EXERCISE").contains(question.getType()))
+                .toList();
+        Set<Long> visibleQuestionIds = questions.stream()
+                .map(QuestionBankItem::getId)
+                .collect(Collectors.toSet());
+
+        List<QuestionBoardItemDTO> result = new ArrayList<>();
+        int sortOrder = 0;
+        for (QuestionBankItem question : questions) {
+            List<Interaction> attempts = interactionsByQuestion.getOrDefault(question.getId(), List.of());
+            Interaction latest = latestInteraction(attempts);
+            List<InteractionResponse> responses = latest == null
+                    ? List.of()
+                    : responsesByInteraction.getOrDefault(latest.getId(), List.of());
+            result.add(buildQuestionBoardItem(
+                    question, latest, attempts.size(), responses, totalStudents, sortOrder++));
+        }
+
+        // 已归档题目仍应在本节课堂中显示，避免课堂进行中突然丢失作答记录。
+        for (Map.Entry<Long, List<Interaction>> entry : interactionsByQuestion.entrySet()) {
+            if (visibleQuestionIds.contains(entry.getKey())) continue;
+            Interaction latest = latestInteraction(entry.getValue());
+            if (latest == null) continue;
+            result.add(buildQuestionBoardItem(
+                    null,
+                    latest,
+                    entry.getValue().size(),
+                    responsesByInteraction.getOrDefault(latest.getId(), List.of()),
+                    totalStudents,
+                    sortOrder++));
+        }
+        return result;
     }
 
     /** 学生个人画像：汇总该学生在某班级所有课堂中的答题表现。批量查询避免 N+1。 */
@@ -449,16 +542,151 @@ public class InteractionService {
                 "correctRate", 0.0, "participationRate", 0.0);
     }
 
-    private void scheduleAutoClose(Long interactionId, Long sessionId, int timeLimitSeconds) {
-        ScheduledFuture<?> future = autoCloseScheduler.schedule(() -> {
-            pendingClosures.remove(interactionId);
-            try {
-                closeInteraction(interactionId, sessionId);
-            } catch (Exception e) {
-                log.error("自动关闭互动失败: interactionId={}", interactionId, e);
+    private QuestionBoardItemDTO buildQuestionBoardItem(QuestionBankItem question,
+                                                         Interaction interaction,
+                                                         int sendCount,
+                                                         List<InteractionResponse> responses,
+                                                         int totalStudents,
+                                                         int sortOrder) {
+        String optionsJson = interaction != null ? interaction.getOptions() : question.getOptions();
+        String type = interaction != null ? interaction.getType() : question.getType();
+        String correctKey = interaction != null ? interaction.getCorrectKey() : question.getCorrectKey();
+        List<InteractionCreateDTO.OptionDTO> options = parseOptions(optionsJson);
+        int respondedCount = responses.size();
+        Map<String, Long> rawDistribution = responses.stream()
+                .collect(Collectors.groupingBy(
+                        response -> response.getAnswer() != null ? response.getAnswer() : "未作答",
+                        LinkedHashMap::new,
+                        Collectors.counting()));
+        Map<String, LiveStatsDTO.DistributionItem> distribution = new LinkedHashMap<>();
+        if (options != null) {
+            options.forEach(option -> rawDistribution.putIfAbsent(option.getKey(), 0L));
+        }
+        rawDistribution.forEach((answer, count) -> distribution.put(answer,
+                LiveStatsDTO.DistributionItem.builder()
+                        .count(count.intValue())
+                        .percent(respondedCount > 0
+                                ? Math.round(count * 1000.0 / respondedCount) / 10.0
+                                : 0.0)
+                        .build()));
+
+        Double correctRate = null;
+        if ("CHOICE".equals(type) && correctKey != null && respondedCount > 0) {
+            long correctCount = responses.stream().filter(r -> Boolean.TRUE.equals(r.getIsCorrect())).count();
+            correctRate = Math.round(correctCount * 1000.0 / respondedCount) / 10.0;
+        }
+
+        return QuestionBoardItemDTO.builder()
+                .questionId(question != null ? question.getId() : interaction.getQuestionId())
+                .interactionId(interaction != null ? interaction.getId() : null)
+                .type(type)
+                .title(interaction != null ? interaction.getTitle() : question.getTitle())
+                .description(interaction != null ? interaction.getDescription() : question.getRequirement())
+                .options(options)
+                .correctKey(correctKey)
+                .knowledgePoint(interaction != null ? interaction.getKnowledgePoint() : question.getKnowledgePoint())
+                .difficulty(interaction != null ? interaction.getDifficulty() : question.getDifficulty())
+                .status(interaction != null ? interaction.getStatus() : "UNSENT")
+                .sortOrder(sortOrder)
+                .timeLimit(interaction != null ? interaction.getTimeLimit() : question.getDefaultTimeLimit())
+                .sendCount(sendCount)
+                .createdAt(question != null && question.getCreatedAt() != null
+                        ? question.getCreatedAt().toString()
+                        : interaction != null && interaction.getCreatedAt() != null
+                        ? interaction.getCreatedAt().toString() : null)
+                .activatedAt(interaction != null && interaction.getActivatedAt() != null
+                        ? interaction.getActivatedAt().toString() : null)
+                .deadlineEpochMs(interaction != null ? toEpochMillis(interaction.getDeadlineAt()) : null)
+                .totalStudents(totalStudents)
+                .respondedCount(respondedCount)
+                .correctRate(correctRate)
+                .distribution(distribution)
+                .build();
+    }
+
+    private Interaction latestInteraction(List<Interaction> interactions) {
+        return interactions.stream()
+                .max(Comparator.comparing(
+                                Interaction::getActivatedAt,
+                                Comparator.nullsFirst(Comparator.naturalOrder()))
+                        .thenComparing(Interaction::getId))
+                .orElse(null);
+    }
+
+    private List<InteractionCreateDTO.OptionDTO> parseOptions(String optionsJson) {
+        if (optionsJson == null || optionsJson.isBlank()) return null;
+        try {
+            return objectMapper.readValue(optionsJson,
+                    objectMapper.getTypeFactory().constructCollectionType(
+                            List.class, InteractionCreateDTO.OptionDTO.class));
+        } catch (JsonProcessingException e) {
+            log.warn("互动选项解析失败", e);
+            return null;
+        }
+    }
+
+    private ClassroomSession lockActiveSession(Long sessionId) {
+        ClassroomSession session = sessionMapper.selectByIdForUpdate(sessionId);
+        if (session == null || !"ACTIVE".equals(session.getStatus())) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "课堂不存在或已结束");
+        }
+        return session;
+    }
+
+    private void ensureNoActiveInteraction(Long sessionId) {
+        if (interactionMapper.findActiveBySessionId(sessionId) != null) {
+            throw new BusinessException(ErrorCode.DATA_ALREADY_EXISTS.getCode(), "请先结束当前题目，再发送下一题");
+        }
+    }
+
+    private LocalDateTime calculateDeadline(LocalDateTime activatedAt, Integer timeLimitSeconds) {
+        return timeLimitSeconds != null && timeLimitSeconds > 0
+                ? activatedAt.plusSeconds(timeLimitSeconds)
+                : null;
+    }
+
+    private Long toEpochMillis(LocalDateTime dateTime) {
+        return dateTime == null ? null : dateTime.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+    }
+
+    private void scheduleAutoCloseAt(Interaction interaction) {
+        if (interaction.getDeadlineAt() == null || interaction.getId() == null || interaction.getSessionId() == null) {
+            return;
+        }
+        ScheduledFuture<?> previous = pendingClosures.remove(interaction.getId());
+        if (previous != null) previous.cancel(false);
+
+        long delayMillis = Math.max(0L, Duration.between(LocalDateTime.now(), interaction.getDeadlineAt()).toMillis());
+        ScheduledFuture<?> future = autoCloseScheduler.schedule(
+                () -> handleAutoClose(interaction.getId(), interaction.getSessionId()),
+                delayMillis,
+                TimeUnit.MILLISECONDS);
+        pendingClosures.put(interaction.getId(), future);
+        log.debug("已调度自动关闭: interactionId={}, deadline={}", interaction.getId(), interaction.getDeadlineAt());
+    }
+
+    private void handleAutoClose(Long interactionId, Long sessionId) {
+        pendingClosures.remove(interactionId);
+        try {
+            Interaction latest = interactionMapper.selectById(interactionId);
+            if (latest == null || !"ACTIVE".equals(latest.getStatus())) return;
+            if (latest.getDeadlineAt() != null && latest.getDeadlineAt().isAfter(LocalDateTime.now())) {
+                scheduleAutoCloseAt(latest);
+                return;
             }
-        }, timeLimitSeconds, TimeUnit.SECONDS);
-        pendingClosures.put(interactionId, future);
-        log.debug("已调度自动关闭: interactionId={}, 延时={}s", interactionId, timeLimitSeconds);
+            closeInteraction(interactionId, sessionId);
+        } catch (Exception e) {
+            log.error("自动关闭互动失败: interactionId={}", interactionId, e);
+        }
+    }
+
+    /** 服务重启后恢复尚未结束题目的自动关闭任务。 */
+    @EventListener(ApplicationReadyEvent.class)
+    public void recoverAutoCloseTasks() {
+        List<Interaction> activeInteractions = interactionMapper.findActiveWithDeadline();
+        activeInteractions.forEach(this::scheduleAutoCloseAt);
+        if (!activeInteractions.isEmpty()) {
+            log.info("已恢复 {} 个互动自动关闭任务", activeInteractions.size());
+        }
     }
 }

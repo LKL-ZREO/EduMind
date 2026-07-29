@@ -51,7 +51,6 @@ class OwnershipGuardResourceAccessTest {
     @Mock private PreviewTaskMapper previewTaskMapper;
     @Mock private SharedKbMemberMapper sharedKbMemberMapper;
     @Mock private TeachingCalendarMapper teachingCalendarMapper;
-    @Mock private InteractionMapper interactionMapper;
 
     @InjectMocks private OwnershipGuard guard;
 
@@ -128,22 +127,6 @@ class OwnershipGuardResourceAccessTest {
         when(teachingCalendarMapper.selectById(7L)).thenReturn(plan);
 
         assertThat(guard.isTeachingCalendarOwner(7L)).isFalse();
-    }
-
-    @Test
-    void interactionDraftAccessFollowsClassOwnership() {
-        Interaction draft = new Interaction();
-        draft.setId(8L);
-        draft.setClassId(3L);
-        draft.setStatus("DRAFT");
-        when(interactionMapper.selectById(8L)).thenReturn(draft);
-
-        ClassInfo classInfo = new ClassInfo();
-        classInfo.setId(3L);
-        classInfo.setTeacherId(100L);
-        when(classInfoMapper.selectById(3L)).thenReturn(classInfo);
-
-        assertThat(guard.isInteractionDraftOwner(8L)).isTrue();
     }
 
     private Document document(String docId, Long ownerId, Long kbId) {
