@@ -1,261 +1,303 @@
-<p align="center">
-  <h1 align="center">🎓 EduMind — AI 驱动的智能教学助手</h1>
-  <p align="center">
-    <img src="https://img.shields.io/badge/Spring_Boot-4.0.4-brightgreen" alt="Spring Boot">
+<div align="center">
+  <h1>🎓 EduMind</h1>
+  <p><strong>面向高校教学场景的 AI 教学助手</strong></p>
+  <p>把课程知识库、智能答疑、作业批改、课堂互动与教学分析连接成一条可部署、可评估的完整链路。</p>
+  <p>
+    <a href="https://github.com/LKL-ZREO/EduMind/actions/workflows/ci.yml"><img src="https://github.com/LKL-ZREO/EduMind/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
     <img src="https://img.shields.io/badge/Java-21-orange" alt="Java 21">
-    <img src="https://img.shields.io/badge/Vue-3.5-blue" alt="Vue 3">
-    <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
+    <img src="https://img.shields.io/badge/Spring_Boot-4.0.4-6DB33F" alt="Spring Boot 4.0.4">
+    <img src="https://img.shields.io/badge/Vue-3.5-42B883" alt="Vue 3.5">
+    <img src="https://img.shields.io/badge/LangChain4j-1.15.1-blue" alt="LangChain4j 1.15.1">
+    <img src="https://img.shields.io/badge/License-MIT-green" alt="MIT License">
   </p>
-</p>
+  <p>
+    <a href="#核心能力">核心能力</a> ·
+    <a href="#系统架构">系统架构</a> ·
+    <a href="#快速开始">快速开始</a> ·
+    <a href="#本地开发">本地开发</a> ·
+    <a href="edumind/docs/production-deployment.md">生产部署</a>
+  </p>
+</div>
 
-EduMind 是一个面向高校教学场景的 AI 智能助手，核心功能包括 **RAG 知识库检索**、**作业自动批改**、**教学数据仪表盘** 和 **QQ Bot 答疑**。基于 Spring Boot 4 + Vue 3 构建，内置 ONNX 本地推理、pgvector 向量检索、MCP 工具系统和 Redis Stream 异步批改引擎。
+## 项目简介
 
----
+EduMind 是一个前后端分离的智能教学平台。教师可以管理课程、班级、知识库和作业任务，学生可以提交作业并参与课堂互动；内置 AI Agent 负责知识检索、教学问答和结构化批改，教学结果最终沉淀为可追踪的数据分析。
 
-## ✨ 核心功能
+项目不是单纯的模型 API 包装层：Embedding、混合检索、RRF 融合、Reranker、工具调用、异步批改、权限控制、评测和监控均在应用内形成了完整实现。LLM 层保持供应商中立，只需要配置一个 OpenAI 兼容端点。
 
-| 模块 | 说明 |
-|------|------|
-| **RAG 知识库检索** | Embedding → pgvector 向量检索 → 关键词检索 → RRF 融合 → Reranker 精排，支持 LLM 查询改写和低置信度兜底 |
-| **作业自动批改** | AI 驱动的作业批改，DAG 工作流引擎，Redis Stream 异步消费，支持逾期扣分 |
-| **教学数据仪表盘** | 班级成绩分布热力图、知识点掌握度分析、高频错题统计、学生成长曲线 |
-| **QQ Bot 答疑** | 基于 OneBot 协议的 QQ 机器人，学生在群里 @机器人 即可获得 RAG 检索结果 |
-| **MCP 工具系统** | 实现 Model Context Protocol，暴露后端数据给 OpenClaw 的 AI Agent 调用 |
-| **智能文档切割** | Markdown 结构感知切割、代码块保护、对话轮次识别、滑动窗口上下文拼接 |
+## 核心能力
 
----
+| 能力               | 实现                                                                                                        |
+| ------------------ | ----------------------------------------------------------------------------------------------------------- |
+| **内置教学 Agent** | LangChain4j Agent、会话记忆、本地工具调用、自我反思和结构化输出；直接连接可配置的 OpenAI 兼容模型服务       |
+| **混合 RAG 检索**  | 本地 ONNX Embedding、pgvector 向量检索、PostgreSQL 全文检索、RRF 融合、Cross-Encoder 精排与低置信度查询改写 |
+| **知识库管理**     | 文档上传、Markdown/代码/对话结构感知切块、课程级检索范围和共享知识库                                        |
+| **作业与批改**     | 作业任务、学生提交、Redis Stream 异步批改、分布式锁防重复、DAG 工作流与批改轨迹                             |
+| **课堂与教学数据** | 班级管理、实时课堂连接、知识点掌握度、成绩分布、错题聚合和学生成长数据                                      |
+| **可选外部集成**   | OneBot/NapCat QQ 机器人，以及受 API Key 保护的 MCP JSON-RPC 端点                                            |
+| **生产可运维性**   | Docker Compose、Nginx/HTTPS、PostgreSQL 自动备份、Prometheus/Grafana、结构化日志、限流与熔断                |
 
-## 🏗️ 技术架构
+## 系统架构
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                       Nginx :80                             │
-│              (反向代理 + 安全头 + Gzip)                       │
-└──────────────────────────┬──────────────────────────────────┘
-                           │
-        ┌──────────────────┼──────────────────┐
-        ▼                  ▼                  ▼
-┌───────────────┐  ┌──────────────┐  ┌───────────────┐
-│   Vue 3 前端   │  │ Spring Boot  │  │  Prometheus   │
-│   Vite 7      │  │  4.0.4 :8080 │  │  Grafana      │
-│   Element Plus│  │  虚拟线程     │  │  监控面板      │
-└───────────────┘  └──────┬───────┘  └───────────────┘
-                           │
-        ┌──────────────────┼──────────────────┐
-        ▼                  ▼                  ▼
-┌───────────┐  ┌───────────────┐  ┌───────────────────┐
-│ PostgreSQL │  │    Redis 7    │  │  MinIO (S3)       │
-│ + pgvector │  │  Stream/Cache │  │  对象存储          │
-└───────────┘  └───────────────┘  └───────────────────┘
-```
+```mermaid
+flowchart TB
+    users["教师 / 学生"] --> nginx["Nginx · HTTPS / 静态资源 / 反向代理"]
+    nginx --> web["Vue 3 Web"]
+    nginx --> app["Spring Boot 4 API"]
 
-### RAG 检索管线
+    onebot["OneBot / NapCat（可选）"] --> app
+    mcp["外部 MCP Client（可选）"] --> app
 
-```
-Query → Embedding(ONNX) → pgvector相似度  ─┐
-                                            ├→ RRF融合 → Reranker精排 → 结果
-        → LLM改写 → 关键词全文检索 ─────────┘
-                                            ↓
-                              低置信度(<0.3) → 追加检索
+    app --> agent["LangChain4j 教学 Agent"]
+    agent --> llm["OpenAI 兼容模型服务"]
+    agent --> tools["LangChain4jToolBridge · 本地工具"]
+    tools --> rag["RAG Pipeline"]
+
+    rag --> pg[("PostgreSQL 16 + pgvector")]
+    app --> redis[("Redis 7 · Session / Cache / Stream / Lock")]
+    app --> storage[("本地 Volume / MinIO S3")]
+
+    prometheus["Prometheus / Grafana（可选）"] --> app
 ```
 
-### 技术栈一览
+应用自身的 Agent 直接执行本地工具，不需要经过 MCP 或外部 Agent 网关。`/mcp` 复用同一组 `ToolDefinition`，只用于可选的外部客户端集成。
 
-| 层级 | 技术 | 版本 |
-|------|------|------|
-| 运行时 | Java + Spring Boot | 21 + 4.0.4 |
-| 框架 | MyBatis-Plus + Spring Security | 3.5.15 |
-| 数据库 | PostgreSQL + pgvector | 16 |
-| 缓存 | Caffeine + Redis (Redisson) | 7 |
-| AI/LLM | LangChain4j + OpenClaw Gateway | 1.13.0 |
-| 本地推理 | DJL + ONNX Runtime | 0.28.0 |
-| 文档解析 | Apache Tika + PDFBox | 2.9.1 / 3.0.4 |
-| 限流熔断 | Bucket4j + Resilience4j | 8.10.1 / 2.3.0 |
-| 前端 | Vue 3 + Vite + Element Plus + ECharts | 3.5 / 7 / 2.13 / 6.0 |
-| 监控 | Prometheus + Grafana + Micrometer | 2.55 / 11.2 |
-| CI/CD | GitHub Actions | — |
+### RAG 检索链路
 
----
+```text
+用户问题
+  ├─ 本地 ONNX Embedding → pgvector 相似度检索 ─┐
+  └─ PostgreSQL 全文关键词检索 ─────────────────┤
+                                                  ├─ RRF 融合 → Reranker 精排 → 上下文
+低置信度时：LLM Query Rewrite → 追加检索 ────────┘
+```
 
-## 🚀 快速开始
+`RagService` 是统一检索入口，Web、文档服务、OneBot 和本地 Agent 工具共享同一条检索实现。
 
-### 前置条件
+## 快速开始
 
-- JDK 21
-- Node.js >= 20
-- Docker Desktop
-- [OpenClaw](https://github.com/nicepkg/openclaw)（AI Gateway，LLM API 管理）
+最简单的体验方式是使用 Docker Compose 完整构建前后端。此方式只要求安装 Docker Engine 与 Docker Compose plugin，不需要在宿主机安装 JDK 或 Node.js。
 
-### 1. 配置环境变量
+### 1. 获取代码
+
+```bash
+git clone https://github.com/LKL-ZREO/EduMind.git
+cd EduMind/edumind
+cp .env.example .env
+```
+
+### 2. 配置 `.env`
+
+至少填写以下项目：
+
+```dotenv
+DOMAIN=localhost
+
+DB_PASS=<数据库密码，至少 16 个字符>
+LIVE_SESSION_TOKEN_SECRET=<随机密钥，至少 32 个字符>
+ENCRYPT_AES_KEY=<随机密钥，至少 32 个字符>
+MCP_API_KEY=<随机密钥，至少 32 个字符>
+
+LLM_BASE_URL=https://api.moonshot.cn/v1
+LLM_API_KEY=<模型供应商 API Key>
+LLM_MODEL=kimi-k2.5
+
+S3_ACCESS_KEY=<MinIO Access Key>
+S3_SECRET_KEY=<MinIO Secret Key，至少 16 个字符>
+GRAFANA_PASSWORD=<Grafana 管理员密码>
+```
+
+可以使用 OpenSSL 生成密钥：
+
+```bash
+openssl rand -base64 48
+openssl rand -base64 32
+openssl rand -hex 16
+```
+
+完整变量及说明见 [`.env.example`](edumind/.env.example)。视觉模型默认复用文本模型端点和 Key，也可以通过 `LLM_VISION_*` 单独配置。
+
+### 3. 构建并启动
+
+```bash
+docker compose up -d --build
+docker compose ps
+```
+
+启动完成后访问：
+
+- Web：<http://localhost>
+- MinIO Console：<http://127.0.0.1:9001>
+- PostgreSQL、Redis、MinIO API 仅绑定在宿主机 `127.0.0.1`
+
+首次启动会下载本地 Embedding 模型，应用健康检查的等待时间会比后续启动更长。
+
+停止服务：
+
+```bash
+docker compose down
+```
+
+不要在需要保留数据时添加 `-v`；`docker compose down -v` 会删除数据库和文件存储卷。
+
+## 生产部署
+
+单机生产环境已经提供预检、前后端镜像构建、服务健康等待、Let's Encrypt 证书签发、HTTPS 切换、证书续期和 PostgreSQL 定时备份流程。
 
 ```bash
 cd edumind
-cp .env.example .env
-# 编辑 .env，填入 DB_PASS、LIVE_SESSION_TOKEN_SECRET、LLM_API_KEY 等
+/bin/sh scripts/preflight.sh
+/bin/sh scripts/deploy.sh
 ```
 
-### 2. 启动基础设施
+生产部署前必须准备域名 DNS，并只向公网开放 `80`、`443` 和受限的 SSH 端口。完整的服务器要求、配置、更新、恢复演练和排障步骤见：
+
+> [EduMind 单机生产部署指南](edumind/docs/production-deployment.md)
+
+## 本地开发
+
+### 后端
 
 ```bash
-docker compose up -d
-# 启动 PostgreSQL + Redis + MinIO + Nginx + 应用
-```
+cd edumind
 
-### 3. 启动后端
+# 先填写 .env，再启动依赖服务
+docker compose up -d postgres redis minio
 
-```bash
 ./mvnw spring-boot:run
-# 应用运行在 http://localhost:8080
-# Swagger UI: http://localhost:8080/swagger-ui.html
 ```
 
-### 4. 启动前端
+- API：<http://localhost:8080>
+- Swagger UI：<http://localhost:8080/swagger-ui.html>
+
+### 前端
 
 ```bash
 cd vue-project
-npm install
+npm ci
 npm run dev
-# 开发服务器运行在 http://localhost:5173
 ```
 
-### 5. 启动监控面板（可选）
+前端开发服务器运行在 <http://localhost:5173>，并将 `/api` 代理到后端 `8080`。
 
-```bash
-# 或双击根目录的 grafana.bat
-docker compose up prometheus grafana -d --no-deps
-# Grafana: http://localhost:3001 (admin/admin)
-# Prometheus: http://localhost:9090
-```
-
----
-
-## 📁 项目结构
-
-```
-├── edumind/                          # Spring Boot 后端
-│   ├── src/main/java/.../
-│   │   ├── Controller/              # REST 控制器
-│   │   ├── Service/                 # 业务服务层
-│   │   ├── DTO/ / VO/ / Entity/     # 数据传输 / 视图对象 / 实体
-│   │   ├── rag/                     # RAG 检索管线
-│   │   ├── mcp/                     # MCP 工具系统
-│   │   ├── agent/workflow/          # DAG 工作流引擎
-│   │   ├── infrastructure/          # 基础设施层
-│   │   │   ├── async/              # Redis Stream 异步消费
-│   │   │   ├── cache/              # Caffeine + Redis 缓存
-│   │   │   ├── limiter/            # Bucket4j 限流
-│   │   │   └── pdf/                # PDF 解析 (Mineru/Vision)
-│   │   ├── common/                  # 公共组件
-│   │   │   ├── exception/          # 全局异常处理
-│   │   │   ├── result/             # 统一响应体
-│   │   │   └── web/                # RequestId 过滤器
-│   │   └── config/                  # Spring 配置
-│   ├── src/main/resources/
-│   │   ├── db/migration/           # Flyway 数据库迁移
-│   │   └── prompts/                # AI Prompt 模板
-│   ├── src/test/                    # 测试
-│   ├── prometheus/                  # Prometheus 配置 + 告警规则
-│   ├── grafana/                     # Grafana Dashboard + 数据源
-│   └── docker-compose.yml
-│
-├── vue-project/                     # Vue 3 前端
-│   ├── src/
-│   │   ├── views/                  # 页面视图
-│   │   ├── stores/                 # Pinia 状态管理
-│   │   ├── api/                    # Axios API 封装
-│   │   └── router/                 # Vue Router 配置
-│   └── vitest.config.ts
-│
-├── .github/workflows/              # CI/CD
-│   ├── ci.yml                      # 质量门禁（测试 + 构建）
-│   └── deploy.yml                  # 自动部署
-│
-└── grafana.bat                     # 一键启动 Grafana
-```
-
----
-
-## 🧪 测试
+### 常用质量检查
 
 ```bash
 # 后端
 cd edumind
-./mvnw test                                    # 全量测试
-./mvnw test -Dtest="RagEvalRunner"             # RAG 评测脚本
+./mvnw test
+./mvnw package -DskipTests
 
 # 前端
 cd vue-project
-npm run test                                   # Vitest 单元测试
+npm run ci:check
 ```
 
----
+CI 会执行后端测试、Session 安全集成测试、前端格式/类型/静态检查、单元测试与生产构建。工作流见 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)。
 
-## 🔍 可观测性
+## 关键配置
 
-项目内置了完整的可观测性栈：
+| 变量                              | 用途                         | 默认/要求                         |
+| --------------------------------- | ---------------------------- | --------------------------------- |
+| `LLM_BASE_URL`                    | OpenAI 兼容文本模型端点      | 默认 Moonshot 示例，可替换        |
+| `LLM_API_KEY`                     | 文本模型 API Key             | 必填                              |
+| `LLM_TEXT_MODEL` / `LLM_MODEL`    | 文本模型名                   | 必填或使用示例默认值              |
+| `LLM_VISION_*`                    | 独立视觉端点、Key 与模型名   | 可选；留空复用文本配置            |
+| `DB_PASS`                         | PostgreSQL 密码              | 至少 16 个字符                    |
+| `LIVE_SESSION_TOKEN_SECRET`       | 课堂范围令牌签名密钥         | 至少 32 个字符                    |
+| `ENCRYPT_AES_KEY`                 | 敏感字段加密密钥             | 至少 32 个字符                    |
+| `MCP_API_KEY`                     | 外部 MCP 调用认证            | 至少 32 个字符                    |
+| `STORAGE_TYPE`                    | `local` 或 `s3` 文件存储实现 | 默认 `local`                      |
+| `S3_ACCESS_KEY` / `S3_SECRET_KEY` | Compose 内置 MinIO 凭据      | 必填                              |
+| `RERANKER_MODEL_DIR`              | 宿主机 Reranker 模型目录     | 默认 `./models/bge-reranker-base` |
+| `ONEBOT_WS_ENABLED`               | 是否连接 OneBot/NapCat       | 默认 `false`                      |
+| `ENABLE_OBSERVABILITY`            | 部署脚本是否启动监控栈       | 默认 `false`                      |
 
-- **`/actuator/prometheus`** — JVM、HTTP、RAG 检索等指标
-- **Grafana Dashboard** — JVM 内存/GC、API QPS/延迟、5xx 错误率、RAG 耗时与最新质量分数
-- **结构化输出可靠性** — JSON 严格解析/修复/语义校验/重试结果与 Repair p95
-- **结构化日志** — JSON 格式，自动携带 `requestId` + `userId`
-- **Request ID 追踪** — 每个请求贯穿 Nginx → 应用 → 响应头
+Reranker 模型不是启动硬依赖。缺少 `onnx/model.onnx` 时应用会关闭精排能力，其他检索链路仍可运行。
 
-```bash
-# 一键拉起监控面板
-grafana.bat
-```
+## 可选服务
 
----
-
-## 📊 RAG 评测
-
-评测链路运行真实的“检索 → 生成 → LLM-as-Judge”流程，不会拿参考答案冒充模型答案。每次运行都会保存数据集 SHA-256、Git 提交、模型与 Top-K/Reranker 配置，以及逐题的参考答案、生成答案、召回证据、分数和耗时。
-
-指标包括 Keyword Recall、Content Coverage、Hit Rate、MRR、nDCG、Faithfulness 和 Answer Relevancy；默认阈值由 `RAG_EVAL_MIN_*` 环境变量配置。任意评测用例报错或所选指标低于阈值时，`qualityGatePassed` 为 `false`，真实管线测试会直接失败。
+### Prometheus 与 Grafana
 
 ```bash
 cd edumind
-# Bash
-EVALUATION_ENABLED=true ./mvnw test -Dtest="RagEvalRunner" -Dspring.profiles.active=local
-
-# PowerShell
-$env:EVALUATION_ENABLED="true"
-.\mvnw.cmd --% test -Dtest=RagEvalRunner -Dspring.profiles.active=local
+docker compose --profile observability up -d prometheus grafana
 ```
 
-也可以通过 API 发起实验并查看历史：
+- Prometheus：<http://127.0.0.1:9090>
+- Grafana：<http://127.0.0.1:3002>
 
-```http
-POST /api/eval/run
-Content-Type: application/json
+两者只绑定本机，生产环境建议通过 SSH 隧道访问。
 
-{
-  "metrics": ["keyword_recall", "content_coverage", "hit_rate", "mrr", "ndcg", "faithfulness", "answer_relevancy"],
-  "topK": 5,
-  "enableReranker": true,
-  "generateAnswers": true,
-  "datasetVersion": "rag-eval-v1"
-}
+### OneBot / NapCat
 
-GET /api/eval/runs?limit=20
-GET /api/eval/runs/{runId}
+在 `.env` 中启用：
+
+```dotenv
+ONEBOT_WS_ENABLED=true
+ONEBOT_WS_URL=ws://host.docker.internal:3001
+ONEBOT_WS_TOKEN=<与 NapCat 一致的随机令牌>
 ```
 
-Prometheus 暴露 `edumind_rag_eval_score{metric="..."}` 和 `edumind_rag_eval_runs_total{outcome="..."}`；Grafana 的 AI/RAG Dashboard 展示最新质量分数与通过、门禁失败、运行错误次数。
+NapCat 需要单独启动。OneBot 未启用时不会影响 Web、RAG、批改或 MCP 功能。
 
----
+## 技术栈
 
-## 🔒 安全
+| 层级        | 技术                                                           |
+| ----------- | -------------------------------------------------------------- |
+| 后端        | Java 21、Spring Boot 4.0.4、Spring Security、MyBatis-Plus      |
+| Agent / LLM | LangChain4j 1.15.1、OpenAI 兼容模型服务、Resilience4j          |
+| 本地 AI     | DJL 0.28.0、ONNX Runtime、本地 Embedding / Reranker            |
+| 数据        | PostgreSQL 16、pgvector、Flyway、Redis 7、Redisson、Caffeine   |
+| 文件        | 本地 Docker Volume、MinIO / S3 兼容存储                        |
+| 前端        | Vue 3.5、TypeScript 5.9、Vite 7、Element Plus、ECharts、Tiptap |
+| 可观测性    | Actuator、Micrometer、Prometheus、Grafana、JSON 日志           |
+| 部署        | Docker Compose、Nginx、Certbot、GitHub Actions                 |
 
-- JWT 无状态认证 + MCP API Key 双通道
-- Bucket4j + Redisson 分布式限流（拦截器 + AOP 双层）
-- Resilience4j 熔断保护 AI 调用
-- BCrypt 密码哈希 + 常量时间 API Key 比对
-- Nginx + Spring Security 双层安全头（CSP/HSTS/XSS）
-- 全参数化 SQL 查询，防止注入
+## 项目结构
 
----
+```text
+EduMind/
+├── edumind/                         # Spring Boot 后端与生产编排
+│   ├── src/main/java/.../
+│   │   ├── agent/                   # LangChain4j Agent、记忆与工作流
+│   │   ├── rag/                     # 混合检索与智能切块
+│   │   ├── mcp/                     # MCP JSON-RPC 与工具定义
+│   │   ├── infrastructure/          # Stream、OneBot 等基础设施适配
+│   │   ├── live/                    # 实时课堂
+│   │   ├── eval/                    # RAG 评测
+│   │   └── Controller/ Service/ ... # Web 与业务层
+│   ├── src/main/resources/
+│   │   ├── db/migration/            # Flyway 迁移
+│   │   └── prompts/                 # Prompt 模板
+│   ├── docker-compose.yml
+│   ├── Dockerfile                   # 后端镜像
+│   ├── Dockerfile.nginx             # Vue 构建 + Nginx 镜像
+│   └── scripts/                     # 预检、部署、SSL、备份
+├── vue-project/                     # Vue 3 前端
+├── .github/workflows/               # CI 与部署工作流
+└── docs/                            # 审查与项目文档
+```
 
-## 📄 License
+## 安全设计
+
+- 教师端使用 Redis-backed Spring Session 与 CSRF 防护。
+- 课堂学生使用独立的范围令牌，不复用教师认证会话。
+- MCP 使用单独 API Key，并采用常量时间比较。
+- `/api/**` 使用 Bucket4j + Redisson 分布式限流。
+- LLM 调用由 Resilience4j 熔断保护。
+- Nginx 仅公开 `80/443`；数据库、Redis、MinIO 和监控端口默认绑定 `127.0.0.1`。
+- 生产配置启用安全 Cookie、HSTS、CSP、日志轮转和非 root 后端容器。
+
+安全问题请不要通过公开 Issue 披露敏感细节，可先联系仓库维护者。
+
+## 相关文档
+
+- [后端与功能说明](edumind/README.md)
+- [生产部署指南](edumind/docs/production-deployment.md)
+- [迁移测试矩阵](edumind/docs/p0-migration-test-matrix.md)
+- [代码质量审查记录](docs/alibaba-code-review-2026-07-13.md)
+
+## License
 
 MIT
