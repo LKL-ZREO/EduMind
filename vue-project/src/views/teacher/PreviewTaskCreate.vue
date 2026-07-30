@@ -99,7 +99,7 @@ const route = useRoute()
 const classList = ref<{ id: number; name: string }[]>([])
 const form = ref({
   classId: Number(route.query.classId) || (null as number | null),
-  knowledgePoint: '',
+  knowledgePoint: String(route.query.knowledgePoint || ''),
   topic: '',
 })
 const generating = ref(false)

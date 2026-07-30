@@ -97,6 +97,15 @@ public class ChatHistoryServiceImpl implements ChatHistoryService {
         return deleted >= 0;
     }
 
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean deleteSession(Long userId, String sessionId) {
+        int deleted = chatHistoryMapper.deleteBySessionId(userId, sessionId);
+        evictHistoryCache(userId);
+        log.info("已删除用户 {} 会话 {} 的 {} 条对话记录", userId, sessionId, deleted);
+        return deleted >= 0;
+    }
+
     private void evictHistoryCache(Long userId) {
         var cache = cacheManager.getCache(CACHE_NAME);
         if (cache != null) {

@@ -76,4 +76,8 @@ public interface ChatHistoryMapper extends BaseMapper<ChatHistory> {
      */
     @Delete("DELETE FROM chat_history WHERE user_id = #{userId}")
     int deleteByUserId(@Param("userId") Long userId);
+
+    @Delete("DELETE FROM chat_history WHERE user_id = #{userId} AND session_id = #{sessionId}")
+    int deleteBySessionId(@Param("userId") Long userId,
+                          @Param("sessionId") String sessionId);
 }

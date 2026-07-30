@@ -21,6 +21,9 @@ public interface OpenClawService {
     /** 清除该用户的全部 Agent 工作记忆。 */
     void clearMemory(Long userId);
 
+    /** 清理单个用户会话的工作记忆。 */
+    void clearMemory(Long userId, String sessionId);
+
     /** 健康检查 */
     boolean checkConnection();
 }

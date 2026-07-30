@@ -45,6 +45,11 @@ public class AgentServiceConfiguration {
             }
 
             @Override
+            public void clearMemory(Long userId, String sessionId) {
+                // No Agent memory exists for the disabled backend.
+            }
+
+            @Override
             public boolean checkConnection() {
                 return false;
             }

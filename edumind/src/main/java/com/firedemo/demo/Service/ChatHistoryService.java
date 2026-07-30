@@ -61,6 +61,9 @@ public interface ChatHistoryService {
      */
     boolean deleteByUserId(Long userId);
 
+    /** 删除一个用户拥有的单个会话消息。 */
+    boolean deleteSession(Long userId, String sessionId);
+
     /**
      * 构建上下文提示词
      *

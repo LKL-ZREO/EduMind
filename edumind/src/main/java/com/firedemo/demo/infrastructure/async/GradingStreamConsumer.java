@@ -7,6 +7,7 @@ import com.firedemo.demo.Entity.Submission;
 import com.firedemo.demo.Entity.SubmissionError;
 import com.firedemo.demo.Entity.TeacherKnowledge;
 import com.firedemo.demo.Service.FileStorageService;
+import com.firedemo.demo.Service.KnowledgePointVocabularyService;
 import com.firedemo.demo.infrastructure.onebot.OneBotWebSocketClient;
 import com.firedemo.demo.common.enums.SubmissionStatus;
 import com.firedemo.demo.Service.OpenClawService;
@@ -55,6 +56,7 @@ public class GradingStreamConsumer extends AbstractStreamConsumer {
     private final RedisCacheReader redisCacheReader;
     private final GradingWorkflow gradingWorkflow;
     private final PromptLoader promptLoader;
+    private final KnowledgePointVocabularyService knowledgePointVocabularyService;
 
     /** grading-*.txt 三个模板的联合 SHA-256，任一模板改动后缓存自动失效 */
     private String promptTemplateHash;
@@ -85,7 +87,8 @@ public class GradingStreamConsumer extends AbstractStreamConsumer {
                                   CacheConsistencyService cacheConsistencyService,
                                   RedisCacheReader redisCacheReader,
                                   GradingWorkflow gradingWorkflow,
-                                  PromptLoader promptLoader) {
+                                  PromptLoader promptLoader,
+                                  KnowledgePointVocabularyService knowledgePointVocabularyService) {
         super(redissonClient);
         this.gradingStreamProducer = gradingStreamProducer;
         this.submissionMapper = submissionMapper;
@@ -102,6 +105,7 @@ public class GradingStreamConsumer extends AbstractStreamConsumer {
         this.redisCacheReader = redisCacheReader;
         this.gradingWorkflow = gradingWorkflow;
         this.promptLoader = promptLoader;
+        this.knowledgePointVocabularyService = knowledgePointVocabularyService;
     }
 
     // ==================== 钩子方法（身份标识） ====================
@@ -346,6 +350,8 @@ public class GradingStreamConsumer extends AbstractStreamConsumer {
 
         LocalDateTime now = LocalDateTime.now();
         List<SubmissionError> batch = new ArrayList<>();
+        Map<String, String> canonicalKnowledgePoints =
+                knowledgePointVocabularyService.loadCanonicalNames(classId);
 
         if (eval.getErrors() != null) {
             for (EvaluationResultDTO.ErrorItem err : eval.getErrors()) {
@@ -356,7 +362,8 @@ public class GradingStreamConsumer extends AbstractStreamConsumer {
                 se.setErrorText(err.getIssue());
                 se.setErrorType(err.getType() != null ? err.getType() : "");
                 se.setSeverity(err.getSeverity() != null ? err.getSeverity() : "minor");
-                se.setKnowledgePoint(err.getKnowledgePoint() != null ? err.getKnowledgePoint() : "其他");
+                se.setKnowledgePoint(knowledgePointVocabularyService.normalize(
+                        err.getKnowledgePoint(), canonicalKnowledgePoints));
                 se.setCreatedAt(now);
                 se.setUpdatedAt(now);
                 batch.add(se);
@@ -372,7 +379,8 @@ public class GradingStreamConsumer extends AbstractStreamConsumer {
                 se.setErrorText(sug.getIssue() + " -> " + (sug.getSuggestion() != null ? sug.getSuggestion() : ""));
                 se.setErrorType("");
                 se.setSeverity(sug.getPriority() != null ? sug.getPriority() : "low");
-                se.setKnowledgePoint(sug.getKnowledgePoint() != null ? sug.getKnowledgePoint() : "其他");
+                se.setKnowledgePoint(knowledgePointVocabularyService.normalize(
+                        sug.getKnowledgePoint(), canonicalKnowledgePoints));
                 se.setCreatedAt(now);
                 se.setUpdatedAt(now);
                 batch.add(se);

@@ -119,20 +119,22 @@ export const useLiveSessionStore = defineStore('liveSession', () => {
 
   function submitResponse(answer: string) {
     const interactionId = currentInteraction.value?.interactionId
-    if (!interactionId) return
-    send(`/app/session/${sessionId.value}/interaction/${interactionId}/respond`, {
+    if (!interactionId) return false
+    const sent = send(`/app/session/${sessionId.value}/interaction/${interactionId}/respond`, {
       interactionId,
       answer,
       studentId: sessionInfo.value?.studentId,
       studentName: sessionInfo.value?.studentName,
     })
+    if (!sent) return false
     const index = interactionHistory.value.findIndex((item) => item.interactionId === interactionId)
     const existing = interactionHistory.value[index]
     if (existing) interactionHistory.value[index] = { ...existing, myAnswer: answer }
+    return true
   }
 
   function askQuestion(question: string) {
-    send(`/app/session/${sessionId.value}/qa/ask`, { question })
+    return send(`/app/session/${sessionId.value}/qa/ask`, { question })
   }
 
   function closeInteraction(interactionId: number) {
@@ -158,7 +160,7 @@ export const useLiveSessionStore = defineStore('liveSession', () => {
   }
 
   function sendReaction(emoji: string) {
-    send(`/app/session/${sessionId.value}/reaction`, {
+    return send(`/app/session/${sessionId.value}/reaction`, {
       emoji,
       studentId: sessionInfo.value?.studentId,
       studentName: sessionInfo.value?.studentName,
@@ -167,13 +169,17 @@ export const useLiveSessionStore = defineStore('liveSession', () => {
   }
 
   function raiseHand() {
-    send(`/app/session/${sessionId.value}/hand/raise`, {})
+    const sent = send(`/app/session/${sessionId.value}/hand/raise`, {})
+    if (!sent) return false
     handRaised.value = true
+    return true
   }
 
   function lowerHand() {
-    send(`/app/session/${sessionId.value}/hand/lower`, {})
+    const sent = send(`/app/session/${sessionId.value}/hand/lower`, {})
+    if (!sent) return false
     handRaised.value = false
+    return true
   }
 
   function callStudent(studentId?: string) {
@@ -223,6 +229,7 @@ export const useLiveSessionStore = defineStore('liveSession', () => {
     const index = interactionHistory.value.findIndex(
       (item) => item.interactionId === push.interactionId,
     )
+    const existing = interactionHistory.value[index]
     const item: InteractionHistoryItem = {
       interactionId: push.interactionId,
       questionId: push.questionId,
@@ -237,10 +244,9 @@ export const useLiveSessionStore = defineStore('liveSession', () => {
       totalStudents: 0,
       respondedCount: 0,
       correctRate: null,
-      myAnswer: null,
-      myCorrect: null,
+      myAnswer: existing?.myAnswer ?? null,
+      myCorrect: existing?.myCorrect ?? null,
     }
-    const existing = interactionHistory.value[index]
     if (existing) {
       interactionHistory.value[index] = { ...existing, ...item }
     } else {
@@ -409,8 +415,9 @@ export const useLiveSessionStore = defineStore('liveSession', () => {
   }
 
   function send(destination: string, body: object) {
-    if (!stomp?.connected) return
+    if (!stomp?.connected) return false
     stomp.publish({ destination, body: JSON.stringify(body) })
+    return true
   }
 
   function markDisconnected() {

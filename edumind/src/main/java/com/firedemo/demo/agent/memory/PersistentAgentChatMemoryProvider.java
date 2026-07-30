@@ -68,6 +68,15 @@ public class PersistentAgentChatMemoryProvider implements ChatMemoryProvider {
         log.info("Agent working memory cleared: userId={}, persistedSnapshots={}", userId, deleted);
     }
 
+    public void clear(Long userId, String sessionId) {
+        Objects.requireNonNull(userId, "userId is required");
+        AgentMemoryId id = new AgentMemoryId(userId, sessionId);
+        ChatMemory memory = memories.asMap().remove(id);
+        if (memory != null) memory.clear();
+        memoryStore.deleteMessages(id);
+        log.info("Agent working memory cleared: memoryId={}", id);
+    }
+
     /** Keeps persisted working memory aligned with a post-processed answer returned to the user. */
     public boolean replaceLastAiMessage(AgentMemoryId id, String expectedText, String replacementText) {
         Objects.requireNonNull(id, "memoryId is required");

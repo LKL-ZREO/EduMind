@@ -1,10 +1,12 @@
 package com.firedemo.demo.mcp.tools;
 
 import com.firedemo.demo.agent.context.AgentExecutionContext;
+import com.firedemo.demo.agent.context.AgentUiEventBus;
 import com.firedemo.demo.mcp.ToolDefinition;
 import com.firedemo.demo.rag.*;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.util.List;
 import java.util.Map;
@@ -22,9 +24,17 @@ import java.util.Map;
 public class KnowledgeSearchTool implements ToolDefinition {
 
     private final RagService ragService;
+    private final AgentUiEventBus uiEventBus;
 
-    public KnowledgeSearchTool(RagService ragService) {
+    @Autowired
+    public KnowledgeSearchTool(RagService ragService, AgentUiEventBus uiEventBus) {
         this.ragService = ragService;
+        this.uiEventBus = uiEventBus;
+    }
+
+    /** Backward-compatible constructor for isolated tool tests. */
+    public KnowledgeSearchTool(RagService ragService) {
+        this(ragService, new AgentUiEventBus());
     }
 
     @Override
@@ -90,6 +100,19 @@ public class KnowledgeSearchTool implements ToolDefinition {
                     .build();
 
             RagResult result = ragService.search(request);
+
+            if (context.channel() == com.firedemo.demo.agent.context.AgentChannel.WEB) {
+                result.getResults().stream().limit(5).forEach(scored -> {
+                    var chunk = scored.chunk();
+                    String excerpt = chunk.getContent() == null ? "" : chunk.getContent().strip();
+                    if (excerpt.length() > 180) excerpt = excerpt.substring(0, 180) + "…";
+                    uiEventBus.publish(context.traceId(), "citation", Map.of(
+                            "documentId", chunk.getDocumentId() == null ? "" : chunk.getDocumentId(),
+                            "documentName", chunk.getDocumentName() == null ? "教学资料" : chunk.getDocumentName(),
+                            "sectionIndex", chunk.getSectionIndex(),
+                            "excerpt", excerpt));
+                });
+            }
 
             if (!result.isHasContext()) {
                 return result.getFormattedContent();

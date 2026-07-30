@@ -5,6 +5,7 @@ import com.firedemo.demo.Entity.StudentConfusionLog;
 import com.firedemo.demo.Entity.Submission;
 import com.firedemo.demo.Entity.TeacherKnowledge;
 import com.firedemo.demo.Service.DashboardService;
+import com.firedemo.demo.Service.KnowledgeReclassificationService;
 import com.firedemo.demo.Service.PreLessonService;
 import com.firedemo.demo.Service.SubmissionService;
 import com.firedemo.demo.Service.TimelineService;
@@ -39,6 +40,7 @@ import java.util.Map;
 public class DashboardController {
 
     private final DashboardService dashboardService;
+    private final KnowledgeReclassificationService knowledgeReclassificationService;
     private final PreLessonService preLessonService;
     private final TimelineService timelineService;
     private final RBloomFilter<String> classIdBloomFilter;
@@ -95,6 +97,15 @@ public class DashboardController {
         return Result.success(dashboardService.getStudentOverview(classId, sortBy, keyword));
     }
 
+    @GetMapping("/student-insight")
+    @PreAuthorize("@sec.isClassOwner(#classId)")
+    public Result<StudentInsightDTO> getStudentInsight(
+            @RequestParam Long classId,
+            @RequestParam(required = false) String studentId,
+            @RequestParam(required = false) String studentName) {
+        return Result.success(dashboardService.getStudentInsight(classId, studentId, studentName));
+    }
+
     @GetMapping("/classes")
     public Result<List<ClassInfoDTO>> getClassList() {
         Long userId = getCurrentUserId();
@@ -112,29 +123,43 @@ public class DashboardController {
 
     @PostMapping("/teacher-knowledge/add")
     @PreAuthorize("@sec.isClassOwner(#body.classId)")
-    public Result<Void> addTeacherKnowledge(@Valid @RequestBody TeacherKnowledgeAddRequest body) {
+    public Result<KnowledgeReclassificationTaskDTO> addTeacherKnowledge(
+            @Valid @RequestBody TeacherKnowledgeAddRequest body) {
         Long userId = getCurrentUserId();
         if (!classIdBloomFilter.contains(String.valueOf(body.getClassId())))
             return Result.error(ErrorCode.DATA_NOT_FOUND.getCode(), "班级不存在");
         dashboardService.addTeacherKnowledge(body.getClassId(), userId, body.getName(), body.getColor());
-        return Result.success(null);
+        return Result.success(knowledgeReclassificationService.start(body.getClassId()));
     }
 
     @PostMapping("/teacher-knowledge/batch")
     @PreAuthorize("@sec.isClassOwner(#body.classId)")
-    public Result<Void> batchSaveTeacherKnowledge(@Valid @RequestBody TeacherKnowledgeSaveRequest body) {
+    public Result<KnowledgeReclassificationTaskDTO> batchSaveTeacherKnowledge(
+            @Valid @RequestBody TeacherKnowledgeSaveRequest body) {
         Long userId = getCurrentUserId();
         if (!classIdBloomFilter.contains(String.valueOf(body.getClassId())))
             return Result.error(ErrorCode.DATA_NOT_FOUND.getCode(), "班级不存在");
         dashboardService.saveTeacherKnowledge(body.getClassId(), userId, body.getItems());
-        return Result.success(null);
+        return Result.success(knowledgeReclassificationService.start(body.getClassId()));
     }
 
     @DeleteMapping("/teacher-knowledge/{id}")
     @PreAuthorize("@sec.isTeacherKnowledgeOwner(#id)")
-    public Result<Void> deleteTeacherKnowledge(@PathVariable Long id) {
-        dashboardService.deleteTeacherKnowledge(id);
-        return Result.success(null);
+    public Result<KnowledgeReclassificationTaskDTO> deleteTeacherKnowledge(@PathVariable Long id) {
+        Long classId = dashboardService.deleteTeacherKnowledge(id);
+        return Result.success(knowledgeReclassificationService.start(classId));
+    }
+
+    @GetMapping("/knowledge-reclassification/{taskId}")
+    @PreAuthorize("@sec.isClassOwner(#classId)")
+    public Result<KnowledgeReclassificationTaskDTO> getReclassificationTask(
+            @PathVariable String taskId,
+            @RequestParam Long classId) {
+        KnowledgeReclassificationTaskDTO task = knowledgeReclassificationService.get(taskId);
+        if (task == null || !classId.equals(task.getClassId())) {
+            return Result.error(ErrorCode.DATA_NOT_FOUND.getCode(), "重分类任务不存在或已过期");
+        }
+        return Result.success(task);
     }
 
     // ======================== 学生成长曲线 ========================

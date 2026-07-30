@@ -79,8 +79,8 @@ watch(
               数据中心
             </RouterLink>
             <RouterLink to="/teacher/pre-lesson" class="nav-item">
-              <span class="icon">📋</span>
-              备课仪表盘
+              <span class="icon">🧭</span>
+              备课工作台
             </RouterLink>
           </nav>
         </aside>

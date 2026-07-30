@@ -3,6 +3,7 @@ package com.firedemo.demo.Service.ServiceImpl;
 import com.firedemo.demo.Service.OpenClawService;
 import com.firedemo.demo.agent.context.AgentExecutionContext;
 import com.firedemo.demo.agent.context.AgentRunTrace;
+import com.firedemo.demo.agent.context.AgentUiEventBus;
 import com.firedemo.demo.agent.langchain4j.*;
 import com.firedemo.demo.agent.memory.AgentMemoryId;
 import com.firedemo.demo.agent.memory.PersistentAgentChatMemoryProvider;
@@ -73,6 +74,7 @@ public class LangChain4jAgentService implements OpenClawService {
     private final CourseMapper courseMapper;
     private final LlmProperties llmProperties;
     private final PersistentAgentChatMemoryProvider memoryProvider;
+    private final AgentUiEventBus uiEventBus;
 
     // ── 一次性构建的 Agent 实例 ──
     private TeachingAgent sessionAgent;           // 带工具 + ChatMemory（per sessionId）
@@ -85,7 +87,8 @@ public class LangChain4jAgentService implements OpenClawService {
                                    McpSessionStore mcpSessionStore,
                                    CourseMapper courseMapper,
                                    LlmProperties llmProperties,
-                                   PersistentAgentChatMemoryProvider memoryProvider) {
+                                   PersistentAgentChatMemoryProvider memoryProvider,
+                                   AgentUiEventBus uiEventBus) {
         this.chatModel = chatModel;
         this.streamingModel = streamingModel;
         this.toolBridge = toolBridge;
@@ -93,6 +96,7 @@ public class LangChain4jAgentService implements OpenClawService {
         this.courseMapper = courseMapper;
         this.llmProperties = llmProperties;
         this.memoryProvider = memoryProvider;
+        this.uiEventBus = uiEventBus;
     }
 
     @PostConstruct
@@ -172,6 +176,7 @@ public class LangChain4jAgentService implements OpenClawService {
             return result;
         } finally {
             logRunTrace(context, trace);
+            uiEventBus.complete(context.traceId());
         }
     }
 
@@ -192,7 +197,10 @@ public class LangChain4jAgentService implements OpenClawService {
         TokenStream tokenStream = streamingAgent.chat(
                 memoryId, message, AgentInvocationParameters.create(context, trace));
         return toFlux(tokenStream)
-                .doFinally(signalType -> logRunTrace(context, trace));
+                .doFinally(signalType -> {
+                    logRunTrace(context, trace);
+                    uiEventBus.complete(context.traceId());
+                });
     }
 
     // ========================================================================
@@ -207,6 +215,11 @@ public class LangChain4jAgentService implements OpenClawService {
     @Override
     public void clearMemory(Long userId) {
         memoryProvider.clearByUserId(userId);
+    }
+
+    @Override
+    public void clearMemory(Long userId, String sessionId) {
+        memoryProvider.clear(userId, sessionId);
     }
 
     // ========================================================================

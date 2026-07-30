@@ -2,6 +2,7 @@ package com.firedemo.demo.agent.langchain4j;
 
 import com.firedemo.demo.agent.context.AgentExecutionContext;
 import com.firedemo.demo.agent.context.AgentRunTrace;
+import com.firedemo.demo.agent.context.AgentUiEventBus;
 import com.firedemo.demo.agent.observability.AgentToolMetrics;
 import com.firedemo.demo.mcp.ToolDefinition;
 import dev.langchain4j.agent.tool.P;
@@ -9,6 +10,7 @@ import dev.langchain4j.agent.tool.Tool;
 import dev.langchain4j.invocation.InvocationParameters;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.util.HashMap;
 import java.util.List;
@@ -33,15 +35,25 @@ public class LangChain4jToolBridge {
 
     private final Map<String, ToolDefinition> toolMap;
     private final AgentToolMetrics toolMetrics;
+    private final AgentUiEventBus uiEventBus;
 
+    @Autowired
     public LangChain4jToolBridge(List<ToolDefinition> toolDefinitions,
-                                 AgentToolMetrics toolMetrics) {
+                                 AgentToolMetrics toolMetrics,
+                                 AgentUiEventBus uiEventBus) {
         this.toolMap = toolDefinitions.stream()
                 .collect(Collectors.toMap(ToolDefinition::name, t -> t));
         this.toolMetrics = toolMetrics;
+        this.uiEventBus = uiEventBus;
         log.info("LangChain4j ToolBridge 初始化: 已注册 {} 个工具 — {}",
                 toolDefinitions.size(),
                 toolDefinitions.stream().map(ToolDefinition::name).toList());
+    }
+
+    /** Backward-compatible constructor for focused unit tests and external embedding code. */
+    public LangChain4jToolBridge(List<ToolDefinition> toolDefinitions,
+                                 AgentToolMetrics toolMetrics) {
+        this(toolDefinitions, toolMetrics, new AgentUiEventBus());
     }
 
     // ========================================================================
@@ -124,14 +136,51 @@ public class LangChain4jToolBridge {
         Map<String, Object> toolArgs = args;
         args = summarizeArgs(args);
         log.info("Tool call: name={}", toolName);
+        long startedNanos = System.nanoTime();
+        if (context.channel() == com.firedemo.demo.agent.context.AgentChannel.WEB) {
+            uiEventBus.publish(context.traceId(), "tool_started", Map.of(
+                    "tool", toolName,
+                    "label", toolLabel(toolName)));
+        }
         try {
             log.debug("ToolBridge 执行: name={}, args={}", toolName, args);
-            return toolMetrics.record(toolName,
+            String result = toolMetrics.record(toolName,
                     () -> trace.traceToolCall(toolName, () -> tool.execute(toolArgs, context)));
+            if (context.channel() == com.firedemo.demo.agent.context.AgentChannel.WEB) {
+                uiEventBus.publish(context.traceId(), "tool_completed", Map.of(
+                        "tool", toolName,
+                        "label", toolLabel(toolName),
+                        "success", true,
+                        "elapsedMs", elapsedMillis(startedNanos)));
+            }
+            return result;
         } catch (Exception e) {
             log.error("ToolBridge 工具执行失败: name={}", toolName, e);
+            if (context.channel() == com.firedemo.demo.agent.context.AgentChannel.WEB) {
+                uiEventBus.publish(context.traceId(), "tool_completed", Map.of(
+                        "tool", toolName,
+                        "label", toolLabel(toolName),
+                        "success", false,
+                        "elapsedMs", elapsedMillis(startedNanos)));
+            }
             return "工具执行出错: " + e.getMessage();
         }
+    }
+
+    private long elapsedMillis(long startedNanos) {
+        return Math.max(0L, (System.nanoTime() - startedNanos) / 1_000_000L);
+    }
+
+    private String toolLabel(String toolName) {
+        return switch (toolName) {
+            case "searchKnowledge" -> "检索教学知识库";
+            case "analyzeVisualContent" -> "分析图片内容";
+            case "queryClassStatus" -> "查询班级学情";
+            case "queryHomeworkTasks" -> "查询作业任务";
+            case "queryStudentStats" -> "查询学生成绩";
+            case "getCurrentTime" -> "获取当前时间";
+            default -> "调用教学工具";
+        };
     }
 
     private Map<String, Object> summarizeArgs(Map<String, Object> args) {

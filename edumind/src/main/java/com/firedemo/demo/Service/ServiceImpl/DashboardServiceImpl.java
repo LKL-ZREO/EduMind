@@ -1,23 +1,20 @@
 package com.firedemo.demo.Service.ServiceImpl;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.firedemo.demo.DTO.ClassInfoDTO;
 import com.firedemo.demo.DTO.DashboardMetricsDTO;
 import com.firedemo.demo.DTO.FrequentErrorDTO;
 import com.firedemo.demo.DTO.KnowledgeMasteryDTO;
-import com.firedemo.demo.DTO.KnowledgeReclassificationResult;
 import com.firedemo.demo.DTO.ScoreDistributionDTO;
+import com.firedemo.demo.DTO.StudentInsightDTO;
 import com.firedemo.demo.DTO.StudentOverviewDTO;
 import com.firedemo.demo.DTO.TeacherKnowledgeDTO;
-import com.firedemo.demo.Entity.ClassInfo;
 import com.firedemo.demo.Entity.Submission;
-import com.firedemo.demo.Entity.SubmissionError;
 import com.firedemo.demo.Entity.TeacherKnowledge;
 import com.firedemo.demo.Entity.User;
 import com.firedemo.demo.Service.DashboardService;
-import com.firedemo.demo.Service.OpenClawService;
-import com.firedemo.demo.infrastructure.ai.StructuredOutputInvoker;
-import com.firedemo.demo.infrastructure.ai.StructuredOutputValidationException;
+import com.firedemo.demo.Service.KnowledgePointVocabularyService;
+import com.firedemo.demo.common.exception.BusinessException;
+import com.firedemo.demo.common.exception.ErrorCode;
 import com.firedemo.demo.mapper.ClassInfoMapper;
 import com.firedemo.demo.mapper.LegacyHomeworkEvaluationStatsMapper;
 import com.firedemo.demo.mapper.SubmissionErrorMapper;
@@ -31,26 +28,16 @@ import org.springframework.cache.annotation.CacheConfig;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.cache.annotation.Caching;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Properties;
 import java.util.Set;
-import java.util.stream.Collectors;
-
-import jakarta.annotation.PostConstruct;
 
 @Slf4j
 @Service
@@ -58,35 +45,13 @@ import jakarta.annotation.PostConstruct;
 @CacheConfig(cacheNames = "dashboard")
 public class DashboardServiceImpl implements DashboardService {
 
-    /** 从 concept-keywords.properties 加载的概念关键词映射 */
-    private final Map<String, String> conceptKeywords = new HashMap<>();
-
     private final LegacyHomeworkEvaluationStatsMapper legacyEvaluationStatsMapper;
     private final UserMapper userMapper;
     private final ClassInfoMapper classInfoMapper;
     private final SubmissionMapper submissionMapper;
     private final TeacherKnowledgeMapper teacherKnowledgeMapper;
     private final SubmissionErrorMapper submissionErrorMapper;
-    private final OpenClawService openClawService;
-    private final StructuredOutputInvoker structuredOutputInvoker;
     private final CacheManager cacheManager;
-
-    @PostConstruct
-    void loadConceptKeywords() {
-        Properties props = new Properties();
-        try (InputStream in = getClass().getClassLoader()
-                .getResourceAsStream("prompts/concept-keywords.properties")) {
-            if (in != null) {
-                props.load(new InputStreamReader(in, StandardCharsets.UTF_8));
-                props.forEach((k, v) -> conceptKeywords.put((String) k, (String) v));
-                log.info("Loaded {} concept keywords", conceptKeywords.size());
-            } else {
-                log.warn("concept-keywords.properties not found");
-            }
-        } catch (IOException | RuntimeException e) {
-            log.error("Failed to load concept-keywords.properties", e);
-        }
-    }
 
     // ======================== Core Metrics ========================
 
@@ -216,50 +181,29 @@ public class DashboardServiceImpl implements DashboardService {
     @Override
     @Cacheable(key = "'errors:' + #classId", sync = true)
     public List<FrequentErrorDTO> getFrequentErrors(Long classId, String knowledgePoint) {
-        List<SubmissionError> errors;
-        if (knowledgePoint != null && !knowledgePoint.isEmpty() && !"全部".equals(knowledgePoint)) {
-            errors = submissionErrorMapper.selectByClassIdAndKnowledgePoint(classId, knowledgePoint, 50);
-        } else {
-            errors = submissionErrorMapper.selectByClassIdAndKnowledgePoint(classId, null, 50);
-        }
-
-        Map<String, ErrorAgg> aggMap = new LinkedHashMap<>();
-        for (SubmissionError e : errors) {
-            String key = e.getErrorText();
-            ErrorAgg agg = aggMap.computeIfAbsent(key, k -> new ErrorAgg());
-            agg.count++;
-            agg.knowledgePoint = e.getKnowledgePoint();
-            String sev = e.getSeverity();
-            if (sev != null) {
-                if ("critical".equals(sev) || "high".equals(sev)) agg.difficulty = "high";
-                else if ("major".equals(sev) || "medium".equals(sev)) {
-                    if (!"high".equals(agg.difficulty)) agg.difficulty = "medium";
-                } else {
-                    if (agg.difficulty == null) agg.difficulty = "low";
-                }
-            }
-        }
-
-        return aggMap.entrySet().stream()
-                .sorted(Map.Entry.<String, ErrorAgg>comparingByValue(Comparator.comparingInt(a -> -a.count)))
-                .limit(10)
-                .map(entry -> {
+        int totalStudents = Math.max(0,
+                valueOrZero(submissionMapper.countDistinctStudentsByClassId(classId)));
+        return submissionErrorMapper.selectFrequentErrorStats(classId, knowledgePoint, 20).stream()
+                .map(row -> {
                     FrequentErrorDTO dto = new FrequentErrorDTO();
-                    dto.setQuestion(entry.getKey());
-                    String diff = entry.getValue().difficulty != null ? entry.getValue().difficulty : "medium";
-                    dto.setDifficulty(diff);
-                    dto.setDifficultyLabel(convertDifficultyLabel(diff));
-                    dto.setErrorCount(entry.getValue().count);
-                    dto.setKnowledgePoint(entry.getValue().knowledgePoint);
+                    dto.setQuestion((String) row.get("question"));
+                    dto.setKnowledgePoint((String) row.get("knowledge_point"));
+                    int severityRank = intValue(row.get("severity_rank"));
+                    String difficulty = severityRank >= 3 ? "high" : severityRank == 2 ? "medium" : "low";
+                    dto.setDifficulty(difficulty);
+                    dto.setDifficultyLabel(convertDifficultyLabel(difficulty));
+                    dto.setErrorCount(intValue(row.get("error_count")));
+                    int affectedStudents = intValue(row.get("affected_student_count"));
+                    dto.setAffectedStudentCount(affectedStudents);
+                    double affectedRate = totalStudents > 0
+                            ? Math.round(affectedStudents * 1000.0 / totalStudents) / 10.0 : 0.0;
+                    dto.setAffectedStudentRate(affectedRate);
+                    dto.setErrorRate((int) Math.round(affectedRate));
+                    dto.setAssignmentCount(intValue(row.get("assignment_count")));
+                    dto.setLatestSeenAt(localDateTimeValue(row.get("latest_seen_at")));
                     return dto;
                 })
-                .collect(Collectors.toList());
-    }
-
-    private static class ErrorAgg {
-        int count;
-        String difficulty;
-        String knowledgePoint;
+                .toList();
     }
 
     // ======================== Student Overview ========================
@@ -329,6 +273,108 @@ public class DashboardServiceImpl implements DashboardService {
         return result;
     }
 
+    @Override
+    public StudentInsightDTO getStudentInsight(Long classId, String studentId, String studentName) {
+        String normalizedStudentId = trimToNull(studentId);
+        String normalizedStudentName = trimToNull(studentName);
+        if (normalizedStudentId == null && normalizedStudentName == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "学生学号或姓名至少填写一项");
+        }
+
+        List<Submission> rawSubmissions = normalizedStudentId != null
+                ? submissionMapper.selectByStudentIdAndClassOrderByNo(normalizedStudentId, classId)
+                : submissionMapper.selectByStudentAndClassOrderByNo(normalizedStudentName, classId);
+        List<Submission> submissions = rawSubmissions.stream()
+                .filter(submission -> submission.getTotalScore() != null)
+                .toList();
+        if (submissions.isEmpty()) {
+            throw new BusinessException(ErrorCode.DATA_NOT_FOUND.getCode(), "该学生暂无有效作业记录");
+        }
+
+        String resolvedStudentId = normalizedStudentId != null
+                ? normalizedStudentId : submissions.get(0).getStudentId();
+        String resolvedStudentName = normalizedStudentName != null
+                ? normalizedStudentName : submissions.get(0).getStudentName();
+
+        List<StudentInsightDTO.ScorePoint> scoreHistory = new ArrayList<>();
+        int previousScore = 0;
+        for (int index = 0; index < submissions.size(); index++) {
+            Submission submission = submissions.get(index);
+            int score = submission.getTotalScore();
+            scoreHistory.add(StudentInsightDTO.ScorePoint.builder()
+                    .no(index + 1)
+                    .submissionId(submission.getId())
+                    .assignmentName(submission.getAssignmentName())
+                    .date(submission.getSubmittedAt() == null
+                            ? "" : submission.getSubmittedAt().toLocalDate().toString())
+                    .score(score)
+                    .change(index == 0 ? 0 : score - previousScore)
+                    .late(Boolean.TRUE.equals(submission.getIsLate()))
+                    .build());
+            previousScore = score;
+        }
+
+        int average = (int) Math.round(submissions.stream()
+                .mapToInt(Submission::getTotalScore).average().orElse(0));
+        int latest = submissions.get(submissions.size() - 1).getTotalScore();
+        int highest = submissions.stream().mapToInt(Submission::getTotalScore).max().orElse(0);
+        int lowest = submissions.stream().mapToInt(Submission::getTotalScore).min().orElse(0);
+        int latestChange = scoreHistory.get(scoreHistory.size() - 1).getChange();
+        int lateCount = (int) submissions.stream().filter(item -> Boolean.TRUE.equals(item.getIsLate())).count();
+
+        List<StudentInsightDTO.WeakKnowledgePoint> weakPoints = submissionErrorMapper
+                .selectStudentKnowledgeStats(classId, resolvedStudentId, resolvedStudentName, 8).stream()
+                .map(row -> StudentInsightDTO.WeakKnowledgePoint.builder()
+                        .name((String) row.get("name"))
+                        .errorCount(intValue(row.get("error_count")))
+                        .criticalCount(intValue(row.get("critical_count")))
+                        .latestSeenAt(localDateTimeValue(row.get("latest_seen_at")))
+                        .build())
+                .toList();
+
+        List<StudentInsightDTO.RecentError> recentErrors = submissionErrorMapper
+                .selectRecentStudentErrors(classId, resolvedStudentId, resolvedStudentName, 12).stream()
+                .map(row -> StudentInsightDTO.RecentError.builder()
+                        .id(longValue(row.get("id")))
+                        .submissionId(longValue(row.get("submission_id")))
+                        .assignmentName((String) row.get("assignment_name"))
+                        .knowledgePoint((String) row.get("knowledge_point"))
+                        .errorText((String) row.get("error_text"))
+                        .severity((String) row.get("severity"))
+                        .createdAt(localDateTimeValue(row.get("created_at")))
+                        .build())
+                .toList();
+
+        int totalErrors = weakPoints.stream()
+                .mapToInt(StudentInsightDTO.WeakKnowledgePoint::getErrorCount).sum();
+        int criticalErrors = weakPoints.stream()
+                .mapToInt(StudentInsightDTO.WeakKnowledgePoint::getCriticalCount).sum();
+        StudentInsightDTO.Risk risk = buildStudentRisk(
+                average, latest, latestChange, lateCount, submissions, weakPoints);
+
+        return StudentInsightDTO.builder()
+                .student(StudentInsightDTO.StudentIdentity.builder()
+                        .studentId(resolvedStudentId)
+                        .name(resolvedStudentName)
+                        .build())
+                .summary(StudentInsightDTO.Summary.builder()
+                        .avgScore(average)
+                        .latestScore(latest)
+                        .highestScore(highest)
+                        .lowestScore(lowest)
+                        .completedCount(submissions.size())
+                        .lateCount(lateCount)
+                        .totalErrorCount(totalErrors)
+                        .criticalErrorCount(criticalErrors)
+                        .latestChange(latestChange)
+                        .build())
+                .risk(risk)
+                .scoreHistory(scoreHistory)
+                .weakKnowledgePoints(weakPoints)
+                .recentErrors(recentErrors)
+                .build();
+    }
+
     // ======================== Class List ========================
 
     @Override
@@ -364,26 +410,118 @@ public class DashboardServiceImpl implements DashboardService {
         @CacheEvict(key = "'students:' + #classId")
     })
     public void saveTeacherKnowledge(Long classId, Long userId, List<TeacherKnowledgeDTO> items) {
-        teacherKnowledgeMapper.delete(
-                new LambdaQueryWrapper<TeacherKnowledge>()
-                        .eq(TeacherKnowledge::getClassId, classId));
-        if (items != null && !items.isEmpty()) {
-            List<TeacherKnowledge> batch = new ArrayList<>(items.size());
-            for (int i = 0; i < items.size(); i++) {
-                TeacherKnowledgeDTO dto = items.get(i);
-                TeacherKnowledge tk = new TeacherKnowledge();
-                tk.setClassId(classId);
-                tk.setName(dto.getName());
-                tk.setColor(dto.getColor() != null ? dto.getColor() : "#1890ff");
-                tk.setSortOrder(dto.getSortOrder() != null ? dto.getSortOrder() : i);
-                tk.setCreatedBy(userId);
-                batch.add(tk);
-            }
-            teacherKnowledgeMapper.insertBatch(batch);
+        if (items == null || items.isEmpty()) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "知识点列表不能为空");
         }
         ensureOtherExists(classId, userId);
-        reclassifyUnclassified(classId);
-        reclassifyWithAI(classId);
+        List<TeacherKnowledge> existing = teacherKnowledgeMapper.selectByClassId(classId);
+        Map<Long, TeacherKnowledge> existingById = existing.stream()
+                .collect(java.util.stream.Collectors.toMap(TeacherKnowledge::getId, item -> item));
+        Map<String, TeacherKnowledge> existingByName = existing.stream()
+                .collect(java.util.stream.Collectors.toMap(TeacherKnowledge::getName, item -> item));
+
+        List<KnowledgeSyncItem> requested = new ArrayList<>();
+        Set<String> requestedNames = new java.util.LinkedHashSet<>();
+        Set<Long> requestedIds = new java.util.HashSet<>();
+        Set<Long> retainedIds = new java.util.HashSet<>();
+        int fallbackOrder = 0;
+        for (TeacherKnowledgeDTO dto : items) {
+            if (dto == null) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "知识点列表包含空项");
+            }
+            if (dto.getId() != null && !requestedIds.add(dto.getId())) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "知识点ID不能重复");
+            }
+            String name = requireKnowledgeName(dto.getName());
+            if (KnowledgePointVocabularyService.OTHER.equals(name)) {
+                if (dto.getId() != null) {
+                    TeacherKnowledge item = existingById.get(dto.getId());
+                    if (item != null && !KnowledgePointVocabularyService.OTHER.equals(item.getName())) {
+                        throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "不能将普通知识点改名为‘其他’");
+                    }
+                }
+                continue;
+            }
+            if (!requestedNames.add(name)) {
+                throw new BusinessException(ErrorCode.DATA_ALREADY_EXISTS.getCode(), "知识点名称不能重复：" + name);
+            }
+
+            TeacherKnowledge matched = null;
+            if (dto.getId() != null) {
+                matched = existingById.get(dto.getId());
+                if (matched == null || !classId.equals(matched.getClassId())) {
+                    throw new BusinessException(ErrorCode.DATA_NOT_FOUND.getCode(), "知识点不存在或不属于当前班级");
+                }
+                if (KnowledgePointVocabularyService.OTHER.equals(matched.getName())) {
+                    throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "系统兜底知识点‘其他’不可修改");
+                }
+            } else if (existingByName.containsKey(name)
+                    && !KnowledgePointVocabularyService.OTHER.equals(name)) {
+                matched = existingByName.get(name);
+            }
+            if (matched != null) retainedIds.add(matched.getId());
+            int sortOrder = dto.getSortOrder() == null ? fallbackOrder : dto.getSortOrder();
+            requested.add(new KnowledgeSyncItem(matched, name, normalizeColor(dto.getColor()), sortOrder));
+            fallbackOrder++;
+        }
+
+        List<KnowledgeRename> renames = new ArrayList<>();
+        for (KnowledgeSyncItem item : requested) {
+            TeacherKnowledge current = item.existing();
+            if (current == null || current.getName().equals(item.name())) continue;
+            String temporaryName = "__kp_tmp_" + current.getId() + "_"
+                    + java.util.UUID.randomUUID().toString().substring(0, 8);
+            submissionErrorMapper.updateKnowledgePoint(classId, current.getName(), temporaryName);
+            renames.add(new KnowledgeRename(current, temporaryName, item.name()));
+            current.setName(temporaryName);
+            current.setUpdatedAt(LocalDateTime.now());
+            teacherKnowledgeMapper.updateById(current);
+        }
+
+        for (TeacherKnowledge current : existing) {
+            if (KnowledgePointVocabularyService.OTHER.equals(current.getName())) continue;
+            if (retainedIds.contains(current.getId())) continue;
+            String originalName = renames.stream()
+                    .filter(rename -> rename.knowledge().getId().equals(current.getId()))
+                    .map(KnowledgeRename::temporaryName)
+                    .findFirst()
+                    .orElse(current.getName());
+            submissionErrorMapper.updateKnowledgePoint(
+                    classId, originalName, KnowledgePointVocabularyService.OTHER);
+            teacherKnowledgeMapper.deleteById(current.getId());
+        }
+
+        Map<Long, KnowledgeSyncItem> syncByExistingId = requested.stream()
+                .filter(item -> item.existing() != null)
+                .collect(java.util.stream.Collectors.toMap(item -> item.existing().getId(), item -> item));
+        for (KnowledgeRename rename : renames) {
+            KnowledgeSyncItem item = syncByExistingId.get(rename.knowledge().getId());
+            submissionErrorMapper.updateKnowledgePoint(classId, rename.temporaryName(), rename.finalName());
+            TeacherKnowledge knowledge = rename.knowledge();
+            knowledge.setName(rename.finalName());
+            knowledge.setColor(item.color());
+            knowledge.setSortOrder(item.sortOrder());
+            knowledge.setUpdatedAt(LocalDateTime.now());
+            teacherKnowledgeMapper.updateById(knowledge);
+        }
+
+        for (KnowledgeSyncItem item : requested) {
+            if (item.existing() != null) {
+                if (item.existing().getName().startsWith("__kp_tmp_")) continue;
+                item.existing().setColor(item.color());
+                item.existing().setSortOrder(item.sortOrder());
+                item.existing().setUpdatedAt(LocalDateTime.now());
+                teacherKnowledgeMapper.updateById(item.existing());
+                continue;
+            }
+            TeacherKnowledge knowledge = new TeacherKnowledge();
+            knowledge.setClassId(classId);
+            knowledge.setName(item.name());
+            knowledge.setColor(item.color());
+            knowledge.setSortOrder(item.sortOrder());
+            knowledge.setCreatedBy(userId);
+            teacherKnowledgeMapper.insert(knowledge);
+        }
     }
 
     @Override
@@ -396,29 +534,41 @@ public class DashboardServiceImpl implements DashboardService {
         @CacheEvict(key = "'students:' + #classId")
     })
     public void addTeacherKnowledge(Long classId, Long userId, String name, String color) {
+        String normalizedName = requireKnowledgeName(name);
+        if (KnowledgePointVocabularyService.OTHER.equals(normalizedName)) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "‘其他’是系统兜底知识点，无需手动添加");
+        }
+        if (teacherKnowledgeMapper.exists(classId, normalizedName)) {
+            throw new BusinessException(ErrorCode.DATA_ALREADY_EXISTS.getCode(), "知识点已存在：" + normalizedName);
+        }
         TeacherKnowledge tk = new TeacherKnowledge();
         tk.setClassId(classId);
-        tk.setName(name);
-        tk.setColor(color != null ? color : "#1890ff");
+        tk.setName(normalizedName);
+        tk.setColor(normalizeColor(color));
         tk.setSortOrder(0);
         tk.setCreatedBy(userId);
         teacherKnowledgeMapper.insert(tk);
         ensureOtherExists(classId, userId);
-        reclassifyUnclassified(classId);
-        reclassifyWithAI(classId);
     }
 
     @Override
-    public void deleteTeacherKnowledge(Long id) {
+    @Transactional(rollbackFor = Exception.class)
+    public Long deleteTeacherKnowledge(Long id) {
         TeacherKnowledge tk = teacherKnowledgeMapper.selectById(id);
-        if (tk != null) {
-            teacherKnowledgeMapper.deleteById(id);
-            // 手动驱逐缓存 — 使用 tk.getClassId() 而非错误的 #classId SpEL
-            evictDashboardCache(tk.getClassId());
+        if (tk == null) {
+            throw new BusinessException(ErrorCode.DATA_NOT_FOUND);
         }
+        if (KnowledgePointVocabularyService.OTHER.equals(tk.getName())) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "系统兜底知识点‘其他’不可删除");
+        }
+        submissionErrorMapper.updateKnowledgePoint(
+                tk.getClassId(), tk.getName(), KnowledgePointVocabularyService.OTHER);
+        teacherKnowledgeMapper.deleteById(id);
+        evictDashboardCache(tk.getClassId());
+        return tk.getClassId();
     }
 
-    // ======================== Ensure "Other" + Reclassify ========================
+    // ======================== Ensure "Other" ========================
 
     private void ensureOtherExists(Long classId, Long userId) {
         if (teacherKnowledgeMapper.exists(classId, "其他")) return;
@@ -429,130 +579,6 @@ public class DashboardServiceImpl implements DashboardService {
         other.setSortOrder(Integer.MAX_VALUE);
         other.setCreatedBy(userId);
         teacherKnowledgeMapper.insert(other);
-    }
-
-    private void reclassifyUnclassified(Long classId) {
-        List<SubmissionError> unclassified = submissionErrorMapper.selectUnclassifiedByClassId(classId);
-        if (unclassified.isEmpty()) return;
-
-        List<TeacherKnowledge> kps = teacherKnowledgeMapper.selectByClassId(classId);
-        if (kps.isEmpty()) return;
-
-        Map<String, String> keywordMap = buildKeywordMap(kps);
-        LocalDateTime now = LocalDateTime.now();
-        List<SubmissionError> toUpdate = new ArrayList<>();
-        for (SubmissionError se : unclassified) {
-            String match = matchKeyword(se.getErrorText(), keywordMap);
-            if (match != null && !"其他".equals(match)) {
-                se.setKnowledgePoint(match);
-                se.setUpdatedAt(now);
-                toUpdate.add(se);
-            }
-        }
-        if (!toUpdate.isEmpty()) {
-            for (SubmissionError se : toUpdate) {
-                submissionErrorMapper.updateById(se);
-            }
-            log.info("Keyword reclassify done: classId={}, reclassified={}", classId, toUpdate.size());
-        }
-    }
-
-    @Async
-    void reclassifyWithAI(Long classId) {
-        List<SubmissionError> unclassified = submissionErrorMapper.selectUnclassifiedByClassId(classId);
-        if (unclassified.isEmpty()) return;
-
-        List<TeacherKnowledge> kps = teacherKnowledgeMapper.selectByClassId(classId);
-        if (kps.isEmpty()) return;
-
-        List<String> kpNames = kps.stream().map(TeacherKnowledge::getName).collect(Collectors.toList());
-
-        String prompt = buildReclassifyPrompt(unclassified, kpNames);
-        try {
-            KnowledgeReclassificationResult response = structuredOutputInvoker.invoke(
-                    p -> openClawService.chat(p, "reclassify_" + classId), prompt,
-                    KnowledgeReclassificationResult.class, "knowledge-reclassification",
-                    result -> validateReclassification(result, unclassified.size(), Set.copyOf(kpNames)));
-
-            int reclassified = 0;
-            List<SubmissionError> batch = new ArrayList<>();
-            for (KnowledgeReclassificationResult.Item item : response.getResults()) {
-                int index = item.getIndex();
-                String kp = item.getKnowledgePoint();
-                if (!"其他".equals(kp) && index >= 0 && index < unclassified.size()) {
-                    SubmissionError se = unclassified.get(index);
-                    se.setKnowledgePoint(kp);
-                    se.setUpdatedAt(LocalDateTime.now());
-                    batch.add(se);
-                    reclassified++;
-                }
-            }
-            if (!batch.isEmpty()) {
-                for (SubmissionError e : batch) {
-                    submissionErrorMapper.updateById(e);
-                }
-            }
-            if (reclassified > 0) {
-                log.info("AI reclassify done: classId={}, reclassified={}", classId, reclassified);
-            }
-        } catch (Exception e) {
-            log.warn("AI reclassify failed for classId={}: {}", classId, e.getMessage());
-        }
-    }
-
-    private void validateReclassification(KnowledgeReclassificationResult result,
-                                          int errorCount, Set<String> allowedKnowledgePoints) {
-        List<String> violations = new ArrayList<>();
-        for (int i = 0; i < result.getResults().size(); i++) {
-            KnowledgeReclassificationResult.Item item = result.getResults().get(i);
-            if (item.getIndex() >= errorCount) {
-                violations.add("results[" + i + "].index: out of range");
-            }
-            if (!"其他".equals(item.getKnowledgePoint())
-                    && !allowedKnowledgePoints.contains(item.getKnowledgePoint())) {
-                violations.add("results[" + i + "].knowledgePoint: not in allowed values");
-            }
-        }
-        if (!violations.isEmpty()) throw new StructuredOutputValidationException(violations);
-    }
-
-    private String buildReclassifyPrompt(List<SubmissionError> unclassified, List<String> kpNames) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("现有 C 语言错误列表（共 ").append(unclassified.size()).append(" 条）：\n");
-        for (int i = 0; i < unclassified.size(); i++) {
-            sb.append(i).append(": \"").append(unclassified.get(i).getErrorText()).append("\"\n");
-        }
-        sb.append("\n请将每条错误归类到以下知识点之一：\n");
-        sb.append(kpNames).append("\n\n");
-        sb.append("返回纯 JSON：\n");
-        sb.append("{\"results\": [{\"index\":0, \"knowledgePoint\":\"指针\"}, ...]}\n\n");
-        sb.append("规则：\n- 不属于任何一个的填\"其他\"\n- 不要输出任何解释");
-        return sb.toString();
-    }
-
-    private Map<String, String> buildKeywordMap(List<TeacherKnowledge> kps) {
-        Map<String, String> result = new LinkedHashMap<>();
-        Set<String> kpNames = kps.stream().map(TeacherKnowledge::getName).collect(Collectors.toSet());
-        for (Map.Entry<String, String> e : conceptKeywords.entrySet()) {
-            if (kpNames.contains(e.getValue())) {
-                result.put(e.getKey(), e.getValue());
-            }
-        }
-        for (String name : kpNames) {
-            result.putIfAbsent(name, name);
-        }
-        return result;
-    }
-
-    private String matchKeyword(String errorText, Map<String, String> keywordMap) {
-        if (errorText == null) return null;
-        String lower = errorText.toLowerCase();
-        for (Map.Entry<String, String> e : keywordMap.entrySet()) {
-            if (lower.contains(e.getKey().toLowerCase())) {
-                return e.getValue();
-            }
-        }
-        return null;
     }
 
     // ======================== Warning Students ========================
@@ -602,7 +628,110 @@ public class DashboardServiceImpl implements DashboardService {
         return (int) studentAvgs.values().stream().filter(avg -> avg < 60).count();
     }
 
+    private StudentInsightDTO.Risk buildStudentRisk(
+            int average,
+            int latest,
+            int latestChange,
+            int lateCount,
+            List<Submission> submissions,
+            List<StudentInsightDTO.WeakKnowledgePoint> weakPoints) {
+        List<String> reasons = new ArrayList<>();
+        List<String> suggestions = new ArrayList<>();
+        boolean highRisk = false;
+
+        if (average < 60) {
+            reasons.add("累计平均成绩低于60分");
+            suggestions.add("优先安排基础知识补救，并检查最近作业中的共性错误");
+            highRisk = true;
+        } else if (average < 70) {
+            reasons.add("累计平均成绩处于60至69分区间");
+            suggestions.add("安排一组基础巩固练习，确认核心概念掌握情况");
+        }
+        if (latest < 60) {
+            reasons.add("最近一次作业未达到及格线");
+            suggestions.add("回看最近一次作业，优先处理影响得分最大的错误");
+            highRisk = true;
+        }
+        boolean consecutiveDecline = submissions.size() >= 3
+                && submissions.get(submissions.size() - 3).getTotalScore()
+                    > submissions.get(submissions.size() - 2).getTotalScore()
+                && submissions.get(submissions.size() - 2).getTotalScore() > latest;
+        if (consecutiveDecline) {
+            reasons.add("最近两次成绩连续下降");
+            suggestions.add("对比最近三次作业，确认下降是否集中在同一知识点");
+            highRisk = true;
+        } else if (latestChange <= -10) {
+            reasons.add("最近一次成绩下降10分以上");
+            suggestions.add("确认本次题目难度变化，并查看新增错误类型");
+        }
+        if (lateCount > 0) {
+            reasons.add("存在" + lateCount + "次迟交记录");
+            suggestions.add("了解迟交原因，并确认后续任务完成节奏");
+        }
+        weakPoints.stream()
+                .filter(point -> !KnowledgePointVocabularyService.OTHER.equals(point.getName()))
+                .findFirst()
+                .filter(point -> point.getErrorCount() >= 3)
+                .ifPresent(point -> {
+                    reasons.add(point.getName() + "累计出现" + point.getErrorCount() + "条错误");
+                    suggestions.add("针对“" + point.getName() + "”安排讲解或分层练习");
+                });
+
+        if (reasons.isEmpty()) reasons.add("当前未发现明确风险信号");
+        if (suggestions.isEmpty()) suggestions.add("保持当前学习节奏，并继续观察下一次作业表现");
+        if (submissions.size() < 3) suggestions.add("当前样本较少，建议积累至少3次作业后判断长期趋势");
+
+        String level = highRisk ? "HIGH"
+                : reasons.size() > 1 || average < 70 || latestChange < 0 || lateCount > 0 ? "MEDIUM" : "LOW";
+        return StudentInsightDTO.Risk.builder()
+                .level(level)
+                .reasons(reasons.stream().distinct().toList())
+                .suggestions(suggestions.stream().distinct().toList())
+                .build();
+    }
+
     // ======================== Utils ========================
+
+    private String requireKnowledgeName(String value) {
+        String name = trimToNull(value);
+        if (name == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "知识点名称不能为空");
+        }
+        if (name.length() > 100) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "知识点名称不能超过100个字符");
+        }
+        return name;
+    }
+
+    private String normalizeColor(String color) {
+        String normalized = trimToNull(color);
+        return normalized != null && normalized.matches("#[0-9a-fA-F]{6}")
+                ? normalized : "#1890ff";
+    }
+
+    private String trimToNull(String value) {
+        if (value == null) return null;
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private int valueOrZero(Integer value) {
+        return value == null ? 0 : value;
+    }
+
+    private int intValue(Object value) {
+        return value instanceof Number number ? number.intValue() : 0;
+    }
+
+    private Long longValue(Object value) {
+        return value instanceof Number number ? number.longValue() : null;
+    }
+
+    private LocalDateTime localDateTimeValue(Object value) {
+        if (value instanceof LocalDateTime localDateTime) return localDateTime;
+        if (value instanceof java.sql.Timestamp timestamp) return timestamp.toLocalDateTime();
+        return null;
+    }
 
     /**
      * 统一驱逐 classId 相关的所有仪表盘缓存
@@ -622,9 +751,15 @@ public class DashboardServiceImpl implements DashboardService {
     private String convertDifficultyLabel(String priority) {
         switch (priority) {
             case "high":
-            case "critical": return "困难";
+            case "critical": return "高严重度";
             case "medium": return "中等";
-            default: return "简单";
+            default: return "一般";
         }
     }
+
+    private record KnowledgeSyncItem(
+            TeacherKnowledge existing, String name, String color, int sortOrder) {}
+
+    private record KnowledgeRename(
+            TeacherKnowledge knowledge, String temporaryName, String finalName) {}
 }
