@@ -4,7 +4,7 @@ import {
   renderTextWithBreaks,
   sanitizeHtml,
   sanitizeRenderedMathHtml,
-} from '@/utils/safeHtml'
+} from '@/shared/utils/safeHtml'
 
 describe('safeHtml', () => {
   it('removes executable elements and event handlers', () => {

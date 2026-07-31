@@ -43,7 +43,7 @@ Docker Compose 默认启动 PostgreSQL、Redis、MinIO、应用、Nginx、备份
 | ------------------- | ---------------------------------------------- | -------- |
 | **OneBot / NapCat** | QQ 机器人客户端，通过 WebSocket 与应用双向通信 | 见下方   |
 
-> **LLM 调用**：应用使用内置 LangChain4j Agent，直接连接 `.env` 中配置的 OpenAI 兼容模型端点，不依赖 OpenClaw。
+> **LLM 调用**：应用使用内置 LangChain4j Agent，直接连接 `.env` 中配置的 OpenAI 兼容模型端点，不依赖 Agent。
 
 ---
 
@@ -175,30 +175,17 @@ npm run dev
 
 ```
 edumind/
-├── src/main/java/com/firedemo/demo/
-│   ├── agent/workflow/     # Agent 工作流引擎
-│   ├── common/
-│   │   ├── ai/             # 结构化输出调用器
-│   │   ├── async/          # Redis Stream 消费者框架
-│   │   ├── cache/          # Cache-Aside / 一致性服务
-│   │   ├── limiter/        # 令牌桶限流
-│   │   └── prompt/         # Prompt 模板加载器
-│   ├── config/             # Spring 配置
-│   ├── Controller/         # REST API
-│   ├── DTO/                # 数据传输对象
-│   ├── Entity/             # 实体类
-│   ├── mapper/             # MyBatis-Plus Mapper
-│   ├── mcp/                # MCP JSON-RPC 端点 + Tool Calling
-│   ├── rag/                # RAG 检索管线（核心）
-│   │   ├── EmbeddingService    # ONNX 文本嵌入
-│   │   ├── VectorStoreService  # pgvector 向量存储
-│   │   ├── RrfFusionService    # RRF 多路融合
-│   │   ├── RerankerService     # Cross-Encoder 精排
-│   │   ├── QueryRewriter       # LLM Query 改写
-│   │   ├── SmartChunkService   # 文档智能切割
-│   │   └── RagService          # 统一检索入口
-│   ├── Service/            # 业务服务
-│   └── utils/              # 工具类与 Session 请求过滤器
+├── src/main/java/com/firedemo/edumind/
+│   ├── auth/               # 用户、会话与资源授权
+│   ├── classroom/          # 班级、课程与学生
+│   ├── teaching/           # 教学看板、备课、题库与预习
+│   ├── homework/           # 作业、提交、批改 Stream 与工作流
+│   ├── knowledge/          # 文档、共享知识库与 retrieval/RAG
+│   ├── live/               # 实时课堂与 WebSocket
+│   ├── assistant/          # Agent、聊天、工具、视觉与评测
+│   ├── integration/        # MCP、OneBot、存储和文档解析适配器
+│   ├── platform/           # 配置、缓存、消息、限流、安全与 Web
+│   └── shared/             # Result 与业务异常
 ├── src/main/resources/
 │   ├── db/migration/       # Flyway 数据库迁移脚本
 │   ├── prompts/            # LLM Prompt 模板

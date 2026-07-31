@@ -265,13 +265,16 @@ NapCat 需要单独启动。OneBot 未启用时不会影响 Web、RAG、批改�
 EduMind/
 ├── edumind/                         # Spring Boot 后端与生产编排
 │   ├── src/main/java/.../
-│   │   ├── agent/                   # LangChain4j Agent、记忆与工作流
-│   │   ├── rag/                     # 混合检索与智能切块
-│   │   ├── mcp/                     # MCP JSON-RPC 与工具定义
-│   │   ├── infrastructure/          # Stream、OneBot 等基础设施适配
+│   │   ├── auth/                    # 用户、会话与资源授权
+│   │   ├── classroom/               # 班级、课程与学生
+│   │   ├── teaching/                # 教学看板、备课、题库与预习
+│   │   ├── homework/                # 作业、提交与异步批改
+│   │   ├── knowledge/               # 文档、知识库与 RAG
 │   │   ├── live/                    # 实时课堂
-│   │   ├── eval/                    # RAG 评测
-│   │   └── Controller/ Service/ ... # Web 与业务层
+│   │   ├── assistant/               # Agent、聊天、工具、视觉与评测
+│   │   ├── integration/             # MCP、OneBot、存储与文档适配
+│   │   ├── platform/                # 配置、缓存、消息、限流与 Web
+│   │   └── shared/                  # 结果与业务异常
 │   ├── src/main/resources/
 │   │   ├── db/migration/            # Flyway 迁移
 │   │   └── prompts/                 # Prompt 模板
@@ -279,7 +282,7 @@ EduMind/
 │   ├── Dockerfile                   # 后端镜像
 │   ├── Dockerfile.nginx             # Vue 构建 + Nginx 镜像
 │   └── scripts/                     # 预检、部署、SSL、备份
-├── vue-project/                     # Vue 3 前端
+├── vue-project/                     # Vue 3 前端（app / features / shared）
 ├── .github/workflows/               # CI 与部署工作流
 └── docs/                            # 审查与项目文档
 ```

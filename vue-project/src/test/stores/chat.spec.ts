@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
-import { useChatStore } from '@/stores/chat'
+import { useChatStore } from '@/features/assistant/store'
 
 /**
  * Chat Store 测试 — AI 响应状态管理。

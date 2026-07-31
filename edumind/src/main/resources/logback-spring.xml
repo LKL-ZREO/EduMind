@@ -98,7 +98,7 @@
         <root level="INFO">
             <appender-ref ref="CONSOLE"/>
         </root>
-        <logger name="com.firedemo.demo" level="DEBUG"/>
+        <logger name="com.firedemo.edumind" level="DEBUG"/>
         <logger name="org.springframework.security" level="DEBUG"/>
         <logger name="org.springframework.web" level="INFO"/>
         <logger name="org.springframework.boot.actuate.health" level="WARN"/>
@@ -109,7 +109,7 @@
         <root level="INFO">
             <appender-ref ref="CONSOLE"/>
         </root>
-        <logger name="com.firedemo.demo" level="DEBUG"/>
+        <logger name="com.firedemo.edumind" level="DEBUG"/>
         <logger name="org.testcontainers" level="INFO"/>
         <logger name="tc.postgres" level="WARN"/>
     </springProfile>
@@ -121,7 +121,7 @@
             <appender-ref ref="ASYNC_FILE"/>
             <appender-ref ref="ERROR_FILE"/>
         </root>
-        <logger name="com.firedemo.demo" level="INFO"/>
+        <logger name="com.firedemo.edumind" level="INFO"/>
         <logger name="org.springframework.security" level="WARN"/>
         <logger name="org.springframework.web" level="WARN"/>
         <logger name="org.springframework.boot.actuate" level="WARN"/>

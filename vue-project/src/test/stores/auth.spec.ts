@@ -1,15 +1,15 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
-import { useAuthStore } from '@/stores/auth'
+import { useAuthStore } from '@/features/auth/store'
 
-vi.mock('@/api/request', () => ({
+vi.mock('@/shared/api/request', () => ({
   default: {
     get: vi.fn(),
     post: vi.fn(),
   },
 }))
 
-import request from '@/api/request'
+import request from '@/shared/api/request'
 
 describe('useAuthStore — Session Cookie authentication', () => {
   const mockGet = request.get as ReturnType<typeof vi.fn>

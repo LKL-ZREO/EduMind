@@ -1,0 +1,349 @@
+package com.firedemo.edumind.teaching;
+
+import com.firedemo.edumind.classroom.ClassInfoDTO;
+import com.firedemo.edumind.knowledge.KnowledgeReclassificationTaskDTO;
+import com.firedemo.edumind.knowledge.TeacherKnowledgeAddRequest;
+import com.firedemo.edumind.knowledge.TeacherKnowledgeSaveRequest;
+import com.firedemo.edumind.homework.Submission;
+import com.firedemo.edumind.knowledge.TeacherKnowledge;
+import com.firedemo.edumind.knowledge.KnowledgeReclassificationService;
+import com.firedemo.edumind.homework.SubmissionService;
+import com.firedemo.edumind.shared.exception.ErrorCode;
+import com.firedemo.edumind.assistant.prompt.PromptLoader;
+import com.firedemo.edumind.shared.result.Result;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.redisson.api.RBloomFilter;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.ArrayList;
+import java.util.Map;
+
+/**
+ * 仪表盘数据控制器
+ */
+@Slf4j
+@RestController
+@RequestMapping("/api/dashboard")
+@RequiredArgsConstructor
+public class DashboardController {
+
+    private final DashboardService dashboardService;
+    private final KnowledgeReclassificationService knowledgeReclassificationService;
+    private final PreLessonService preLessonService;
+    private final TimelineService timelineService;
+    private final RBloomFilter<String> classIdBloomFilter;
+    private final SubmissionService submissionService;
+    private final PromptLoader promptLoader;
+
+    // ======================== 核心数据 ========================
+
+    @GetMapping("/metrics")
+    @PreAuthorize("@sec.isClassOwner(#classId)")
+    public Result<DashboardMetricsDTO> getMetrics(@RequestParam Long classId) {
+        if (!classIdBloomFilter.contains(String.valueOf(classId)))
+            return Result.error(ErrorCode.DATA_NOT_FOUND.getCode(), "班级不存在");
+        return Result.success(dashboardService.getMetrics(classId));
+    }
+
+    @GetMapping("/score-distribution")
+    @PreAuthorize("@sec.isClassOwner(#classId)")
+    public Result<List<ScoreDistributionDTO>> getScoreDistribution(@RequestParam Long classId) {
+        if (!classIdBloomFilter.contains(String.valueOf(classId)))
+            return Result.error(ErrorCode.DATA_NOT_FOUND.getCode(), "班级不存在");
+        return Result.success(dashboardService.getScoreDistribution(classId));
+    }
+
+    @GetMapping("/knowledge-mastery")
+    @PreAuthorize("@sec.isClassOwner(#classId)")
+    public Result<List<KnowledgeMasteryDTO>> getKnowledgeMastery(@RequestParam Long classId) {
+        if (!classIdBloomFilter.contains(String.valueOf(classId)))
+            return Result.error(ErrorCode.DATA_NOT_FOUND.getCode(), "班级不存在");
+        return Result.success(dashboardService.getKnowledgeMastery(classId));
+    }
+
+    @GetMapping("/frequent-errors")
+    @PreAuthorize("@sec.isClassOwner(#classId)")
+    public Result<List<FrequentErrorDTO>> getFrequentErrors(
+            @RequestParam Long classId,
+            @RequestParam(required = false) String knowledgePoint) {
+        if (!classIdBloomFilter.contains(String.valueOf(classId)))
+            return Result.error(ErrorCode.DATA_NOT_FOUND.getCode(), "班级不存在");
+        return Result.success(dashboardService.getFrequentErrors(classId, knowledgePoint));
+    }
+
+    @GetMapping("/students")
+    @PreAuthorize("@sec.isClassOwner(#classId)")
+    public Result<List<StudentOverviewDTO>> getStudentOverview(
+            @RequestParam Long classId,
+            @RequestParam(required = false, defaultValue = "score") String sortBy,
+            @RequestParam(required = false) String keyword) {
+        if (!classIdBloomFilter.contains(String.valueOf(classId)))
+            return Result.error(ErrorCode.DATA_NOT_FOUND.getCode(), "班级不存在");
+        return Result.success(dashboardService.getStudentOverview(classId, sortBy, keyword));
+    }
+
+    @GetMapping("/student-insight")
+    @PreAuthorize("@sec.isClassOwner(#classId)")
+    public Result<StudentInsightDTO> getStudentInsight(
+            @RequestParam Long classId,
+            @RequestParam(required = false) String studentId,
+            @RequestParam(required = false) String studentName) {
+        return Result.success(dashboardService.getStudentInsight(classId, studentId, studentName));
+    }
+
+    @GetMapping("/classes")
+    public Result<List<ClassInfoDTO>> getClassList() {
+        Long userId = getCurrentUserId();
+        if (userId == null) return Result.error(401, "未登录");
+        return Result.success(dashboardService.getClassList(userId));
+    }
+
+    // ======================== 老师知识管理 ========================
+
+    @GetMapping("/teacher-knowledge")
+    @PreAuthorize("@sec.isClassOwner(#classId)")
+    public Result<List<TeacherKnowledge>> getTeacherKnowledge(@RequestParam Long classId) {
+        return Result.success(dashboardService.getTeacherKnowledge(classId));
+    }
+
+    @PostMapping("/teacher-knowledge/add")
+    @PreAuthorize("@sec.isClassOwner(#body.classId)")
+    public Result<KnowledgeReclassificationTaskDTO> addTeacherKnowledge(
+            @Valid @RequestBody TeacherKnowledgeAddRequest body) {
+        Long userId = getCurrentUserId();
+        if (!classIdBloomFilter.contains(String.valueOf(body.getClassId())))
+            return Result.error(ErrorCode.DATA_NOT_FOUND.getCode(), "班级不存在");
+        dashboardService.addTeacherKnowledge(body.getClassId(), userId, body.getName(), body.getColor());
+        return Result.success(knowledgeReclassificationService.start(body.getClassId()));
+    }
+
+    @PostMapping("/teacher-knowledge/batch")
+    @PreAuthorize("@sec.isClassOwner(#body.classId)")
+    public Result<KnowledgeReclassificationTaskDTO> batchSaveTeacherKnowledge(
+            @Valid @RequestBody TeacherKnowledgeSaveRequest body) {
+        Long userId = getCurrentUserId();
+        if (!classIdBloomFilter.contains(String.valueOf(body.getClassId())))
+            return Result.error(ErrorCode.DATA_NOT_FOUND.getCode(), "班级不存在");
+        dashboardService.saveTeacherKnowledge(body.getClassId(), userId, body.getItems());
+        return Result.success(knowledgeReclassificationService.start(body.getClassId()));
+    }
+
+    @DeleteMapping("/teacher-knowledge/{id}")
+    @PreAuthorize("@sec.isTeacherKnowledgeOwner(#id)")
+    public Result<KnowledgeReclassificationTaskDTO> deleteTeacherKnowledge(@PathVariable Long id) {
+        Long classId = dashboardService.deleteTeacherKnowledge(id);
+        return Result.success(knowledgeReclassificationService.start(classId));
+    }
+
+    @GetMapping("/knowledge-reclassification/{taskId}")
+    @PreAuthorize("@sec.isClassOwner(#classId)")
+    public Result<KnowledgeReclassificationTaskDTO> getReclassificationTask(
+            @PathVariable String taskId,
+            @RequestParam Long classId) {
+        KnowledgeReclassificationTaskDTO task = knowledgeReclassificationService.get(taskId);
+        if (task == null || !classId.equals(task.getClassId())) {
+            return Result.error(ErrorCode.DATA_NOT_FOUND.getCode(), "重分类任务不存在或已过期");
+        }
+        return Result.success(task);
+    }
+
+    // ======================== 学生成长曲线 ========================
+
+    @GetMapping("/student-progress")
+    @PreAuthorize("@sec.isClassOwner(#classId)")
+    public Result<Map<String, Object>> getStudentProgress(
+            @RequestParam String studentName,
+            @RequestParam Long classId,
+            @RequestParam(required = false) String studentId) {
+
+        List<Submission> submissions;
+        if (studentId != null && !studentId.isEmpty()) {
+            submissions = submissionService.listByStudentIdAndClassOrderByNo(studentId, classId);
+        } else {
+            submissions = submissionService.listByStudentAndClassOrderByNo(studentName, classId);
+        }
+        if (submissions.isEmpty()) return Result.error(404, "暂无提交记录");
+
+        List<Map<String, Object>> points = new ArrayList<>();
+        for (int i = 0; i < submissions.size(); i++) {
+            Submission s = submissions.get(i);
+            Map<String, Object> p = new HashMap<>();
+            p.put("no", i + 1);
+            p.put("assignmentName", s.getAssignmentName());
+            p.put("score", s.getTotalScore() != null ? s.getTotalScore() : 0);
+            p.put("date", s.getSubmittedAt() != null ? s.getSubmittedAt().toLocalDate().toString() : "");
+            p.put("change", i > 0 ? (s.getTotalScore() != null ? s.getTotalScore() : 0)
+                    - (submissions.get(i - 1).getTotalScore() != null ? submissions.get(i - 1).getTotalScore() : 0) : 0);
+            points.add(p);
+        }
+
+        double avgScore = points.stream().mapToInt(p -> (int) p.get("score")).average().orElse(0);
+        int maxScore = points.stream().mapToInt(p -> (int) p.get("score")).max().orElse(0);
+        int minScore = points.stream().mapToInt(p -> (int) p.get("score")).min().orElse(0);
+        double trend = points.size() >= 2 ? Math.round(((int) points.get(points.size() - 1).get("score") - avgScore) * 10.0) / 10.0 : 0;
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("studentName", studentName);
+        result.put("totalCount", submissions.size());
+        result.put("avgScore", Math.round(avgScore * 10.0) / 10.0);
+        result.put("maxScore", maxScore);
+        result.put("minScore", minScore);
+        result.put("trend", trend);
+        result.put("points", points);
+        return Result.success(result);
+    }
+
+    // ======================== 教案生成 ========================
+
+    @GetMapping("/weak-points")
+    @PreAuthorize("@sec.isClassOwner(#classId)")
+    public Result<List<String>> getWeakKnowledgePoints(@RequestParam Long classId) {
+        List<Map<String, Object>> weakStats = dashboardService.getFrequentErrors(classId, null).stream()
+                .filter(e -> e.getErrorCount() > 5)
+                .map(e -> {
+                    Map<String, Object> m = new HashMap<>();
+                    m.put("name", e.getKnowledgePoint());
+                    return m;
+                })
+                .collect(java.util.stream.Collectors.toList());
+        List<String> weakPoints = weakStats.stream()
+                .map(m -> (String) m.get("name"))
+                .filter(n -> n != null && !"其他".equals(n))
+                .distinct()
+                .collect(java.util.stream.Collectors.toList());
+        return Result.success(weakPoints);
+    }
+
+    @PostMapping("/teaching-plan/generate")
+    @PreAuthorize("@sec.isClassOwner(#requestDTO.classId)")
+    public Result<String> generatePlan(@RequestBody TeachingPlanRequestDTO requestDTO) {
+        StringBuilder plan = new StringBuilder();
+        String template = promptLoader.load("teaching-plan.txt");
+
+        StringBuilder goalsHtml = new StringBuilder();
+        for (String goal : requestDTO.getGoals()) {
+            goalsHtml.append("  <li>");
+            switch (goal) {
+                case "basic": goalsHtml.append("巩固基础知识，建立扎实理论功底"); break;
+                case "difficult": goalsHtml.append("突破重点难点，深入理解核心概念"); break;
+                case "extend": goalsHtml.append("举一反三，培养知识迁移能力"); break;
+                case "review": goalsHtml.append("查漏补缺，完善知识体系"); break;
+                default: goalsHtml.append(goal);
+            }
+            goalsHtml.append("</li>\n");
+        }
+
+        String knowledgePoints = String.join("、", requestDTO.getWeakKnowledgePoints());
+        String mainPoint = requestDTO.getWeakKnowledgePoints().get(0);
+        String diffPoint = requestDTO.getWeakKnowledgePoints().size() > 1
+                ? requestDTO.getWeakKnowledgePoints().get(1) : mainPoint;
+
+        String result = template
+                .replace("{{knowledgePoints}}", knowledgePoints)
+                .replace("{{goals}}", goalsHtml.toString())
+                .replace("{{mainPoint}}", mainPoint)
+                .replace("{{difficultPoint}}", diffPoint);
+        plan.append(result);
+        return Result.success(plan.toString());
+    }
+
+    // ======================== 备课学情仪表盘 ========================
+
+    @GetMapping("/pre-lesson")
+    @PreAuthorize("@sec.isClassOwner(#classId)")
+    public Result<PreLessonDTO> getPreLessonOverview(@RequestParam Long classId) {
+        if (!classIdBloomFilter.contains(String.valueOf(classId)))
+            return Result.error(ErrorCode.DATA_NOT_FOUND.getCode(), "班级不存在");
+        return Result.success(preLessonService.getPreLessonOverview(classId));
+    }
+
+    /** 教学时间线（聚合课堂/作业/预习） */
+    @GetMapping("/timeline")
+    @PreAuthorize("@sec.isClassOwner(#classId)")
+    public Result<TimelineDTO> getTimeline(@RequestParam Long classId,
+                                           @RequestParam(defaultValue = "15") int limit) {
+        if (!classIdBloomFilter.contains(String.valueOf(classId)))
+            return Result.error(ErrorCode.DATA_NOT_FOUND.getCode(), "班级不存在");
+        return Result.success(timelineService.getTimeline(classId, limit));
+    }
+
+    /** AI 备课建议（独立接口，避免主接口因 AI 调用超时） */
+    @GetMapping("/pre-lesson/suggestion")
+    @PreAuthorize("@sec.isClassOwner(#classId)")
+    public Result<Map<String, String>> getPreLessonSuggestion(@RequestParam Long classId) {
+        if (!classIdBloomFilter.contains(String.valueOf(classId)))
+            return Result.error(ErrorCode.DATA_NOT_FOUND.getCode(), "班级不存在");
+        String suggestion = preLessonService.getAiSuggestion(classId);
+        return Result.success(Map.of("suggestion", suggestion));
+    }
+
+    // ======================== 学生"不懂"标记 ========================
+
+    @GetMapping("/student-confusions")
+    @PreAuthorize("@sec.isClassOwner(#classId)")
+    public Result<List<StudentConfusionLog>> getStudentConfusions(@RequestParam Long classId) {
+        return Result.success(dashboardService.getStudentConfusions(classId));
+    }
+
+    /** 按知识点聚合计数 */
+    @GetMapping("/student-confusions/stats")
+    @PreAuthorize("@sec.isClassOwner(#classId)")
+    public Result<List<Map<String, Object>>> getConfusionStats(@RequestParam Long classId) {
+        return Result.success(dashboardService.getStudentConfusionStats(classId));
+    }
+
+    // ======================== 教学日历 ========================
+
+    @GetMapping("/teaching-calendar")
+    @PreAuthorize("@sec.isClassOwner(#classId)")
+    public Result<List<TeachingCalendar>> getTeachingCalendar(@RequestParam Long classId) {
+        return Result.success(dashboardService.getTeachingCalendar(classId));
+    }
+
+    @PostMapping("/teaching-calendar/add")
+    @PreAuthorize("@sec.isClassOwner(#plan.classId)")
+    public Result<TeachingCalendar> addPlan(@Valid @RequestBody TeachingCalendar plan) {
+        Long userId = getCurrentUserId();
+        plan.setTeacherId(userId);
+        plan.setStatus("PLANNED");
+        dashboardService.addTeachingPlan(plan);
+        return Result.success(plan);
+    }
+
+    @DeleteMapping("/teaching-calendar/{id}")
+    @PreAuthorize("@sec.isTeachingCalendarOwner(#id)")
+    public Result<Void> deletePlan(@PathVariable Long id) {
+        if (!dashboardService.deleteTeachingPlan(id, getCurrentUserId())) {
+            throw new com.firedemo.edumind.shared.exception.BusinessException(ErrorCode.DATA_NOT_FOUND);
+        }
+        return Result.success(null);
+    }
+
+    @GetMapping("/live-confusions")
+    @PreAuthorize("@sec.isClassOwner(#classId)")
+    public Result<Map<String, Object>> getLiveConfusions(@RequestParam Long classId) {
+        DashboardService.LiveConfusionSummary summary = dashboardService.getLiveConfusions(classId);
+        return Result.success(Map.of(
+                "stats", summary.stats(),
+                "total", summary.events().size(),
+                "events", summary.events()));
+    }
+
+    // ======================== 内部工具 ========================
+
+    /**
+     * 从 Spring Security 上下文获取当前登录用户 ID，供 Service 层调用使用。
+     */
+    private Long getCurrentUserId() {
+        var auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated() || auth.getDetails() == null) return null;
+        if (auth.getDetails() instanceof Long uid) return uid;
+        return null;
+    }
+}

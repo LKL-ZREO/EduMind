@@ -50,28 +50,28 @@ npm run format       # Prettier
 
 ## Architecture
 
-### Backend (`edumind/src/main/java/com/firedemo/demo/`)
+### Backend (`edumind/src/main/java/com/firedemo/edumind/`)
 
-**RAG pipeline** (`rag/`) — the core retrieval system:
+**RAG pipeline** (`knowledge/retrieval/`) — the core retrieval system:
 1. `EmbeddingService` — ONNX text embedding (DJL + ONNX Runtime, local CPU inference)
 2. `VectorStoreService` — pgvector similarity search + PostgreSQL full-text keyword search
 3. `RrfFusionService` — RRF (Reciprocal Rank Fusion) merging dual-path results
 4. `RerankerService` — Cross-encoder fine-ranking (ONNX bge-reranker-base)
 5. `QueryRewriter` — LLM-based query rewriting for vague queries and low-confidence fallback
-6. `RagService` — unified entry point orchestrating the full pipeline; used by `KnowledgeSearchTool`, `OnebotRagController`, and `DocumentServiceImpl`
+6. `RagService` — unified entry point orchestrating the full pipeline; used by `KnowledgeSearchTool`, `OnebotRagController`, and `DocumentService`
 7. `SmartChunkService` — document chunking with markdown-structure, code-function, dialogue, and semantic-boundary strategies
 
-**MCP tool system** (`mcp/`) — implements the Model Context Protocol JSON-RPC endpoint at `/mcp`:
+**MCP tool system** — transport lives in `integration/mcp/`; reusable tool contracts and implementations live in `assistant/tool/`:
 - `McpController` — JSON-RPC handler (initialize, tools/list, tools/call)
-- `ToolDefinition` — interface; implementations in `mcp/tools/` are auto-discovered by Spring, used locally through `LangChain4jToolBridge`, and optionally exposed to external MCP clients
-- `ToolContextHolder` — ThreadLocal context carrying user/session info injected from MCP session store
+- `ToolDefinition` — neutral interface auto-discovered by Spring and shared by LangChain4j and MCP
+- `AgentSessionStore` — Redis-backed user/session context shared by Agent and MCP
 - Tools: `KnowledgeSearchTool`, `ClassStatusTool`, `HomeworkTasksTool`, `StudentStatsTool`, `CurrentTimeTool`
 
-**Agent workflow engine** (`agent/workflow/`) — DAG-based execution for homework grading:
+**Agent workflow engine** (`homework/grading/workflow/`) — DAG-based execution for homework grading:
 - `WorkflowEngine` — topological DAG executor with max-step guard, fallback nodes, and trace tracking via Caffeine cache
 - `GradingWorkflow` — concrete workflow definition for homework auto-grading
 
-**Async processing** (`common/async/`) — Redis Stream-based consumer framework:
+**Async processing** — generic support is in `platform/messaging/`, with grading consumers in `homework/grading/`:
 - `AbstractStreamConsumer` — base class for Redis Stream consumers
 - `GradingStreamProducer` / `GradingStreamConsumer` — async homework grading via Redis Streams with distributed lock (Redisson) to prevent duplicate processing
 
@@ -86,15 +86,13 @@ npm run format       # Prettier
 - `WebMvcConfig` — registers `TokenBucketInterceptor` (excludes `/api/auth/**`, `/actuator/**`, `/error`)
 - `properties/` — typed configuration property classes
 
-**REST controllers** (`Controller/`): `AgentController`, `AuthController`, `ChatController`, `ClassController`, `CourseController`, `DashboardController`, `DocumentController`, `FileUploadController`, `HomeworkController`, `OnebotRagController`, `SharedKbController`, `SubmissionController`, `TaskController`
-
-**Data layer**: MyBatis-Plus mappers in `mapper/`, entities in `Entity/`, DTOs in `DTO/`. Flyway migrations at `src/main/resources/db/migration/`.
+Controllers, services, models, request/response types, and MyBatis mappers are colocated in the owning business feature. Controllers must not access mappers directly.
 
 **Key dependencies**: PostgreSQL 16 + pgvector, Redis 7 (Redisson), MinIO (S3), LangChain4j 1.15.1 (direct OpenAI-compatible model integration), DJL 0.28.0 + ONNX Runtime, Resilience4j circuit breaker on AI calls.
 
 ### Frontend (`vue-project/src/`)
 
-**Route structure** (see `router/index.ts`):
+**Route structure** (see `app/router/index.ts`):
 - `/` — student submit page (public, no auth)
 - `/login`, `/register` — teacher auth (guests only)
 - `/teacher/chat` — AI chat
@@ -105,18 +103,16 @@ npm run format       # Prettier
 - `/view/submission/:id` — submission review
 - Route guards: `requiresAuth` meta → redirect to login; `requiresGuest` → redirect to chat if logged in; AI-responding guard with confirm dialog
 
-**State management** (`stores/`): Pinia stores — `auth.ts` (user, token, login/register/logout), `chat.ts`, `class.ts`
-
-**API layer** (`api/`): Axios instance with base `/api`, auto Bearer token injection, 401 → login redirect. `cache.ts` provides `getCached`/`setCache` for client-side caching.
+Frontend code is feature-first under `features/`; shared API infrastructure, UI, editor, styles, and utilities live under `shared/`, while bootstrap and routing live under `app/`.
 
 **UI**: Element Plus component library, ECharts for visualizations, Tiptap rich text editor, Marked + highlight.js + KaTeX for markdown rendering.
 
 ## Key Architectural Patterns
 
-- **The built-in LangChain4j Agent is the active LLM path** — it connects directly to the OpenAI-compatible endpoint configured by `LLM_BASE_URL`/`LLM_API_KEY`; optional vision settings may use a separate endpoint. OpenClaw is not a runtime or deployment dependency.
+- **The built-in LangChain4j Agent is the active LLM path** — it connects directly to the OpenAI-compatible endpoint configured by `LLM_BASE_URL`/`LLM_API_KEY`; optional vision settings may use a separate endpoint.
 - **Local tools and external MCP share tool definitions** — the built-in Agent executes `ToolDefinition` beans through `LangChain4jToolBridge`; `/mcp` exposes the same business capabilities only for optional external clients.
-- **`OpenClawService` is a historical interface name** — its active implementation is `LangChain4jAgentService`. Do not infer an OpenClaw dependency from that name; keep new code provider-neutral until the interface is renamed in a dedicated refactor.
+- **`AgentService` is the provider-neutral Agent port** — its active implementation is `LangChain4jAgentService`.
 - **RAG is the single truth** for knowledge retrieval — `RagService.search()` is the only retrieval implementation; all callers (MCP tools, QQ bot, document service) route through it.
 - **Redis Streams for async work** — homework grading is queued via Redis Streams, consumed asynchronously with distributed locks preventing duplicate processing.
 - **Rate limiting is at the interceptor layer** — per-endpoint configurable token buckets in `application.properties` under `rate-limit.rules[...]`.
-- **File storage is abstracted** — `FileStorageService` interface with `LocalFileStorageServiceImpl` (disk) and `S3FileStorageServiceImpl` (MinIO/OSS/COS) implementations, toggled by `STORAGE_TYPE` env var.
+- **File storage is abstracted** — the `platform.storage.FileStorage` port has `LocalFileStorage` and `S3FileStorage` adapters, toggled by `STORAGE_TYPE`.

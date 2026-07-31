@@ -62,7 +62,6 @@ jobs:
             -Dedumind.live.token-secret=ci-test-secret-key-must-be-at-least-256-bits-for-jjwt!! \
             --batch-mode
         env:
-          OPENCLAW_API_KEY: ci-test-key
           MCP_API_KEY: ci-test-key
 
       - name: Session security integration tests
@@ -77,7 +76,6 @@ jobs:
             -Dedumind.live.token-secret=ci-test-secret-key-must-be-at-least-256-bits-for-jjwt!! \
             --batch-mode
         env:
-          OPENCLAW_API_KEY: ci-test-key
           MCP_API_KEY: ci-test-key
 
       - name: Report integration test failures

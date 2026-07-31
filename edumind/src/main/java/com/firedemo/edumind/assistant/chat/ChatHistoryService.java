@@ -1,0 +1,96 @@
+package com.firedemo.edumind.assistant.chat;
+
+
+import com.firedemo.edumind.platform.cache.CacheThroughService;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.CacheManager;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Duration;
+import java.util.List;
+import java.util.stream.Collectors;
+
+/**
+ * 对话记录服务实现
+ *
+ * @author 海克斯
+ */
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class ChatHistoryService {
+
+    private final ChatHistoryMapper chatHistoryMapper;
+    private final CacheThroughService cacheThroughService;
+    private final CacheManager cacheManager;
+
+    private static final String CACHE_NAME = "chatHistory";
+    private static final Duration CACHE_TTL = Duration.ofMinutes(5);
+    @Transactional(rollbackFor = Exception.class)
+    public boolean save(ChatHistory history) {
+        boolean result = chatHistoryMapper.insert(history) > 0;
+        if (result && history.getUserId() != null) {
+            evictHistoryCache(history.getUserId());
+        }
+        return result;
+    }
+    @Transactional(rollbackFor = Exception.class)
+    public boolean saveBatch(List<ChatHistory> histories) {
+        if (histories == null || histories.isEmpty()) return true;
+        // 批量插入替代逐条 INSERT，减少 DB 往返
+        int size = histories.size();
+        int batchSize = 100;
+        for (int i = 0; i < size; i += batchSize) {
+            List<ChatHistory> batch = histories.subList(i, Math.min(size, i + batchSize));
+            chatHistoryMapper.insertBatch(batch);
+        }
+        return true;
+    }
+    public List<ChatHistory> getHistory(Long userId, String sessionId, int limit) {
+        if (userId == null || sessionId == null || sessionId.isBlank() || limit <= 0) {
+            return List.of();
+        }
+        return chatHistoryMapper.selectBySessionId(userId, sessionId, limit);
+    }
+    public List<String> getUserSessions(Long userId) {
+        return chatHistoryMapper.selectSessionIdsByUserId(userId);
+    }
+    public List<ChatHistory> getUserHistory(Long userId) {
+        return cacheThroughService.getOrLoad(CACHE_NAME, "history:" + userId,
+                () -> chatHistoryMapper.selectByUserId(userId), CACHE_TTL);
+    }
+    public String buildContextPrompt(Long userId, String sessionId, int limit) {
+        List<ChatHistory> histories = getHistory(userId, sessionId, limit);
+        if (histories.isEmpty()) {
+            return "";
+        }
+
+        return histories.stream()
+                .map(h -> h.getRole() + ": " + h.getContent())
+                .collect(Collectors.joining("\n"));
+    }
+    @Transactional(rollbackFor = Exception.class)
+    public boolean deleteByUserId(Long userId) {
+        int deleted = chatHistoryMapper.deleteByUserId(userId);
+        evictHistoryCache(userId);
+        log.info("已删除用户 {} 的 {} 条对话记录", userId, deleted);
+        return deleted >= 0;
+    }
+    @Transactional(rollbackFor = Exception.class)
+    public boolean deleteSession(Long userId, String sessionId) {
+        int deleted = chatHistoryMapper.deleteBySessionId(userId, sessionId);
+        evictHistoryCache(userId);
+        log.info("已删除用户 {} 会话 {} 的 {} 条对话记录", userId, sessionId, deleted);
+        return deleted >= 0;
+    }
+
+    private void evictHistoryCache(Long userId) {
+        var cache = cacheManager.getCache(CACHE_NAME);
+        if (cache != null) {
+            cache.evict("history:" + userId);
+        }
+    }
+}

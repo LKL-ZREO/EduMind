@@ -400,8 +400,8 @@
                                 <rule>
                                     <element>PACKAGE</element>
                                     <includes>
-                                        <include>com.firedemo.demo.Service.ServiceImpl.*</include>
-                                        <include>com.firedemo.demo.Controller.*</include>
+                                        <include>com.firedemo.edumind.Service.ServiceImpl.*</include>
+                                        <include>com.firedemo.edumind.Controller.*</include>
                                     </includes>
                                     <limits>
                                         <limit>
