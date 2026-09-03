@@ -42,7 +42,39 @@ ONEBOT_WS_TOKEN=<与 NapCat 一致的随机令牌>
 
 Grafana 使用宿主机 `3002`，不会再与 NapCat 的 `3001` 冲突。
 
-## 3. Reranker 模型
+## 3. 检索模型
+
+### Embedding 模型（语义检索必需）
+
+应用默认下载 `Xenova/bge-small-zh-v1.5` 的 `onnx/model.onnx` 和
+`tokenizer.json`，并缓存在 `djl_models` Docker volume。该模型输出 512 维向量，
+与数据库的 `vector(512)` 字段匹配。首次启动需要下载约 95 MB，启动日志出现以下内容才表示语义检索可用：
+
+```text
+EmbeddingService ready: repository=Xenova/bge-small-zh-v1.5, dimension=512
+```
+
+默认依次尝试 Hugging Face 镜像和官方站点。可在 `.env` 覆盖仓库、版本、ONNX 子路径和下载站点：
+
+```dotenv
+EMBEDDING_MODEL_REPOSITORY=Xenova/bge-small-zh-v1.5
+EMBEDDING_MODEL_REVISION=75c43b069aac4d136ba6bc1122f995fedcfd2781
+EMBEDDING_MODEL_ONNX_PATH=onnx/model.onnx
+EMBEDDING_MODEL_BASE_URLS=https://hf-mirror.com,https://huggingface.co
+```
+
+下载写入临时文件，完成尺寸校验后才替换正式文件，网络中断不会留下被当作模型加载的半文件。
+如果两个站点均不可达，可在能联网的机器下载以下两个文件，并放入容器的
+`/home/edumind/.djl/models/Xenova_bge-small-zh-v1.5/`：
+
+```text
+model.onnx      <- Xenova/bge-small-zh-v1.5/resolve/75c43b069aac4d136ba6bc1122f995fedcfd2781/onnx/model.onnx
+tokenizer.json  <- Xenova/bge-small-zh-v1.5/resolve/75c43b069aac4d136ba6bc1122f995fedcfd2781/tokenizer.json
+```
+
+此前因模型未就绪而上传或解析失败的文档需要重新上传或重新触发文档解析，不能仅重启应用补写旧数据。
+
+### Reranker 模型（可选精排）
 
 将模型放到：
 
@@ -53,7 +85,7 @@ edumind/models/bge-reranker-base/
 └── 其他 tokenizer 配置文件
 ```
 
-或通过 `RERANKER_MODEL_DIR` 指定其他 Linux 宿主机目录。没有模型时部署仍可启动，但会禁用精排。Embedding 模型会在首次启动时下载并缓存在 `djl_models` Docker volume。
+或通过 `RERANKER_MODEL_DIR` 指定其他 Linux 宿主机目录。没有该模型时部署仍可启动，但会禁用精排，不影响基础语义检索。
 
 ## 4. 部署
 

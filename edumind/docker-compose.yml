@@ -148,6 +148,11 @@ services:
       ONEBOT_WS_TOKEN: ${ONEBOT_WS_TOKEN:-}
       VISION_ALLOWED_HOSTS: ${VISION_ALLOWED_HOSTS:-multimedia.nt.qq.com.cn}
       AI_MODEL_DIR: /app/models/reranker
+      EMBEDDING_MODEL_DIR: /home/edumind/.djl/models/Xenova_bge-small-zh-v1.5
+      EMBEDDING_MODEL_REPOSITORY: ${EMBEDDING_MODEL_REPOSITORY:-Xenova/bge-small-zh-v1.5}
+      EMBEDDING_MODEL_REVISION: ${EMBEDDING_MODEL_REVISION:-75c43b069aac4d136ba6bc1122f995fedcfd2781}
+      EMBEDDING_MODEL_ONNX_PATH: ${EMBEDDING_MODEL_ONNX_PATH:-onnx/model.onnx}
+      EMBEDDING_MODEL_BASE_URLS: ${EMBEDDING_MODEL_BASE_URLS:-https://hf-mirror.com,https://huggingface.co}
       LOG_DIR: /home/edumind/.edumind/logs
       APP_CORS_ALLOWED_ORIGINS: ${APP_CORS_ALLOWED_ORIGINS:-https://${DOMAIN:-localhost}}
       STORAGE_TYPE: ${STORAGE_TYPE:-local}

@@ -155,6 +155,10 @@ npm run dev
 | `S3_SECRET_KEY`                | MinIO/S3 Secret Key                      | **必填**                                                                   |
 | `S3_BUCKET`                    | S3 存储桶                                | `homework-files`                                                           |
 | `RERANKER_MODEL_DIR`           | 宿主机上的 bge-reranker-base 目录        | `./models/bge-reranker-base`                                               |
+| `EMBEDDING_MODEL_REPOSITORY`   | 512 维 ONNX Embedding 模型仓库           | `Xenova/bge-small-zh-v1.5`                                                 |
+| `EMBEDDING_MODEL_REVISION`     | 固定的 Embedding 模型版本                | `75c43b069aac4d136ba6bc1122f995fedcfd2781`                                 |
+| `EMBEDDING_MODEL_ONNX_PATH`    | Embedding 仓库内 ONNX 文件路径           | `onnx/model.onnx`                                                          |
+| `EMBEDDING_MODEL_BASE_URLS`    | 模型下载站点（逗号分隔，按顺序尝试）     | `https://hf-mirror.com,https://huggingface.co`                             |
 | `GRAFANA_PASSWORD`             | Grafana 管理员密码                       | **必填**                                                                   |
 
 ---
