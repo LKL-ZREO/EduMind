@@ -160,7 +160,11 @@ jobs:
             -e DOMAIN=localhost \
             -p 127.0.0.1:8088:80 \
             edumind-nginx:ci-test
-          curl --retry 10 --retry-delay 1 --retry-connrefused -fsS http://127.0.0.1:8088/health
+          if ! curl --retry 10 --retry-delay 1 --retry-connrefused -fsS http://127.0.0.1:8088/health; then
+            docker ps -a --filter name=edumind-nginx-ci
+            docker logs edumind-nginx-ci
+            exit 1
+          fi
           curl -fsS http://127.0.0.1:8088/ | grep -q 'id="root"'
           curl -fsS http://127.0.0.1:8088/teacher/chat | grep -q 'id="root"'
 
