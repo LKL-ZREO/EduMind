@@ -55,23 +55,25 @@ public class ChatHistoryService {
         }
         return chatHistoryMapper.selectBySessionId(userId, sessionId, limit);
     }
-    public List<String> getUserSessions(Long userId) {
-        return chatHistoryMapper.selectSessionIdsByUserId(userId);
-    }
+//    public List<String> getUserSessions(Long userId) {
+//        return chatHistoryMapper.selectSessionIdsByUserId(userId);
+//    }
     public List<ChatHistory> getUserHistory(Long userId) {
         return cacheThroughService.getOrLoad(CACHE_NAME, "history:" + userId,
                 () -> chatHistoryMapper.selectByUserId(userId), CACHE_TTL);
     }
-    public String buildContextPrompt(Long userId, String sessionId, int limit) {
-        List<ChatHistory> histories = getHistory(userId, sessionId, limit);
-        if (histories.isEmpty()) {
-            return "";
-        }
 
-        return histories.stream()
-                .map(h -> h.getRole() + ": " + h.getContent())
-                .collect(Collectors.joining("\n"));
-    }
+    //用于拼接用户的消息历史记录的prompt，现在使用的是lanchain4j底层的消息记忆机制，无需自己实现拼接
+//    public String buildContextPrompt(Long userId, String sessionId, int limit) {
+//        List<ChatHistory> histories = getHistory(userId, sessionId, limit);
+//        if (histories.isEmpty()) {
+//            return "";
+//        }
+//
+//        return histories.stream()
+//                .map(h -> h.getRole() + ": " + h.getContent())
+//                .collect(Collectors.joining("\n"));
+//    }
     @Transactional(rollbackFor = Exception.class)
     public boolean deleteByUserId(Long userId) {
         int deleted = chatHistoryMapper.deleteByUserId(userId);
