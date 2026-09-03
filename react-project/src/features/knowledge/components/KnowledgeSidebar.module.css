@@ -1,0 +1,104 @@
+.sidebar {
+  display: flex;
+  flex: 0 0 280px;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 20px 16px;
+  overflow: auto;
+  background: #fff;
+  border-right: 1px solid #e4e9f1;
+}
+
+.heading :global(.ant-typography) {
+  margin: 2px 0 12px;
+}
+
+.eyebrow {
+  color: #6b83ae;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+}
+
+.spaceButton {
+  display: flex;
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.spaceSection {
+  padding-top: 10px;
+  border-top: 1px solid #eef1f6;
+}
+
+.sectionHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px 5px;
+  color: #8490a4;
+  font-size: 11px;
+}
+
+.spaceRow {
+  display: flex;
+  gap: 3px;
+}
+
+.spaceRow > :global(.ant-btn:first-child) {
+  flex: 1;
+  justify-content: flex-start;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.treeArea {
+  flex: 1;
+  min-height: 180px;
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px solid #eef1f6;
+}
+
+.treeArea > :global(.ant-typography) {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 11px;
+}
+
+.treeArea :global(.ant-tree) {
+  background: transparent;
+}
+
+.treeTitle {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.treeTitle span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spin {
+  display: block;
+  margin: 35px auto;
+}
+
+@media (width <= 1050px) {
+  .sidebar {
+    flex-basis: 235px;
+  }
+}
+
+@media (width <= 760px) {
+  .sidebar {
+    flex: 0 0 auto;
+    max-height: 40vh;
+    border-right: 0;
+    border-bottom: 1px solid #e4e9f1;
+  }
+}

@@ -1,0 +1,26 @@
+services:
+  app:
+    environment:
+      # Keep enough host memory for PostgreSQL, Redis, MinIO and the OS.
+      JAVA_TOOL_OPTIONS: >-
+        -Xms256m
+        -Xmx1024m
+        -XX:MaxDirectMemorySize=256m
+        -XX:ActiveProcessorCount=2
+      SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: 10
+      SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE: 2
+      AGENT_MEMORY_MAX_ACTIVE_SESSIONS: 1000
+    mem_limit: 1900m
+    mem_reservation: 1024m
+
+  postgres:
+    command:
+      - postgres
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - effective_cache_size=512MB
+      - -c
+      - maintenance_work_mem=64MB
+      - -c
+      - max_connections=60

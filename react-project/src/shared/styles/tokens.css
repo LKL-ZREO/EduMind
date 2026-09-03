@@ -1,0 +1,10 @@
+:root {
+  --color-bg-layout: #f0f4f8;
+  --color-bg-card: #ffffff;
+  --color-text-heading: #172033;
+  --color-text-primary: #303133;
+  --color-text-secondary: #606266;
+  --color-border: #e4e7ed;
+  --color-primary: #1677ff;
+  --shadow-card: 0 12px 32px rgb(15 23 42 / 8%);
+}

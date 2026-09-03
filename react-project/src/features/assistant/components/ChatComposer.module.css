@@ -1,0 +1,92 @@
+.area {
+  padding: 12px clamp(16px, 5vw, 70px) 15px;
+  background: #fff;
+  border-top: 1px solid #e6eaf1;
+}
+
+.composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 9px;
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 9px;
+  background: #fff;
+  border: 1px solid #dce3ed;
+  border-radius: 15px;
+  box-shadow: 0 8px 25px rgb(15 23 42 / 7%);
+}
+
+.composer :global(.ant-input) {
+  min-height: 32px;
+  padding: 5px 3px;
+  resize: none;
+  border: 0;
+  box-shadow: none;
+}
+
+.composer > :global(.ant-btn) {
+  flex: 0 0 38px;
+  height: 38px;
+  padding: 0;
+  border-radius: 11px;
+}
+
+.attach {
+  color: #687791;
+  background: #f2f5f9;
+}
+
+.hint {
+  display: flex;
+  justify-content: space-between;
+  max-width: 900px;
+  margin: 7px auto 0;
+  font-size: 11px;
+}
+
+.filePreview {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 920px;
+  margin: 0 auto 9px;
+  padding: 8px 10px;
+  background: #f4f7fb;
+  border: 1px solid #dfe7f2;
+  border-radius: 11px;
+}
+
+.filePreview img {
+  width: 46px;
+  height: 46px;
+  object-fit: cover;
+  border-radius: 8px;
+}
+
+.filePreview span {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.filePreview strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filePreview small {
+  color: #7d899e;
+}
+
+@media (width <= 600px) {
+  .area {
+    padding: 10px;
+  }
+
+  .hint span:last-child {
+    display: none;
+  }
+}

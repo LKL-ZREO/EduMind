@@ -1,0 +1,44 @@
+.workspace {
+  position: relative;
+  display: flex;
+  height: calc(100vh - 56px);
+  min-height: 620px;
+  margin: -24px;
+  overflow: hidden;
+  background: #f7f9fc;
+}
+
+.conversation {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.errorState {
+  flex: 1;
+  padding: 32px;
+}
+
+.operationSpin {
+  position: absolute;
+  z-index: 50;
+  inset: 0;
+  display: grid;
+  pointer-events: none;
+  background: rgb(255 255 255 / 18%);
+  place-items: center;
+}
+
+@media (width <= 900px) {
+  .workspace {
+    min-height: calc(100vh - 56px);
+  }
+}
+
+@media (width <= 640px) {
+  .workspace {
+    margin: -16px;
+  }
+}

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-EduMind — AI-driven intelligent teaching assistant. A monorepo with a Spring Boot 4 backend (`edumind/`) and Vue 3 frontend (`vue-project/`).
+EduMind — AI-driven intelligent teaching assistant. A monorepo with a Spring Boot 4 backend (`edumind/`) and React 19 frontend (`react-project/`). The old `vue-project/` is a read-only migration reference and is not a production target.
 
 ## Build & Run Commands
 
@@ -31,21 +31,23 @@ The app runs on `http://localhost:8080`. Swagger UI at `http://localhost:8080/sw
 
 Environment config: copy `edumind/.env.example` to `edumind/.env` and fill in the values marked REQUIRED. `ONEBOT_WS_TOKEN` is required only when OneBot is enabled.
 
-### Frontend (`vue-project/`)
+### Frontend (`react-project/`)
 
 ```bash
-cd vue-project
-npm install
-npm run dev          # Dev server on http://localhost:5173, proxies /api → :8080
+cd react-project
+npm ci
+npm run dev          # Dev server on http://localhost:5174, proxies /api and /ws → :8080
 npm run build        # Type-check + production build
 npm run lint         # ESLint + oxlint
 npm run format       # Prettier
+npm run test         # Vitest + Testing Library + MSW
+npm run ci:check     # Complete frontend quality gate
 ```
 
 ### External Services (must be started separately)
 
-| Service | Purpose | Default Address |
-|---------|---------|-----------------|
+| Service       | Purpose                  | Default Address  |
+| ------------- | ------------------------ | ---------------- |
 | OneBot/NapCat | QQ bot WebSocket service | `localhost:3001` |
 
 ## Architecture
@@ -53,6 +55,7 @@ npm run format       # Prettier
 ### Backend (`edumind/src/main/java/com/firedemo/edumind/`)
 
 **RAG pipeline** (`knowledge/retrieval/`) — the core retrieval system:
+
 1. `EmbeddingService` — ONNX text embedding (DJL + ONNX Runtime, local CPU inference)
 2. `VectorStoreService` — pgvector similarity search + PostgreSQL full-text keyword search
 3. `RrfFusionService` — RRF (Reciprocal Rank Fusion) merging dual-path results
@@ -62,26 +65,31 @@ npm run format       # Prettier
 7. `SmartChunkService` — document chunking with markdown-structure, code-function, dialogue, and semantic-boundary strategies
 
 **MCP tool system** — transport lives in `integration/mcp/`; reusable tool contracts and implementations live in `assistant/tool/`:
+
 - `McpController` — JSON-RPC handler (initialize, tools/list, tools/call)
 - `ToolDefinition` — neutral interface auto-discovered by Spring and shared by LangChain4j and MCP
 - `AgentSessionStore` — Redis-backed user/session context shared by Agent and MCP
 - Tools: `KnowledgeSearchTool`, `ClassStatusTool`, `HomeworkTasksTool`, `StudentStatsTool`, `CurrentTimeTool`
 
 **Agent workflow engine** (`homework/grading/workflow/`) — DAG-based execution for homework grading:
+
 - `WorkflowEngine` — topological DAG executor with max-step guard, fallback nodes, and trace tracking via Caffeine cache
 - `GradingWorkflow` — concrete workflow definition for homework auto-grading
 
 **Async processing** — generic support is in `platform/messaging/`, with grading consumers in `homework/grading/`:
+
 - `AbstractStreamConsumer` — base class for Redis Stream consumers
 - `GradingStreamProducer` / `GradingStreamConsumer` — async homework grading via Redis Streams with distributed lock (Redisson) to prevent duplicate processing
 
 **Infrastructure** (`common/`):
+
 - `limiter/` — Bucket4j + Redisson distributed token-bucket rate limiting (`TokenBucketInterceptor` registered on `/api/**`)
 - `cache/` — Cache-Aside pattern with Caffeine local cache + Redis synchronization via `CacheConsistencyService`
 - `prompt/` — Prompt template loader from `src/main/resources/prompts/`
 - `ai/` — structured output caller for LLM JSON responses
 
 **Config** (`config/`):
+
 - `SecurityConfig` — teacher Web auth via Redis-backed Spring Session + CSRF; classroom students use a separate session-scoped bearer token; MCP uses its own API key filter
 - `WebMvcConfig` — registers `TokenBucketInterceptor` (excludes `/api/auth/**`, `/actuator/**`, `/error`)
 - `properties/` — typed configuration property classes
@@ -90,9 +98,10 @@ Controllers, services, models, request/response types, and MyBatis mappers are c
 
 **Key dependencies**: PostgreSQL 16 + pgvector, Redis 7 (Redisson), MinIO (S3), LangChain4j 1.15.1 (direct OpenAI-compatible model integration), DJL 0.28.0 + ONNX Runtime, Resilience4j circuit breaker on AI calls.
 
-### Frontend (`vue-project/src/`)
+### Frontend (`react-project/src/`)
 
-**Route structure** (see `app/router/index.ts`):
+**Route structure** (see `app/router/index.tsx`):
+
 - `/` — student submit page (public, no auth)
 - `/login`, `/register` — teacher auth (guests only)
 - `/teacher/chat` — AI chat
@@ -100,12 +109,14 @@ Controllers, services, models, request/response types, and MyBatis mappers are c
 - `/teacher/classes`, `/teacher/classes/:id` — class list & management
 - `/teacher/tasks`, `/teacher/tasks/:id` — homework tasks & details
 - `/teacher/data` — dashboard with heatmaps
+- `/teacher/pre-lesson`, `/teacher/preview/create`, `/preview/:taskId` — lesson preparation and preview
+- `/teacher/live/:classId`, `/live/join`, `/live/:sessionCode` — teacher/student realtime classroom
 - `/view/submission/:id` — submission review
-- Route guards: `requiresAuth` meta → redirect to login; `requiresGuest` → redirect to chat if logged in; AI-responding guard with confirm dialog
+- Route loaders probe `/auth/me`; teacher routes redirect to login with the full return path, guest-only routes redirect authenticated users to chat, and the AI responding guard confirms navigation.
 
-Frontend code is feature-first under `features/`; shared API infrastructure, UI, editor, styles, and utilities live under `shared/`, while bootstrap and routing live under `app/`.
+Frontend code is feature-first under `features/`; each feature owns pages, components, APIs, hooks, models, and optional Zustand state. TanStack Query owns request/response server state, while Zustand is used for streaming and realtime state shared across components. Shared API infrastructure, charts, UI, editor, styles, and utilities live under `shared/`, while bootstrap, providers, layouts, and routing live under `app/`.
 
-**UI**: Element Plus component library, ECharts for visualizations, Tiptap rich text editor, Marked + highlight.js + KaTeX for markdown rendering.
+**UI**: Ant Design component library, ECharts for visualizations, Tiptap rich text editor, Marked + highlight.js + KaTeX for Markdown, Testing Library + MSW for behavior tests, and `@stomp/stompjs` for live classroom connections.
 
 ## Key Architectural Patterns
 

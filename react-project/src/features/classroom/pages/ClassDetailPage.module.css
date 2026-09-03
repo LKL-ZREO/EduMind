@@ -1,0 +1,52 @@
+.page {
+  width: min(1280px, 100%);
+  margin: 0 auto;
+}
+
+.breadcrumb {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.infoCard {
+  box-shadow: var(--shadow-card);
+}
+
+.infoHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 24px;
+}
+
+.infoHeader :global(.ant-typography) {
+  margin-top: 0;
+  margin-bottom: 8px;
+}
+
+.stats {
+  margin-top: 16px;
+  margin-bottom: 16px;
+}
+
+.studentHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.studentHeader :global(.ant-typography) {
+  margin: 0;
+}
+
+@media (width <= 800px) {
+  .infoHeader,
+  .studentHeader {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

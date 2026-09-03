@@ -1,6 +1,6 @@
 # EduMind 单机生产部署
 
-本文适用于一台 Linux 服务器上的 Docker Compose 部署。Compose 会运行 Vue/Nginx、Spring Boot、PostgreSQL、Redis、MinIO 和备份任务；Prometheus/Grafana 与 Certbot 续期服务通过 profiles 管理。
+本文适用于一台 Linux 服务器上的 Docker Compose 部署。Compose 会运行 React/Nginx、Spring Boot、PostgreSQL、Redis、MinIO 和备份任务；Prometheus/Grafana 与 Certbot 续期服务通过 profiles 管理。
 
 ## 1. 服务器前置条件
 
@@ -71,7 +71,7 @@ edumind/models/bge-reranker-base/
 
 部署顺序为：
 
-1. 构建 Spring Boot 和 Vue/Nginx 镜像。
+1. 构建 Spring Boot 和 React/Nginx 镜像。
 2. 启动 PostgreSQL、Redis、MinIO 和应用并等待健康。
 3. 用 HTTP bootstrap Nginx 完成 ACME challenge。
 4. 申请或复用证书并重启 Nginx 切换 HTTPS。

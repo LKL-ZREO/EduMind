@@ -39,8 +39,8 @@ jobs:
         uses: actions/setup-java@v4
         with:
           java-version: ${{ matrix.java }}
-          distribution: 'temurin'
-          cache: 'maven'
+          distribution: "temurin"
+          cache: "maven"
 
       - name: Cache Maven dependencies
         uses: actions/cache@v4
@@ -101,11 +101,11 @@ jobs:
 
   # ==================== 前端测试 ====================
   frontend-test:
-    name: Frontend — Node.js ${{ matrix.node }}
+    name: Frontend React — Node.js ${{ matrix.node }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node: ['22']
+        node: ["22"]
 
     steps:
       - uses: actions/checkout@v4
@@ -114,23 +114,14 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-          cache: 'npm'
-          cache-dependency-path: vue-project/package-lock.json
+          cache: "npm"
+          cache-dependency-path: react-project/package-lock.json
 
       - name: Install dependencies
-        run: cd vue-project && npm ci
+        run: cd react-project && npm ci
 
-      - name: Type check
-        run: cd vue-project && npx vue-tsc --build
-
-      - name: Format check
-        run: cd vue-project && npm run format:check
-
-      - name: Lint
-        run: cd vue-project && npm run lint
-
-      - name: Run tests
-        run: cd vue-project && npx vitest run
+      - name: Run quality gate
+        run: cd react-project && npm run ci:check
 
   # ==================== Docker Build (sanity check) ====================
   docker-build:
@@ -143,9 +134,9 @@ jobs:
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
-          java-version: '21'
-          distribution: 'temurin'
-          cache: 'maven'
+          java-version: "21"
+          distribution: "temurin"
+          cache: "maven"
 
       - name: Build JAR
         run: |
@@ -156,5 +147,23 @@ jobs:
       - name: Build Docker image
         run: cd edumind && docker build -t edumind:ci-test .
 
-      - name: Verify image
+      - name: Build React Nginx image
+        run: docker build -f edumind/Dockerfile.nginx -t edumind-nginx:ci-test .
+
+      - name: Verify backend image
         run: docker images edumind:ci-test
+
+      - name: Verify React Nginx image
+        run: |
+          docker run -d --name edumind-nginx-ci \
+            --add-host app:127.0.0.1 \
+            -e DOMAIN=localhost \
+            -p 127.0.0.1:8088:80 \
+            edumind-nginx:ci-test
+          curl --retry 10 --retry-delay 1 --retry-connrefused -fsS http://127.0.0.1:8088/health
+          curl -fsS http://127.0.0.1:8088/ | grep -q 'id="root"'
+          curl -fsS http://127.0.0.1:8088/teacher/chat | grep -q 'id="root"'
+
+      - name: Stop React Nginx verification container
+        if: always()
+        run: docker rm -f edumind-nginx-ci 2>/dev/null || true

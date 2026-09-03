@@ -6,7 +6,7 @@
     <a href="https://github.com/LKL-ZREO/EduMind/actions/workflows/ci.yml"><img src="https://github.com/LKL-ZREO/EduMind/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
     <img src="https://img.shields.io/badge/Java-21-orange" alt="Java 21">
     <img src="https://img.shields.io/badge/Spring_Boot-4.0.4-6DB33F" alt="Spring Boot 4.0.4">
-    <img src="https://img.shields.io/badge/Vue-3.5-42B883" alt="Vue 3.5">
+    <img src="https://img.shields.io/badge/React-19.2-61DAFB" alt="React 19.2">
     <img src="https://img.shields.io/badge/LangChain4j-1.15.1-blue" alt="LangChain4j 1.15.1">
     <img src="https://img.shields.io/badge/License-MIT-green" alt="MIT License">
   </p>
@@ -42,7 +42,7 @@ EduMind 是一个前后端分离的智能教学平台。教师可以管理课程
 ```mermaid
 flowchart TB
     users["教师 / 学生"] --> nginx["Nginx · HTTPS / 静态资源 / 反向代理"]
-    nginx --> web["Vue 3 Web"]
+    nginx --> web["React 19 Web"]
     nginx --> app["Spring Boot 4 API"]
 
     onebot["OneBot / NapCat（可选）"] --> app
@@ -178,12 +178,12 @@ docker compose up -d postgres redis minio
 ### 前端
 
 ```bash
-cd vue-project
+cd react-project
 npm ci
 npm run dev
 ```
 
-前端开发服务器运行在 <http://localhost:5173>，并将 `/api` 代理到后端 `8080`。
+前端开发服务器运行在 <http://localhost:5174>，并将 `/api` 与 `/ws` 代理到后端 `8080`。
 
 ### 常用质量检查
 
@@ -194,7 +194,7 @@ cd edumind
 ./mvnw package -DskipTests
 
 # 前端
-cd vue-project
+cd react-project
 npm run ci:check
 ```
 
@@ -248,16 +248,16 @@ NapCat 需要单独启动。OneBot 未启用时不会影响 Web、RAG、批改�
 
 ## 技术栈
 
-| 层级        | 技术                                                           |
-| ----------- | -------------------------------------------------------------- |
-| 后端        | Java 21、Spring Boot 4.0.4、Spring Security、MyBatis-Plus      |
-| Agent / LLM | LangChain4j 1.15.1、OpenAI 兼容模型服务、Resilience4j          |
-| 本地 AI     | DJL 0.28.0、ONNX Runtime、本地 Embedding / Reranker            |
-| 数据        | PostgreSQL 16、pgvector、Flyway、Redis 7、Redisson、Caffeine   |
-| 文件        | 本地 Docker Volume、MinIO / S3 兼容存储                        |
-| 前端        | Vue 3.5、TypeScript 5.9、Vite 7、Element Plus、ECharts、Tiptap |
-| 可观测性    | Actuator、Micrometer、Prometheus、Grafana、JSON 日志           |
-| 部署        | Docker Compose、Nginx、Certbot、GitHub Actions                 |
+| 层级        | 技术                                                                                     |
+| ----------- | ---------------------------------------------------------------------------------------- |
+| 后端        | Java 21、Spring Boot 4.0.4、Spring Security、MyBatis-Plus                                |
+| Agent / LLM | LangChain4j 1.15.1、OpenAI 兼容模型服务、Resilience4j                                    |
+| 本地 AI     | DJL 0.28.0、ONNX Runtime、本地 Embedding / Reranker                                      |
+| 数据        | PostgreSQL 16、pgvector、Flyway、Redis 7、Redisson、Caffeine                             |
+| 文件        | 本地 Docker Volume、MinIO / S3 兼容存储                                                  |
+| 前端        | React 19.2、TypeScript 6、Vite 8、Ant Design 6、TanStack Query、Zustand、ECharts、Tiptap |
+| 可观测性    | Actuator、Micrometer、Prometheus、Grafana、JSON 日志                                     |
+| 部署        | Docker Compose、Nginx、Certbot、GitHub Actions                                           |
 
 ## 项目结构
 
@@ -280,9 +280,10 @@ EduMind/
 │   │   └── prompts/                 # Prompt 模板
 │   ├── docker-compose.yml
 │   ├── Dockerfile                   # 后端镜像
-│   ├── Dockerfile.nginx             # Vue 构建 + Nginx 镜像
+│   ├── Dockerfile.nginx             # React 构建 + Nginx 镜像
 │   └── scripts/                     # 预检、部署、SSL、备份
-├── vue-project/                     # Vue 3 前端（app / features / shared）
+├── react-project/                   # React 19 前端（app / features / shared）
+├── vue-project/                     # 只读迁移参考，不参与 CI 或生产构建
 ├── .github/workflows/               # CI 与部署工作流
 └── docs/                            # 审查与项目文档
 ```
@@ -305,6 +306,7 @@ EduMind/
 - [生产部署指南](edumind/docs/production-deployment.md)
 - [迁移测试矩阵](edumind/docs/p0-migration-test-matrix.md)
 - [代码质量审查记录](docs/alibaba-code-review-2026-07-13.md)
+- [Vue → React 迁移记录](docs/react-migration/README.md)
 
 ## License
 

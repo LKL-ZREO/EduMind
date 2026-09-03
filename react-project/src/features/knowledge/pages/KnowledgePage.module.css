@@ -1,0 +1,78 @@
+.page {
+  position: relative;
+  height: calc(100vh - 56px);
+  min-height: 650px;
+  margin: -24px;
+  overflow: hidden;
+  background: #f6f8fb;
+}
+
+.workspace {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+}
+
+.loading {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 14px;
+  color: #7f8a9e;
+}
+
+.error {
+  position: absolute;
+  z-index: 20;
+  top: 16px;
+  right: 20px;
+  left: 300px;
+  box-shadow: 0 10px 30px rgb(15 23 42 / 13%);
+}
+
+.modalSpin {
+  position: fixed;
+  z-index: 1100;
+  inset: 0;
+  display: grid;
+  background: rgb(255 255 255 / 35%);
+  place-items: center;
+}
+
+@media (width <= 1100px) {
+  .workspace > :global(section) {
+    min-width: 280px;
+  }
+
+  .workspace > :global(aside:last-child) {
+    min-width: 300px;
+  }
+}
+
+@media (width <= 900px) {
+  .page {
+    height: auto;
+    min-height: calc(100vh - 56px);
+    overflow: visible;
+  }
+
+  .workspace {
+    flex-direction: column;
+  }
+
+  .error {
+    position: relative;
+    top: auto;
+    right: auto;
+    left: auto;
+    margin: 12px;
+  }
+}
+
+@media (width <= 640px) {
+  .page {
+    margin: -16px;
+  }
+}

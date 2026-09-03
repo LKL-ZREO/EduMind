@@ -4,7 +4,7 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 ## Project Overview
 
-EduMind — AI-driven intelligent teaching assistant. A monorepo with a Spring Boot 4 backend (`edumind/`) and Vue 3 frontend (`vue-project/`).
+EduMind — AI-driven intelligent teaching assistant. A monorepo with a Spring Boot 4 backend (`edumind/`) and React 19 frontend (`react-project/`). The old `vue-project/` is a read-only migration reference and is not a production target.
 
 ## Build & Run Commands
 
@@ -31,21 +31,23 @@ The app runs on `http://localhost:8080`. Swagger UI at `http://localhost:8080/sw
 
 Environment config: copy `edumind/.env.example` to `edumind/.env` and fill in the values marked REQUIRED. `ONEBOT_WS_TOKEN` is required only when OneBot is enabled.
 
-### Frontend (`vue-project/`)
+### Frontend (`react-project/`)
 
 ```bash
-cd vue-project
-npm install
-npm run dev          # Dev server on http://localhost:5173, proxies /api → :8080
+cd react-project
+npm ci
+npm run dev          # Dev server on http://localhost:5174, proxies /api and /ws → :8080
 npm run build        # Type-check + production build
 npm run lint         # ESLint + oxlint
 npm run format       # Prettier
+npm run test         # Vitest + Testing Library + MSW
+npm run ci:check     # Complete frontend quality gate
 ```
 
 ### External Services (must be started separately)
 
-| Service | Purpose | Default Address |
-|---------|---------|-----------------|
+| Service       | Purpose                  | Default Address  |
+| ------------- | ------------------------ | ---------------- |
 | OneBot/NapCat | QQ bot WebSocket service | `localhost:3001` |
 
 ## Architecture
@@ -53,6 +55,7 @@ npm run format       # Prettier
 ### Backend (`edumind/src/main/java/com/firedemo/edumind/`)
 
 The backend is a business-first modular monolith. Top-level packages describe product capabilities instead of technical layers:
+
 - `auth/` — users, sessions, authentication filters, and resource authorization
 - `classroom/` — classes, courses, students, and QQ bindings
 - `teaching/` — dashboard, lesson preparation, question bank, preview tasks, and timeline
@@ -65,6 +68,7 @@ The backend is a business-first modular monolith. Top-level packages describe pr
 - `shared/` — result envelopes and business exceptions only
 
 **RAG pipeline** (`knowledge/retrieval/`) — the core retrieval system:
+
 1. `EmbeddingService` — ONNX text embedding (DJL + ONNX Runtime, local CPU inference)
 2. `VectorStoreService` — pgvector similarity search + PostgreSQL full-text keyword search
 3. `RrfFusionService` — RRF (Reciprocal Rank Fusion) merging dual-path results
@@ -74,16 +78,19 @@ The backend is a business-first modular monolith. Top-level packages describe pr
 7. `SmartChunkService` — document chunking with markdown-structure, code-function, dialogue, and semantic-boundary strategies
 
 **MCP tool system** — `integration/mcp/` implements the JSON-RPC transport at `/mcp`, while reusable tool contracts and implementations live in `assistant/tool/`:
+
 - `McpController` — JSON-RPC handler (initialize, tools/list, tools/call)
 - `ToolDefinition` — neutral interface auto-discovered by Spring, used locally through `LangChain4jToolBridge`, and optionally exposed to external MCP clients
 - `AgentSessionStore` — Redis-backed user/session context shared by the built-in Agent and MCP transport
 - Tools: `KnowledgeSearchTool`, `ClassStatusTool`, `HomeworkTasksTool`, `StudentStatsTool`, `CurrentTimeTool`
 
 **Agent workflow engine** (`homework/grading/workflow/`) — DAG-based execution for homework grading:
+
 - `WorkflowEngine` — topological DAG executor with max-step guard, fallback nodes, and trace tracking via Caffeine cache
 - `GradingWorkflow` — concrete workflow definition for homework auto-grading
 
 **Async processing** — generic Redis Stream support lives in `platform/messaging/`; grading producers and consumers live in `homework/grading/`:
+
 - `AbstractStreamConsumer` — base class for Redis Stream consumers
 - `GradingStreamProducer` / `GradingStreamConsumer` — async homework grading via Redis Streams with distributed lock (Redisson) to prevent duplicate processing
 
@@ -91,9 +98,10 @@ Controllers, application services, models, request/response types, and MyBatis m
 
 **Key dependencies**: PostgreSQL 16 + pgvector, Redis 7 (Redisson), MinIO (S3), LangChain4j 1.15.1 (direct OpenAI-compatible model integration), DJL 0.28.0 + ONNX Runtime, Resilience4j circuit breaker on AI calls.
 
-### Frontend (`vue-project/src/`)
+### Frontend (`react-project/src/`)
 
-**Route structure** (see `app/router/index.ts`):
+**Route structure** (see `app/router/index.tsx`):
+
 - `/` — student submit page (public, no auth)
 - `/login`, `/register` — teacher auth (guests only)
 - `/teacher/chat` — AI chat
@@ -101,12 +109,14 @@ Controllers, application services, models, request/response types, and MyBatis m
 - `/teacher/classes`, `/teacher/classes/:id` — class list & management
 - `/teacher/tasks`, `/teacher/tasks/:id` — homework tasks & details
 - `/teacher/data` — dashboard with heatmaps
+- `/teacher/pre-lesson`, `/teacher/preview/create`, `/preview/:taskId` — lesson preparation and preview
+- `/teacher/live/:classId`, `/live/join`, `/live/:sessionCode` — teacher/student realtime classroom
 - `/view/submission/:id` — submission review
-- Route guards: `requiresAuth` meta → redirect to login; `requiresGuest` → redirect to chat if logged in; AI-responding guard with confirm dialog
+- Route loaders probe `/auth/me`; teacher routes redirect to login with the full return path, guest-only routes redirect authenticated users to chat, and the AI responding guard confirms navigation.
 
-Frontend code is feature-first under `features/` (`auth`, `assistant`, `classroom`, `homework`, `knowledge`, `live`, `teaching`). Each feature owns its views, API wrappers, and Pinia store. Cross-feature UI, editor, API client, styles, and utilities live in `shared/`; app bootstrap and routing live in `app/`.
+Frontend code is feature-first under `features/` (`auth`, `assistant`, `classroom`, `homework`, `knowledge`, `live`, `teaching`). Each feature owns its pages, components, API wrappers, hooks, models, and optional Zustand store. TanStack Query owns request/response server state; Zustand is reserved for cross-component streaming/realtime state. Cross-feature UI, charts, editor, API client, styles, and utilities live in `shared/`; app bootstrap, providers, layouts, and routing live in `app/`.
 
-**UI**: Element Plus component library, ECharts for visualizations, Tiptap rich text editor, Marked + highlight.js + KaTeX for markdown rendering.
+**UI**: Ant Design component library, ECharts for visualizations, Tiptap rich text editor, Marked + highlight.js + KaTeX for Markdown, Testing Library + MSW for behavior tests, and `@stomp/stompjs` for live classroom connections.
 
 ## Key Architectural Patterns
 

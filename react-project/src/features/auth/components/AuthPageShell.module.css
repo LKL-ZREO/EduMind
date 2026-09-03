@@ -1,0 +1,163 @@
+.shell {
+  display: grid;
+  grid-template-columns: minmax(360px, 0.95fr) minmax(420px, 1.05fr);
+  min-height: 100vh;
+  background: #f7f9fc;
+}
+
+.briefing {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 48px;
+  padding: clamp(32px, 6vw, 88px);
+  color: #f8fbff;
+  background:
+    linear-gradient(150deg, rgb(8 31 63 / 96%), rgb(17 70 127 / 92%)),
+    radial-gradient(circle at top right, #2f80ed, transparent 45%);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 12px;
+  color: inherit;
+  font-size: 20px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.brandMark {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  color: #0d3e73;
+  font-size: 13px;
+  background: #fff;
+  border-radius: 12px;
+  place-items: center;
+}
+
+.eyebrow {
+  margin: 0 0 14px;
+  color: #9bc8ff;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.briefing h1 {
+  max-width: 620px;
+  margin: 0;
+  font-size: clamp(32px, 4vw, 54px);
+  line-height: 1.18;
+}
+
+.summary {
+  max-width: 620px;
+  margin: 24px 0 0;
+  color: rgb(235 245 255 / 78%);
+  font-size: 16px;
+  line-height: 1.9;
+}
+
+.steps {
+  display: grid;
+  gap: 12px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.steps li {
+  display: grid;
+  grid-template-columns: 40px 1fr;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid rgb(255 255 255 / 12%);
+  background: rgb(255 255 255 / 6%);
+  border-radius: 12px;
+}
+
+.steps li > span {
+  color: #75b5ff;
+  font-weight: 700;
+}
+
+.steps strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.steps p {
+  margin: 0;
+  color: rgb(235 245 255 / 68%);
+  line-height: 1.6;
+}
+
+.formPanel {
+  display: grid;
+  padding: 32px;
+  place-items: center;
+}
+
+.card {
+  width: min(440px, 100%);
+  padding: clamp(28px, 5vw, 48px);
+  background: #fff;
+  border: 1px solid #e9edf3;
+  border-radius: 20px;
+  box-shadow: 0 24px 60px rgb(31 53 82 / 10%);
+}
+
+.cardHeader {
+  margin-bottom: 28px;
+}
+
+.cardHeader h2 {
+  margin: 0 0 10px;
+  color: var(--color-text-heading);
+  font-size: 28px;
+}
+
+.cardHeader p {
+  margin: 0;
+  color: var(--color-text-secondary);
+  line-height: 1.7;
+}
+
+.footer {
+  margin-top: 20px;
+  color: var(--color-text-secondary);
+  text-align: center;
+}
+
+.footer a {
+  font-weight: 600;
+}
+
+@media (width <= 900px) {
+  .shell {
+    grid-template-columns: 1fr;
+  }
+
+  .briefing {
+    gap: 28px;
+    min-height: auto;
+    padding: 32px 24px;
+  }
+
+  .briefing h1 {
+    font-size: 32px;
+  }
+
+  .steps {
+    display: none;
+  }
+
+  .formPanel {
+    padding: 32px 16px;
+  }
+}

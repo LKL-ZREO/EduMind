@@ -1,0 +1,146 @@
+.sidebar {
+  display: flex;
+  flex: 0 0 290px;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  padding: 22px 18px;
+  color: #e8eefc;
+  background: #10182a;
+}
+
+.heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.heading :global(.ant-typography) {
+  margin: 2px 0 0;
+  color: #fff;
+}
+
+.eyebrow {
+  color: #7f9ed8;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+}
+
+.createButton {
+  height: 42px;
+}
+
+.list {
+  flex: 1;
+  min-height: 180px;
+  overflow: auto;
+}
+
+.loading {
+  display: block;
+  margin: 36px auto;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin-bottom: 6px;
+  padding: 10px;
+  color: #cdd7ed;
+  cursor: pointer;
+  border: 1px solid transparent;
+  border-radius: 10px;
+}
+
+.item:hover,
+.item:focus-visible {
+  background: rgb(255 255 255 / 7%);
+  outline: none;
+}
+
+.item.active {
+  color: #fff;
+  background: #223454;
+  border-color: #38598f;
+}
+
+.icon {
+  display: grid;
+  flex: 0 0 32px;
+  height: 32px;
+  background: rgb(255 255 255 / 8%);
+  border-radius: 9px;
+  place-items: center;
+}
+
+.copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  text-align: left;
+}
+
+.copy strong,
+.copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.copy small {
+  margin-top: 3px;
+  color: #8fa1c0;
+  font-size: 11px;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 12px;
+  color: #9badca;
+  font-size: 12px;
+  border-top: 1px solid rgb(255 255 255 / 9%);
+}
+
+.statusDot {
+  width: 8px;
+  height: 8px;
+  background: #36c98f;
+  border-radius: 50%;
+  box-shadow: 0 0 0 4px rgb(54 201 143 / 12%);
+}
+
+.statusDot.off {
+  background: #ff7875;
+  box-shadow: 0 0 0 4px rgb(255 120 117 / 12%);
+}
+
+.mobileClose {
+  display: none;
+  color: #fff;
+}
+
+@media (width <= 900px) {
+  .sidebar {
+    position: absolute;
+    z-index: 30;
+    inset: 0 auto 0 0;
+    width: min(88vw, 320px);
+    transform: translateX(-105%);
+    transition: transform 180ms ease;
+    box-shadow: 16px 0 40px rgb(15 23 42 / 28%);
+  }
+
+  .sidebar.mobileOpen {
+    transform: translateX(0);
+  }
+
+  .mobileClose {
+    display: inline-flex;
+  }
+}

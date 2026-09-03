@@ -1,11 +1,11 @@
 FROM node:22-alpine AS frontend-builder
 WORKDIR /build
 
-COPY vue-project/package.json vue-project/package-lock.json ./
+COPY react-project/package.json react-project/package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm \
     npm ci --no-audit --no-fund
 
-COPY vue-project/ ./
+COPY react-project/ ./
 RUN npm run build
 
 FROM nginx:1.28-alpine

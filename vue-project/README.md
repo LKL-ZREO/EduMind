@@ -1,4 +1,12 @@
-# vue-project
+# EduMind legacy Vue frontend
+
+This directory is retained as a read-only migration reference. Production,
+Docker, local development documentation, and CI use `react-project/`.
+
+Do not add product features here. See `../docs/react-migration/` for the frozen
+Vue behavior contract and the completed React stages.
+
+## Original template notes
 
 This template should help get you started developing with Vue 3 in Vite.
 

@@ -1,0 +1,43 @@
+.panel {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid #dce3ea;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.list {
+  display: grid;
+  gap: 6px;
+  max-height: 620px;
+  overflow-y: auto;
+}
+
+.row {
+  display: grid;
+  justify-content: stretch;
+  height: auto;
+  padding: 10px 12px;
+  text-align: left;
+  white-space: normal;
+}
+
+.row :global(span) {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.row small {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 400;
+  text-overflow: ellipsis;
+}
+
+.hint {
+  font-size: 12px;
+}

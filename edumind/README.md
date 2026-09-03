@@ -7,7 +7,7 @@
 ```
 ┌──────────────────────────────────────────────────────┐
 │                    用户入口                            │
-│   Web 前端 (Vue 3)  │  QQ 群 (OneBot)  │  MCP 工具    │
+│  Web 前端 (React 19) │  QQ 群 (OneBot)  │  MCP 工具    │
 └────────┬─────────────────────┬───────────────────────┘
          │                     │
          ▼                     ▼
@@ -35,7 +35,7 @@
 └──────────┘
 ```
 
-Docker Compose 默认启动 PostgreSQL、Redis、MinIO、应用、Nginx、备份任务。Vue 前端会在 Nginx 镜像中完成生产构建，不需要在服务器额外运行 Vite。
+Docker Compose 默认启动 PostgreSQL、Redis、MinIO、应用、Nginx、备份任务。React 前端会在 Nginx 镜像中完成生产构建，不需要在服务器额外运行 Vite。
 
 以下服务需要**另行启动**：
 
@@ -122,12 +122,12 @@ Flyway 会在应用启动时自动执行迁移脚本，无需手动导入。
 ## 🧩 前端开发
 
 ```bash
-cd vue-project
+cd react-project
 npm install
 npm run dev
 ```
 
-前端默认运行在 `http://localhost:5173`。
+前端默认运行在 `http://localhost:5174`，并代理 `/api` 与 `/ws` 到后端。
 
 ---
 
@@ -168,7 +168,7 @@ npm run dev
 | 数据库   | PostgreSQL 16 + pgvector 向量检索               |
 | 缓存     | Redis 7（Stream / 分布式锁 / 缓存）             |
 | 文件存储 | MinIO（S3 兼容）/ 本地磁盘                      |
-| 前端     | Vue 3 + TypeScript + Vite                       |
+| 前端     | React 19 + TypeScript + Vite + Ant Design       |
 | 部署     | Docker Compose + Nginx 反向代理                 |
 
 ## 📂 项目结构
@@ -200,7 +200,8 @@ edumind/
 │   ├── setup-ssl.sh        # 首次签发/复用证书
 │   └── backup.sh           # PostgreSQL 可验证备份
 └── pom.xml
-vue-project/                # Vue 3 前端
+react-project/              # React 19 前端
+vue-project/                # 只读迁移参考，不参与生产构建
 ```
 
 ---

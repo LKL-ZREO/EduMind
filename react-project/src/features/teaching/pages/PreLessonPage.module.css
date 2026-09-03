@@ -1,0 +1,214 @@
+.page {
+  display: grid;
+  min-height: 100%;
+  gap: 16px;
+  padding: clamp(16px, 2vw, 26px);
+  background: #f2f5f7;
+}
+
+.hero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 22px;
+  border-radius: 16px;
+  background: linear-gradient(130deg, #fff 15%, #e5f4f1 100%);
+}
+
+.hero h2,
+.hero p {
+  margin: 3px 0;
+}
+
+.hero > div > span {
+  color: #247e77;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+}
+
+.summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.summary :global(.ant-card-body) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 94px;
+}
+
+.summary strong {
+  color: #1d5f5a;
+  font-size: 28px;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: 250px minmax(500px, 1fr) 260px;
+  gap: 14px;
+  align-items: start;
+}
+
+.side,
+.editor {
+  display: grid;
+  min-width: 0;
+  gap: 14px;
+}
+
+.side {
+  position: sticky;
+  top: 12px;
+}
+
+.signalList,
+.timeline,
+.objectives,
+.stages,
+.materials,
+.checkList,
+.tiers {
+  display: grid;
+  gap: 10px;
+}
+
+.signalList :global(.ant-checkbox-wrapper) {
+  align-items: flex-start;
+}
+
+.signalList b,
+.signalList small {
+  display: block;
+}
+
+.signalList small,
+.timeline small,
+.saved {
+  color: #73818a;
+  font-size: 11px;
+}
+
+.timeline > div,
+.tiers > div {
+  display: grid;
+  gap: 4px;
+  padding: 9px;
+  border-radius: 8px;
+  background: #f5f8f9;
+}
+
+.courseGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 160px 150px;
+  gap: 12px;
+}
+
+.courseGrid label,
+.stageBody label {
+  display: grid;
+  gap: 6px;
+  color: #52616a;
+  font-size: 12px;
+}
+
+.stages article {
+  padding: 13px;
+  border: 1px solid #e0e7e9;
+  border-radius: 10px;
+  background: #fbfcfc;
+}
+
+.stageHead {
+  display: grid;
+  grid-template-columns: 80px minmax(150px, 1fr) 110px auto;
+  gap: 8px;
+}
+
+.stageBody {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.notes {
+  margin-top: 14px;
+}
+
+.suggestion {
+  margin: 0 !important;
+  line-height: 1.75;
+  white-space: pre-wrap;
+}
+
+.materials {
+  grid-template-columns: 1fr auto;
+  align-items: center;
+}
+
+.checkList > div {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.actions {
+  width: 100%;
+}
+
+.planPreview {
+  max-height: 60vh;
+  padding: 16px;
+  overflow: auto;
+  border-radius: 10px;
+  background: #f6f8f9;
+  font: inherit;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.center {
+  display: grid;
+  min-height: 360px;
+  place-items: center;
+}
+
+@media (max-width: 1280px) {
+  .workspace {
+    grid-template-columns: 230px minmax(0, 1fr);
+  }
+
+  .side:last-child {
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    position: static;
+  }
+}
+
+@media (max-width: 820px) {
+  .hero {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .summary,
+  .workspace,
+  .side:last-child,
+  .courseGrid,
+  .stageHead,
+  .stageBody {
+    grid-template-columns: 1fr;
+  }
+
+  .side {
+    position: static;
+  }
+
+  .side:last-child {
+    grid-column: auto;
+  }
+}

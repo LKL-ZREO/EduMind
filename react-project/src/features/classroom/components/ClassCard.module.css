@@ -1,0 +1,83 @@
+.card {
+  height: 100%;
+  border: 1px solid transparent;
+  box-shadow: var(--shadow-card);
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease;
+}
+
+.card:hover {
+  border-color: #cfe2ff;
+  transform: translateY(-2px);
+}
+
+.heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.avatar {
+  display: grid;
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  color: #fff;
+  font-size: 18px;
+  font-weight: 700;
+  background: linear-gradient(145deg, #1677ff, #69b1ff);
+  border-radius: 13px;
+  place-items: center;
+}
+
+.title {
+  min-width: 0;
+}
+
+.title :global(.ant-typography) {
+  margin: 0;
+}
+
+.description {
+  min-height: 44px;
+  margin: 20px 0 !important;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  padding: 14px;
+  margin-bottom: 18px;
+  background: #f7f9fc;
+  border-radius: 10px;
+}
+
+.stats :global(.ant-statistic-content) {
+  font-size: 18px;
+}
+
+.invite {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 0;
+  color: var(--color-text-primary);
+  text-align: left;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+}
+
+.invite span {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.invite strong {
+  color: var(--color-primary);
+  font-family: monospace;
+  font-size: 16px;
+}

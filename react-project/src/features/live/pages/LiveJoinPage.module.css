@@ -1,0 +1,77 @@
+.page {
+  display: grid;
+  min-height: 100vh;
+  padding: 24px;
+  place-items: center;
+  color: #172039;
+  background:
+    radial-gradient(circle at 14% 16%, rgba(79, 113, 208, 0.16), transparent 32%),
+    radial-gradient(circle at 88% 78%, rgba(37, 157, 142, 0.12), transparent 30%),
+    linear-gradient(135deg, #f9faff, #f1f5fb);
+}
+.card {
+  display: grid;
+  width: min(470px, 100%);
+  gap: 14px;
+  padding: clamp(28px, 6vw, 54px);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 26px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 24px 70px rgba(42, 58, 100, 0.15);
+  text-align: center;
+  backdrop-filter: blur(14px);
+}
+.card h1,
+.card p {
+  margin: 0;
+}
+.logo {
+  display: grid;
+  width: 52px;
+  height: 52px;
+  margin: 0 auto;
+  border-radius: 16px;
+  color: #fff;
+  background: linear-gradient(135deg, #526fe1, #2d9b8e);
+  font-weight: 900;
+  place-items: center;
+}
+.eyebrow {
+  color: #526fe1;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+}
+.codeSlots {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 8px;
+  margin: 10px 0 0;
+}
+.codeSlots span {
+  display: grid;
+  aspect-ratio: 1;
+  border: 2px solid #dce2ee;
+  border-radius: 11px;
+  color: #263a77;
+  background: #fafbff;
+  font-size: clamp(20px, 5vw, 27px);
+  font-weight: 800;
+  place-items: center;
+}
+.codeSlots .current {
+  border-color: #6179d9;
+  box-shadow: 0 0 0 3px rgba(97, 121, 217, 0.12);
+}
+.realInput {
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+}
+.error {
+  color: #cb4754;
+  font-size: 13px;
+}
+.card small {
+  color: #78849b;
+}
